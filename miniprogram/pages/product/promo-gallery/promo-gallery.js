@@ -274,26 +274,23 @@ Page({
       wx.showToast({ title: set && set.isVideo ? '请先勾选要保存的视频' : '请先勾选要下载的图片', icon: 'none' });
       return;
     }
+    // 非阻塞：按钮文案显示「保存中…」，不使用 wx.showLoading(mask) 以免挡住操作
     this.setData({ savingAlbumId: setId });
-    wx.showLoading({ title: `保存中 0/${urls.length}`, mask: true });
     try {
       const saver = (set && set.isVideo) ? saveVideoUrlsToAlbum : saveUrlsToAlbum;
       const r = await saver(urls, {
-        onProgress(cur, total) {
-          wx.showLoading({ title: `保存中 ${cur}/${total}`, mask: true });
-        },
+        onProgress: () => {},
       });
-      wx.hideLoading();
       wx.showToast({
         title: r.fail
           ? `成功 ${r.ok} / 失败 ${r.fail}`
           : (set && set.isVideo ? `已保存 ${r.ok} 条视频` : `已保存 ${r.ok} 张到相册`),
         icon: 'none',
         duration: 2500,
+        mask: false,
       });
     } catch (err) {
-      wx.hideLoading();
-      wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' });
+      wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none', mask: false });
     } finally {
       this.setData({ savingAlbumId: '' });
     }
@@ -391,20 +388,18 @@ Page({
         percent: 5,
       }), null);
     });
+    // 乐观 UI 已显示 busy/progress；按钮「提交中…」即可，勿用 showLoading 遮罩阻塞操作
     this.setData({ actingId: setId, sets: optimistic, showJobsEntry: true, focusSetId: setId });
-    wx.showLoading({ title: '提交中…', mask: true });
     try {
       await request({
         url: `/api/products/${this.data.id}/promo/sets/${setId}/regenerate`,
         method: 'POST',
         data: whole ? {} : { indexes },
       });
-      wx.hideLoading();
-      wx.showToast({ title: whole ? '已开始整组重生' : '已开始重新生成', icon: 'none' });
+      wx.showToast({ title: whole ? '已开始整组重生' : '已开始重新生成', icon: 'none', mask: false });
       await this.load({ silent: true });
     } catch (err) {
-      wx.hideLoading();
-      wx.showToast({ title: err.message || '提交失败', icon: 'none' });
+      wx.showToast({ title: err.message || '提交失败', icon: 'none', mask: false });
       await this.load({ silent: true });
     } finally {
       this.setData({ actingId: '' });

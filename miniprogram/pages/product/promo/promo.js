@@ -544,19 +544,16 @@ Page({
       wx.showToast({ title: '请先选择要保存的图片', icon: 'none' });
       return;
     }
+    // 非阻塞：savingAlbum 驱动按钮文案，不用 showLoading 遮罩
     this.setData({ savingAlbum: true });
-    wx.showLoading({ title: `保存中 0/${urls.length}`, mask: true });
     try {
       const r = await (this.data.mediaKind === 'video' ? saveVideoUrlsToAlbum : saveUrlsToAlbum)(urls, {
-        onProgress(cur, total) {
-          wx.showLoading({ title: `保存中 ${cur}/${total}`, mask: true });
-        },
+        onProgress: () => {},
       });
-      wx.hideLoading();
       const tip = r.fail
         ? `成功 ${r.ok} / 失败 ${r.fail}`
         : `已保存 ${r.ok} 张到相册`;
-      wx.showToast({ title: tip, icon: 'none', duration: 2500 });
+      wx.showToast({ title: tip, icon: 'none', duration: 2500, mask: false });
       if (r.fail && r.errors && r.errors[0]) {
         setTimeout(() => {
           wx.showModal({
@@ -567,8 +564,7 @@ Page({
         }, 400);
       }
     } catch (e) {
-      wx.hideLoading();
-      wx.showToast({ title: (e && e.message) || '保存失败', icon: 'none' });
+      wx.showToast({ title: (e && e.message) || '保存失败', icon: 'none', mask: false });
     } finally {
       this.setData({ savingAlbum: false });
     }
