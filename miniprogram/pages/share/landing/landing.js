@@ -1,6 +1,6 @@
 /**
  * 分享落地页（客户无感）：
- * 1. 携带 shareId
+ * 1. 携带 shareId（优先）；无 shareId 时可带 productId 降级直开客户详情
  * 2. 后台静默 wx.login → 换 JWT（客户看不到登录 UI）
  * 3. GET /api/shares/:shareId/open —— 限制分享占名额 / 公开放行；openid 自动写入 customer_profiles
  * 4. 立刻 redirect 到【客户专用】商品页 pages/product/view（非员工 detail）
@@ -15,11 +15,24 @@ Page({
   },
   onLoad(q) {
     const shareId = q.shareId || q.scene || '';
+    const productId = q.productId || q.id || '';
     this.setData({ shareId });
-    this.openShare(shareId);
+    this.openShare(shareId, productId);
   },
-  async openShare(shareId) {
+  async openShare(shareId, productId) {
     if (!shareId) {
+      if (productId) {
+        // 降级：卡片同步 path 未带上 shareId（或员工自测）时，仍进客户专用 view
+        try {
+          await ensureSilentSession({ preferRole: 'customer', forceCustomer: true });
+          wx.redirectTo({
+            url: `/pages/product/view/view?id=${productId}`,
+          });
+        } catch (e) {
+          this.setData({ loading: false, error: (e && e.message) || '无法打开商品' });
+        }
+        return;
+      }
       this.setData({ loading: false, error: '缺少分享参数，请通过分享卡片打开' });
       return;
     }
@@ -44,6 +57,13 @@ Page({
         url: `/pages/product/view/view?${qs.join('&')}`,
       });
     } catch (e) {
+      // share 打开失败时若带了 productId，再降级直开（员工自测）
+      if (productId) {
+        try {
+          wx.redirectTo({ url: `/pages/product/view/view?id=${productId}` });
+          return;
+        } catch (e2) { /* fallthrough */ }
+      }
       this.setData({ loading: false, error: e.message || '无法打开分享' });
     }
   },

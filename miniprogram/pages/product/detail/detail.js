@@ -157,6 +157,8 @@ Page({
       if (isStaff) {
         this.loadPromoSets(id);
         this.loadProductJobs(id);
+        // 预创建 share，避免右上角/按钮同步 path 落到无 shareId 的 landing
+        this.prefetchShare();
       } else {
         this.loadMoreProducts(id, shareEventId, boundCustomerId);
         this.loadContactQr();
@@ -287,7 +289,13 @@ Page({
   },
   onShareModeTap(e) {
     const v = e.currentTarget.dataset.v;
-    if (v === 'open' || v === 'limited') this.setData({ shareMode: v });
+    if (v === 'open' || v === 'limited') {
+      this.setData({ shareMode: v });
+      this.prefetchShare();
+    }
+  },
+  prefetchShare() {
+    this.ensureShareForNative().catch(() => { /* 预热失败不挡详情 */ });
   },
   async ensureShareForNative() {
     const policy = this.data.shareMode === 'open' ? 'open' : 'designated_only';
@@ -321,13 +329,16 @@ Page({
     // 分享卡片目标：landing → 客户专用 view；绝不能落到员工 detail
     const policy = this.data.shareMode === 'open' ? 'open' : 'designated_only';
     const cached = this._shareCache && this._shareCache[policy];
+    const productId = this.data.id || (product && product.id) || '';
     const landingPath = (sid) => `/pages/share/landing/landing?shareId=${sid}`;
-    // 同步 path：有缓存 shareId 用 landing；否则占位 landing（promise 会覆盖为真实 shareId）
-    // 绝不能回退到 pages/product/detail（员工管理页）
+    // 无 shareId 时带 productId 降级，避免同步 path 落到裸 landing（微信可能先用 sync 再等 promise）
+    const fallbackPath = productId
+      ? `/pages/share/landing/landing?productId=${productId}`
+      : '/pages/share/landing/landing';
     const syncPath = (cached && cached.shareId)
       ? landingPath(cached.shareId)
-      : '/pages/share/landing/landing';
-    // 右上角菜单已 hide；若仍触发则尽量用已缓存 share
+      : fallbackPath;
+    // 右上角菜单已 hide；若仍触发则尽量用已缓存 share / productId 降级
     if (!res || res.from !== 'button') {
       return { title, path: syncPath, imageUrl: imageUrl || undefined };
     }
@@ -342,13 +353,13 @@ Page({
           // 必须与 app.json 注册页一致：pages/share/landing/landing
           const path = shareId
             ? landingPath(shareId)
-            : (shareRes.path || landingPath(''));
+            : (shareRes.path || fallbackPath);
           return { title, path, imageUrl: imageUrl || undefined };
         })
         .catch((err) => {
           wx.showToast({ title: (err && err.message) || '分享准备失败', icon: 'none' });
-          // 失败也不回员工 detail；无有效 shareId 时 landing 会提示缺参
-          return { title, path: landingPath(''), imageUrl: imageUrl || undefined };
+          // 失败也不回员工 detail；降级带 productId 直开客户详情
+          return { title, path: fallbackPath, imageUrl: imageUrl || undefined };
         }),
     };
   },
