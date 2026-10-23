@@ -11,3 +11,5 @@ miniprogram.bak*/
 .deploy-staging/
 backend/data/
 coverage/
+backend/.env
+backend/storage/
