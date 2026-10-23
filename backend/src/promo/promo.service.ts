@@ -10,6 +10,7 @@ import { ProductsService } from '../products/products.service';
 import { ImageGenClient } from './image-gen.client';
 import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind } from './promo.templates';
 import { enrichPoseSceneText } from './pose-scene-enrich';
+import { prepareRefsForCategory, buildPromptZh } from './garment-ref-prepare';
 import { VisionClient } from '../vision/vision.client';
 import { JobsService } from '../jobs/jobs.service';
 import { registerPromoImageHandler } from '../jobs/handlers/promo-image.handler';
@@ -55,6 +56,8 @@ interface JobItem {
   index: number;
   status: 'pending' | 'running' | 'done' | 'failed';
   prompt: string;
+  /** 中文原话（用户输入 + 读衣中文），与 prompt 成对留痕 */
+  promptZh?: string;
   poseId?: string;
   sceneId?: string;
   objectKey?: string;
@@ -1026,8 +1029,11 @@ export class PromoService implements OnModuleInit {
     const feature = String(
       input.feature ?? this.readFeature(user.tenantId, productId)?.feature ?? this.defaultFeature(product),
     ).slice(0, 2000);
-    let poseText = String(input.poseText || '').trim();
-    let sceneText = String(input.sceneText || '').trim();
+    // 中文原话（留痕用，不被英文 enrich 覆盖）
+    const poseTextZh = String(input.poseText || '').trim();
+    const sceneTextZh = String(input.sceneText || '').trim();
+    let poseText = poseTextZh;
+    let sceneText = sceneTextZh;
     // 自由描述 → 关键词拆解 + 英文生图片段（LLM 优先，否则启发式）；自定义文案覆盖芯片 prompt
     if (poseText || sceneText) {
       try {
@@ -1078,6 +1084,7 @@ export class PromoService implements OnModuleInit {
           objectKey: prior.objectKey,
           savedMediaId: prior.mediaId,
           prompt: prior.prompt || '',
+          promptZh: prior.promptZh,
           genCalls: Array.isArray(prior.genCalls) ? prior.genCalls : [],
           model: prior.model,
           size: prior.size,
@@ -1130,10 +1137,62 @@ export class PromoService implements OnModuleInit {
 
     // 商品参考图：ensureLocal（OSS→本地）；缺一不可
     const refPaths: string[] = [];
+    const refInputs: Array<{ localPath: string; objectKey?: string; assetId?: string; filename?: string }> = [];
     for (const r of refs) {
       const local = await this.ensureLocal(r!.objectKey);
       if (!local) throw new Error(`参考图本地不可用：${r!.objectKey}`);
       refPaths.push(local);
+      refInputs.push({
+        localPath: local,
+        objectKey: r!.objectKey,
+        assetId: r!.id,
+        filename: (r as any).filename || (r as any).originalName,
+      });
+    }
+
+    const keyDir = `tenants/${user.tenantId}/products/${product.styleNo}/promo/${legacy.id}`;
+    fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
+
+    // 羊毛衫专用标准流程：分类 → 宫格补细节 → 角色标注 → 硬约束；非羊毛衫/读不全拒生
+    await opts?.onProgress?.({
+      percent: 8,
+      step: 'prepare_refs',
+      message: '识别羊毛衫参考图…',
+      done: 0,
+      total: items.length,
+    });
+    const garmentPrep = await prepareRefsForCategory('knitwear', this.vision, refInputs, {
+      workDir: path.join(this.storageRoot(), keyDir, '_knitwear_grid'),
+    });
+    if (!garmentPrep.ok) {
+      throw new Error(garmentPrep.reasonZh || '羊毛衫参考图不可用，已拒绝生图');
+    }
+    this.logger.log(
+      `knitwear-prep via=${garmentPrep.via} detail=${garmentPrep.detailSufficiency} refs=${garmentPrep.refs.length} classified=${garmentPrep.classified.length}`,
+    );
+    await opts?.appendEvent?.('garment_prep', '羊毛衫参考图准备完成', {
+      via: garmentPrep.via,
+      detailSufficiency: garmentPrep.detailSufficiency,
+      garmentDescZh: garmentPrep.garmentDescZh,
+      refKinds: garmentPrep.refs.map((r) => r.kind),
+      classified: garmentPrep.classified.map((c) => ({ kind: c.kind, roleZh: c.roleZh, objectKey: c.objectKey })),
+    });
+
+    // 将硬约束 + 参考图角色写入每张待生图 prompt；中文原话成对留痕
+    const promptZhBase = buildPromptZh({
+      feature,
+      poseText: poseTextZh,
+      sceneText: sceneTextZh,
+      garmentDescZh: garmentPrep.garmentDescZh,
+      refRolesPromptZh: garmentPrep.refRolesPromptZh,
+    });
+    for (const it of items) {
+      if (it.status === 'done' && it.objectKey) continue;
+      const enrichedPrompt = [it.prompt, garmentPrep.garmentConstraintEn, garmentPrep.refRolesPromptEn]
+        .filter(Boolean)
+        .join(' ');
+      it.prompt = enrichedPrompt;
+      it.promptZh = promptZhBase;
     }
 
     // 风格样例：整组共用；ensureLocal 失败则降级去掉该张并记 warn
@@ -1152,9 +1211,6 @@ export class PromoService implements OnModuleInit {
     if (styleWarns.length) {
       this.logger.warn(`style-ref degrade productId=${productId}: ${styleWarns.join('; ')}`);
     }
-
-    const keyDir = `tenants/${user.tenantId}/products/${product.styleNo}/promo/${legacy.id}`;
-    fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
 
     let done = 0;
     await Promise.all(
@@ -1176,11 +1232,14 @@ export class PromoService implements OnModuleInit {
         try {
           it.status = 'running';
           this.saveJob(legacy);
-          // refs = 商品图(多色仅当前色) + 风格样例；空风格 = 现网路径
-          const garmentRefs =
-            isMultiColor && refPaths[it.index]
-              ? [refPaths[it.index]]
-              : refPaths;
+          // 羊毛衫：prepared 挂拍/细节/宫格（勿丢）；多色时当前色挂拍优先置顶
+          const prepPaths = garmentPrep.refs.map((r) => r.localPath);
+          let garmentRefs = prepPaths;
+          if (isMultiColor && refPaths[it.index]) {
+            const colorPath = refPaths[it.index];
+            const rest = prepPaths.filter((p) => p !== colorPath);
+            garmentRefs = [colorPath, ...rest];
+          }
           const refsForShot = stylePaths.length
             ? [...garmentRefs, ...stylePaths]
             : garmentRefs;
@@ -1191,6 +1250,7 @@ export class PromoService implements OnModuleInit {
           });
           const prompt = styleBlock ? `${it.prompt} ${styleBlock}` : it.prompt;
           if (styleBlock) it.prompt = prompt;
+          const promptZh = it.promptZh || promptZhBase;
           const garmentKeys =
             isMultiColor && refs[it.index]
               ? [refs[it.index]!.objectKey]
@@ -1201,6 +1261,8 @@ export class PromoService implements OnModuleInit {
           const callBase: ImageGenCallRecord = {
             at: new Date().toISOString(),
             prompt,
+            promptEn: prompt,
+            promptZh,
             model: this.gen.model,
             size: legacy.size,
             status: 'ok',
@@ -1210,6 +1272,12 @@ export class PromoService implements OnModuleInit {
             index: it.index,
             refObjectKeys,
             refCount: refsForShot.length,
+            garmentPrep: {
+              via: garmentPrep.via,
+              detailSufficiency: garmentPrep.detailSufficiency,
+              garmentDescZh: garmentPrep.garmentDescZh,
+              refKinds: garmentPrep.refs.map((r) => r.kind),
+            },
           };
           try {
             const r = await this.gen.generate({ prompt, size: legacy.size, refs: refsForShot });
@@ -1228,6 +1296,7 @@ export class PromoService implements OnModuleInit {
               objectKey,
               via: r.via,
               prompt,
+              promptZh,
               model: this.gen.model,
               size: legacy.size,
               genCall,
@@ -1248,6 +1317,7 @@ export class PromoService implements OnModuleInit {
             it.status = 'failed';
             it.error = msg;
             it.prompt = prompt;
+            it.promptZh = promptZh;
             it.model = this.gen.model;
             it.size = legacy.size;
             it.genCall = genCall;
@@ -1403,6 +1473,8 @@ export class PromoService implements OnModuleInit {
           objectKey: it.objectKey,
           mediaId: it.savedMediaId,
           prompt: it.prompt || priorByIndex.get(it.index)?.prompt,
+          promptZh: it.promptZh || it.genCall?.promptZh || priorByIndex.get(it.index)?.promptZh,
+          promptEn: it.prompt || it.genCall?.promptEn || priorByIndex.get(it.index)?.promptEn,
           model: it.model || it.genCall?.model || priorByIndex.get(it.index)?.model,
           size: it.size || it.genCall?.size || priorByIndex.get(it.index)?.size,
           genCalls: genCalls.length ? genCalls : undefined,
@@ -1442,6 +1514,8 @@ export class PromoService implements OnModuleInit {
         sceneId: it.sceneId,
         ms: it.ms,
         prompt: it.prompt || priorByIndex.get(it.index)?.prompt,
+        promptZh: it.promptZh || it.genCall?.promptZh || priorByIndex.get(it.index)?.promptZh,
+        promptEn: it.prompt || it.genCall?.promptEn || priorByIndex.get(it.index)?.promptEn,
         model: it.model || it.genCall?.model || priorByIndex.get(it.index)?.model,
         size: it.size || it.genCall?.size || priorByIndex.get(it.index)?.size,
         genCalls: genCalls.length ? genCalls : undefined,
@@ -1458,6 +1532,7 @@ export class PromoService implements OnModuleInit {
       referenceAssetIds: opts.input.referenceAssetIds || [],
       modelId: opts.input.modelId || null,
       imageGenModel: this.gen.model,
+      garmentCategory: 'knitwear',
       poses: opts.input.poses || [],
       scenes: opts.input.scenes || [],
       poseText: opts.input.poseText || undefined,
@@ -1743,8 +1818,10 @@ export class PromoService implements OnModuleInit {
         ms: i.ms,
         saved: !!i.mediaId,
         regenerating: !!regenerating && !!i.objectKey,
-        // IMAGE_GEN 可分析：最近完整提示词 + 历次调用（重生追加）
+        // IMAGE_GEN 可分析：中文原话 + 英文最终提示词 + 历次调用（重生追加）
         prompt: i.prompt || null,
+        promptZh: i.promptZh || null,
+        promptEn: i.promptEn || i.prompt || null,
         model: i.model || null,
         size: i.size || null,
         genCalls: Array.isArray(i.genCalls) ? i.genCalls : [],

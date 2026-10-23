@@ -263,9 +263,21 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 ## 6.1 IMAGE_GEN 提示词与参数留痕
 
 - **不需新表**：`job_events.data`（JSON，追加）+ `promo_sets.images[]`（JSON）即可。
-- 每次 IMAGE_GEN：写 `job_events` 事件 `image_gen`（完整 `prompt`、`model`、`size`、`setId`、`index`、`refObjectKeys`、`via`、成败/耗时）。
-- `promo_sets.images[i].prompt/model/size` = 该槽**最近一次**完整提示词与参数；`genCalls[]` **追加**历次调用（重生不丢历史，每槽最多 30 条）。
-- `promo_sets.params.imageGenModel` = 上游模型名；进度仍走 `jobs.progress`（重生只更新进度/结果槽位）。
+- 每次 IMAGE_GEN：写 `job_events` 事件 `image_gen`（`prompt`/`promptEn` 英文最终、`promptZh` 中文原话、`model`、`size`、`setId`、`index`、`refObjectKeys`、`via`、成败/耗时、`garmentPrep`）。
+- `promo_sets.images[i].prompt/promptZh/promptEn/model/size` = 该槽**最近一次**中英提示词与参数；`genCalls[]` **追加**历次调用（重生不丢历史，每槽最多 30 条）。
+- `promo_sets.params.imageGenModel` = 上游模型名；`garmentCategory` 当前固定 `knitwear`（羊毛衫）；进度仍走 `jobs.progress`。
+
+## 6.2 羊毛衫生图标准流程（按品类，勿糊通用）
+
+代码：`backend/src/promo/garment-ref-prepare.ts`（`prepareRefsForCategory('knitwear')`）。
+
+1. **识图分类**：对全部商品参考图标 `hang`（挂拍/平铺）/ `detail`（领口袖口织纹）/ `unusable`（非针织成衣、尺码表、吊牌、杂乱一堆等）。原图保留，不静默丢弃；不可用记原因。
+2. **细节不足 → 宫格**：无足够领/袖/织纹细节时，对挂拍切 6（2×3）或 9（3×3）宫格，宫格细胞作补充细节参考（挂拍原图仍送模）。
+3. **角色写入 prompt**：`REFERENCE IMAGE ROLES` 标明每张参考图职责；另附 `GARMENT HARD CONSTRAINTS` 英文硬约束。
+4. **中英留痕**：`promptZh` = 用户中文原话 + 读衣中文；`prompt`/`promptEn` = 送 IMAGE_GEN 的英文最终稿。
+5. **拒生**：非羊毛衫/针织成衣，或读不出完整单件 → 任务失败并返回中文原因（事件 `garment_prep` / job error）。
+
+扩展：鞋子/裤子/衬衣在 `CATEGORY_PREPARE_REGISTRY` 另立专用流程后再注册；未注册品类直接拒生，禁止复用羊毛衫逻辑充数。
 
 ## 7. 部署注意（只动 wool-api）
 

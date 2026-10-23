@@ -12,7 +12,12 @@ export type PromoSetStatus = 'generating' | 'done' | 'partial' | 'failed' | 'del
 /** 单次 IMAGE_GEN 调用的可分析记录（追加不覆盖） */
 export interface ImageGenCallRecord {
   at: string;
+  /** 英文最终 prompt（送 IMAGE_GEN） */
   prompt: string;
+  /** 中文原话：用户 feature/pose/scene + 读衣中文摘要/参考图角色 */
+  promptZh?: string;
+  /** 与 prompt 同义留痕，便于中英成对读取 */
+  promptEn?: string;
   model: string;
   size: string;
   via?: string;
@@ -26,6 +31,13 @@ export interface ImageGenCallRecord {
   /** 本次参考图 objectKey（商品图 + 风格样例） */
   refObjectKeys?: string[];
   refCount?: number;
+  /** 读衣/宫格准备摘要 */
+  garmentPrep?: {
+    via?: string;
+    detailSufficiency?: string;
+    garmentDescZh?: string;
+    refKinds?: string[];
+  };
 }
 
 export interface PromoSetImage {
@@ -37,8 +49,11 @@ export interface PromoSetImage {
   sceneId?: string;
   error?: string;
   ms?: number;
-  /** 最近一次完整提示词（便于查看当前图） */
+  /** 最近一次英文最终提示词 */
   prompt?: string;
+  /** 最近一次中文原话 */
+  promptZh?: string;
+  promptEn?: string;
   model?: string;
   size?: string;
   /** 历次 IMAGE_GEN 调用（重生追加，不丢历史） */
