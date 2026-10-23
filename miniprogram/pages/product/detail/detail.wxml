@@ -88,7 +88,7 @@
           <view class="set-arrow muted">›</view>
         </view>
       </view>
-      <view class="btn-ghost" style="margin-top:20rpx;" bindtap="goPromoMaterials">宣传素材</view>
+      <view class="btn-ghost" style="margin-top:20rpx;" bindtap="goPromoMaterials">新建素材</view>
     </view>
 
     <view class="card">

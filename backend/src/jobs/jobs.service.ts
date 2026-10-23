@@ -59,6 +59,27 @@ export class JobsService {
     return [...this.handlers.keys()];
   }
 
+  /** Job.createdBy 存 memberId（优先）或 openid；历史任务可能两种都有 */
+  private ownerIds(user: AuthContext): string[] {
+    const ids = [user.memberId, user.openid]
+      .map((x) => String(x || '').trim())
+      .filter(Boolean);
+    return [...new Set(ids)];
+  }
+
+  private isOwnedBy(row: JobEntity, user: AuthContext): boolean {
+    const by = String(row.createdBy || '').trim();
+    if (!by) return false;
+    return this.ownerIds(user).includes(by);
+  }
+
+  private assertOwned(row: JobEntity | null, user: AuthContext): JobEntity {
+    if (!row || !this.isOwnedBy(row, user)) {
+      throw new NotFoundException('任务不存在');
+    }
+    return row;
+  }
+
   async create(
     user: AuthContext,
     type: JobType,
@@ -94,8 +115,10 @@ export class JobsService {
   }
 
   async get(user: AuthContext, jobId: string) {
-    const row = await this.jobs().findOne({ where: { id: jobId, tenantId: user.tenantId } });
-    if (!row) throw new NotFoundException('任务不存在');
+    const row = this.assertOwned(
+      await this.jobs().findOne({ where: { id: jobId, tenantId: user.tenantId } }),
+      user,
+    );
     const dto = this.toDto(row);
     await this.enrichProductMeta(user.tenantId, [dto]);
     return dto;
@@ -111,7 +134,12 @@ export class JobsService {
   ) {
     const take = Math.min(100, Math.max(1, Number(query?.limit) || 50));
     const skip = Math.max(0, Number(query?.offset) || 0);
-    const where: any = { tenantId: user.tenantId };
+    const owners = this.ownerIds(user);
+    if (!owners.length) return { items: [], total: 0 };
+    const where: any = {
+      tenantId: user.tenantId,
+      createdBy: owners.length === 1 ? owners[0] : In(owners),
+    };
     if (query?.type) where.type = query.type;
     if (query?.status) where.status = query.status;
     const [rows, total] = await this.jobs().findAndCount({
@@ -147,8 +175,10 @@ export class JobsService {
 
   async retry(user: AuthContext, jobId: string) {
     const repo = this.jobs();
-    const row = await repo.findOne({ where: { id: jobId, tenantId: user.tenantId } });
-    if (!row) throw new NotFoundException('任务不存在');
+    const row = this.assertOwned(
+      await repo.findOne({ where: { id: jobId, tenantId: user.tenantId } }),
+      user,
+    );
     if (row.status === 'running' || row.status === 'queued') {
       throw new BadRequestException('任务仍在排队或执行中');
     }
@@ -171,8 +201,10 @@ export class JobsService {
 
   async cancel(user: AuthContext, jobId: string) {
     const repo = this.jobs();
-    const row = await repo.findOne({ where: { id: jobId, tenantId: user.tenantId } });
-    if (!row) throw new NotFoundException('任务不存在');
+    const row = this.assertOwned(
+      await repo.findOne({ where: { id: jobId, tenantId: user.tenantId } }),
+      user,
+    );
     if (row.status === 'succeeded' || row.status === 'cancelled') {
       throw new BadRequestException(`当前状态不可取消: ${row.status}`);
     }
