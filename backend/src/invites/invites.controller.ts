@@ -34,6 +34,14 @@ export class InvitesController {
     return this.invites.listMembers(user);
   }
 
+  /** 业主踢除员工（须写在 :id/revoke 之前，避免 members 被当成 id） */
+  @Post('members/:memberId/disable')
+  @UseGuards(RolesGuard)
+  @Roles('owner')
+  disableMember(@AuthUser() user: AuthContext, @Param('memberId') memberId: string) {
+    return this.invites.disableMember(user, memberId);
+  }
+
   @Post('accept')
   accept(@AuthUser() user: AuthContext, @Body() body: { code?: string }) {
     return this.invites.accept(user, body || {});

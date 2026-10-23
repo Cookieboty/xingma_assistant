@@ -137,23 +137,40 @@ function saveProfile({ nickname, avatarUrl, phone }) {
   return request({ url: '/api/auth/me', method: 'PATCH', data });
 }
 
-function saveProfileWithAvatarUpload({ nickname, avatarUrl, phone }) {
+/**
+ * 头像若为本地临时路径则先上传再 PATCH。
+ * 只改昵称/手机时不要传入临时头像路径，否则上传失败会拖垮整次保存。
+ * 稳定 https 头像可一并回写；非 https 临时路径在未显式要求上传时忽略。
+ */
+function saveProfileWithAvatarUpload({ nickname, avatarUrl, phone, uploadAvatarIfTemp }) {
   const nick = nickname != null ? String(nickname).trim() : undefined;
   const ph = phone != null ? String(phone).trim() : undefined;
+  const wantUpload = uploadAvatarIfTemp !== false;
   let avatar = avatarUrl;
-  const chain = isTempAvatarPath(avatar)
+  const shouldUpload = wantUpload && isTempAvatarPath(avatar);
+  const chain = shouldUpload
     ? uploadAvatar(avatar).then((url) => {
         avatar = url;
         return url;
       })
     : Promise.resolve(avatar);
-  return chain.then(() =>
-    saveProfile({
+  return chain.then(() => {
+    // 未上传成功的临时路径绝不写入后端
+    let stableAvatar = avatar;
+    if (stableAvatar != null && isTempAvatarPath(stableAvatar)) {
+      stableAvatar = undefined;
+    }
+    return saveProfile({
       nickname: nick !== undefined ? nick : undefined,
-      avatarUrl: avatar != null ? avatar : undefined,
+      avatarUrl: stableAvatar != null ? stableAvatar : undefined,
       phone: ph !== undefined ? ph : undefined,
-    }).then((me) => ({ me, avatarUrl: avatar, nickname: nick, phone: ph })),
-  );
+    }).then((me) => ({
+      me,
+      avatarUrl: stableAvatar != null ? stableAvatar : (me && me.avatarUrl) || null,
+      nickname: nick !== undefined ? nick : (me && me.nickname) || null,
+      phone: ph !== undefined ? ph : (me && me.phone) || null,
+    }));
+  });
 }
 
 /** 任务完成订阅：模板 ID 由后端/小程序后台配置；未配置则静默跳过 */

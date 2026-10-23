@@ -124,7 +124,7 @@ export class TenantsService {
     return false;
   }
 
-  /** 仅开发假登录 / 后台邀请使用：确保成员存在 */
+  /** 仅开发假登录 / 后台邀请使用：确保成员存在；已禁用的可被重新邀请激活 */
   async ensureMember(tenantId: string, openid: string, role: 'owner' | 'staff'): Promise<MemberRec> {
     const exist = await this.findMember(tenantId, openid);
     if (exist) {
@@ -142,12 +142,40 @@ export class TenantsService {
     }
     if (this.db) {
       const repo = this.db.getRepository(TenantMember);
+      const disabled = await repo.findOne({ where: { tenantId, openid } });
+      if (disabled) {
+        disabled.status = 'active';
+        disabled.role = role === 'owner' ? 'owner' : disabled.role === 'owner' ? 'owner' : role;
+        const m = await repo.save(disabled);
+        return { id: m.id, tenantId, openid: m.openid, role: m.role as MemberRec['role'] };
+      }
       const m = await repo.save(repo.create({ tenantId, openid, role, status: 'active', unionId: null, nickname: null }));
       return { id: m.id, tenantId, openid, role };
     }
     const rec: MemberRec = { id: `mem_${openid.slice(-16)}`, tenantId, openid, role };
     this.memMembers.set(`${tenantId}:${openid}`, rec);
     return rec;
+  }
+
+  /** 踢除/禁用员工：status=disabled，之后 findMember 不再命中，不能以员工登录 */
+  async disableMember(tenantId: string, memberId: string): Promise<{ ok: true; id: string }> {
+    if (this.db) {
+      const repo = this.db.getRepository(TenantMember);
+      const m = await repo.findOne({ where: { id: memberId, tenantId } });
+      if (!m) throw new Error('NOT_FOUND');
+      if (m.role === 'owner') throw new Error('CANNOT_DISABLE_OWNER');
+      m.status = 'disabled';
+      await repo.save(m);
+      return { ok: true, id: m.id };
+    }
+    for (const [k, m] of this.memMembers) {
+      if (m.tenantId === tenantId && m.id === memberId) {
+        if (m.role === 'owner') throw new Error('CANNOT_DISABLE_OWNER');
+        this.memMembers.delete(k);
+        return { ok: true, id: memberId };
+      }
+    }
+    throw new Error('NOT_FOUND');
   }
 
   async getMemberNickname(tenantId: string, openid: string): Promise<string | null> {

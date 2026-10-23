@@ -88,7 +88,7 @@ export class InvitesService {
     }
     // 员工平权：新邀请一律 staff（忽略 body.role 的 owner）
     const role = 'staff' as InviteRole;
-    const maxUses = Math.min(Math.max(Number(body.maxUses) || 1, 1), 50);
+    const maxUses = Math.min(Math.max(Number(body.maxUses) || 3, 1), 50);
     const days = body.expiresInDays != null ? Number(body.expiresInDays) : 7;
     const expiresAt =
       days > 0 && Number.isFinite(days)
@@ -217,14 +217,42 @@ export class InvitesService {
       throw new ForbiddenException('无权查看成员');
     }
     const rows = await this.tenants.listMembers(user.tenantId);
-    // 不向前端返回 openid；角色对外统一为员工
+    // 不向前端返回 openid；保留真实 role 供踢除鉴权展示
     return rows.map((m) => ({
       id: m.id,
       nickname: m.nickname,
       status: m.status,
-      role: 'staff',
+      role: m.role === 'owner' ? 'owner' : 'staff',
       createdAt: m.createdAt,
     }));
+  }
+
+  /** 业主踢除员工：逻辑禁用，之后不能再以员工登录；可再被邀请激活 */
+  async disableMember(user: AuthContext, memberId: string) {
+    if (user.role !== 'owner') {
+      throw new ForbiddenException('仅业主可踢除员工');
+    }
+    const id = String(memberId || '').trim();
+    if (!id) throw new BadRequestException('缺少成员 id');
+    if (user.memberId && user.memberId === id) {
+      throw new BadRequestException('不能踢除自己');
+    }
+    try {
+      const r = await this.tenants.disableMember(user.tenantId, id);
+      await this.audit.record({
+        tenantId: user.tenantId,
+        actor: user,
+        action: 'member.disable',
+        targetType: 'tenant_member',
+        targetId: r.id,
+      });
+      return r;
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg === 'NOT_FOUND') throw new NotFoundException('成员不存在');
+      if (msg === 'CANNOT_DISABLE_OWNER') throw new BadRequestException('不能踢除业主');
+      throw e;
+    }
   }
 
   async acceptByCode(

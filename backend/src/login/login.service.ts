@@ -136,8 +136,18 @@ export class LoginService {
     body: { nickname?: string; avatarUrl?: string; phone?: string },
   ) {
     const nickname = body.nickname != null ? String(body.nickname).trim().slice(0, 64) : undefined;
-    const avatarUrl = body.avatarUrl != null ? String(body.avatarUrl).trim().slice(0, 512) : undefined;
+    let avatarUrl = body.avatarUrl != null ? String(body.avatarUrl).trim().slice(0, 512) : undefined;
     const phone = body.phone != null ? String(body.phone).trim().slice(0, 32) : undefined;
+    // 拒绝小程序本地临时路径写入 DB（须先走 /api/media/upload）
+    if (avatarUrl !== undefined && avatarUrl) {
+      const ok =
+        /^https:\/\//i.test(avatarUrl) ||
+        /^\/media\//i.test(avatarUrl) ||
+        /^https?:\/\/[^/]+\/media\//i.test(avatarUrl);
+      if (!ok) {
+        throw new BadRequestException('avatarUrl 须为已上传的 https 地址');
+      }
+    }
     if (nickname === undefined && avatarUrl === undefined && phone === undefined) {
       throw new BadRequestException('请提供 nickname、avatarUrl 或 phone');
     }
