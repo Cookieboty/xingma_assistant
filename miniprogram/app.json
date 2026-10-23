@@ -48,6 +48,12 @@
         "text": "任务",
         "iconPath": "images/tab/task-normal.png",
         "selectedIconPath": "images/tab/task-active.png"
+      },
+      {
+        "pagePath": "pages/settings/index/index",
+        "text": "设置",
+        "iconPath": "images/tab/settings-normal.png",
+        "selectedIconPath": "images/tab/settings-active.png"
       }
     ]
   },

@@ -326,7 +326,7 @@ Page({
     wx.navigateTo({ url: '/pages/product/publish/publish' });
   },
   goSettings() {
-    wx.navigateTo({ url: '/pages/settings/index/index' });
+    wx.switchTab({ url: '/pages/settings/index/index' });
   },
   async toggleSale(e) {
     const { id, status } = e.currentTarget.dataset;

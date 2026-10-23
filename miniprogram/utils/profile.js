@@ -116,8 +116,8 @@ function maybeCollectProfile(opts) {
               resolve();
               return;
             }
-            wx.navigateTo({
-              url: '/pages/settings/index/index?profile=1',
+            wx.switchTab({
+              url: '/pages/settings/index/index',
               complete: () => resolve(),
               fail: () => resolve(),
             });
