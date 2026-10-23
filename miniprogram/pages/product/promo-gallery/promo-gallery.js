@@ -44,7 +44,12 @@ function enrichSet(s, prev) {
     busy,
     albumSelectedCount,
     albumAllSelected,
-    albumSaveLabel: albumSelectedCount ? `下载(${albumSelectedCount})` : '下载到相册',
+    albumSaveLabel: albumSelectedCount ? `下载到相册(${albumSelectedCount})` : '下载到相册',
+    regenLabel: (!albumSelectedCount
+      ? '重新生成'
+      : (albumAllSelected
+        ? '重新生成整组'
+        : (albumSelectedCount === 1 ? '重新生成选中' : `重新生成(${albumSelectedCount})`))),
     statusLabel: STATUS_LABEL[s.status] || s.status,
     templateName: s.displayTitle || s.templateName || (isVideo ? '宣传视频' : '宣传图'),
     typeLabel: isVideo ? '视频' : '图',
@@ -250,44 +255,50 @@ Page({
     }
   },
 
-  async regenSet(e) {
+  async regenSelected(e) {
     const setId = e.currentTarget.dataset.id;
     if (!setId || this.data.actingId) return;
+    const set = this.data.sets.find((s) => s.id === setId);
+    if (!set) return;
+    const selected = ((set.items) || []).filter((i) => i && i.url && i.albumSelected);
+    if (!selected.length) {
+      wx.showToast({ title: '请先勾选要重新生成的图片', icon: 'none' });
+      return;
+    }
+    const allWithUrl = ((set.items) || []).filter((i) => i && i.url);
+    const whole = selected.length === allWithUrl.length;
+    const title = whole ? '重新生成整组' : (selected.length === 1 ? '重新生成选中图片' : `重新生成 ${selected.length} 张`);
+    const content = whole
+      ? '将按原参数重新生成该组全部图片'
+      : '将按原参数重新生成已勾选的图片';
     const ok = await new Promise((resolve) => {
       wx.showModal({
-        title: '整组重新生成',
-        content: '将按原参数重新生成该组全部图片',
+        title,
+        content,
         success: (r) => resolve(!!r.confirm),
       });
     });
     if (!ok) return;
     this.setData({ actingId: setId });
     try {
-      await request({
-        url: `/api/products/${this.data.id}/promo/sets/${setId}/regenerate`,
-        method: 'POST',
-        data: {},
-      });
-      wx.showToast({ title: '已提交重生成', icon: 'none' });
-      this.load();
-    } catch (err) {
-      wx.showToast({ title: err.message || '提交失败', icon: 'none' });
-    } finally {
-      this.setData({ actingId: '' });
-    }
-  },
-
-  async regenImage(e) {
-    const { setid, index } = e.currentTarget.dataset;
-    if (!setid || this.data.actingId) return;
-    this.setData({ actingId: `${setid}_${index}` });
-    try {
-      await request({
-        url: `/api/products/${this.data.id}/promo/sets/${setid}/images/${index}/regenerate`,
-        method: 'POST',
-        data: {},
-      });
-      wx.showToast({ title: '单张已提交', icon: 'none' });
+      if (whole) {
+        await request({
+          url: `/api/products/${this.data.id}/promo/sets/${setId}/regenerate`,
+          method: 'POST',
+          data: {},
+        });
+      } else {
+        for (const im of selected) {
+          const index = Number(im.index);
+          if (!Number.isFinite(index)) throw new Error('图片序号缺失');
+          await request({
+            url: `/api/products/${this.data.id}/promo/sets/${setId}/images/${index}/regenerate`,
+            method: 'POST',
+            data: {},
+          });
+        }
+      }
+      wx.showToast({ title: '已提交重新生成', icon: 'none' });
       this.load();
     } catch (err) {
       wx.showToast({ title: err.message || '提交失败', icon: 'none' });

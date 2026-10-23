@@ -164,3 +164,28 @@
   color: #8a4b28;
   vertical-align: middle;
 }
+
+/* 紧挨图片的主操作：下载 + 重新生成 */
+.media-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
+.media-actions .media-btn {
+  flex: 1;
+  text-align: center;
+  padding: 22rpx 12rpx;
+  font-size: 28rpx;
+  border-radius: 12rpx;
+}
+.ops.secondary {
+  margin-top: 16rpx;
+  display: flex;
+  justify-content: flex-end;
+}
+.ops.secondary .btn-weak {
+  flex: 0 0 auto;
+  padding: 12rpx 20rpx;
+  font-size: 24rpx;
+  color: #9a8f86;
+}
