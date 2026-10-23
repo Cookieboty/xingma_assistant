@@ -75,6 +75,7 @@ export interface ConfirmPublishInput {
   material?: string | null;
   description?: string | null;
   levelId: string;
+  groupId?: string | null;
   priceDisplay?: 'show' | 'hide';
   status?: 'on_sale' | 'off_sale' | 'draft';
   tags?: string[];

@@ -7,7 +7,7 @@
 ```
 微信小程序 (AppID wx394d23ea099d8a01)
   ├─ 管理端：商品 / 客户 / 任务 / 发品 / 宣传 / 设置
-  └─ 客户：share/landing 静默鉴权 → product/detail
+  └─ 客户：share/landing 静默鉴权 → product/view（客户专用；非 product/detail）
            │ HTTPS + JWT + X-Wx-Appid
            ▼
 NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
@@ -197,11 +197,11 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 - **限制分享**（API `sharePolicy=designated_only`，文案「限制分享」）：创建时**不**从客户列表/微信挑选；链接发出后，**前 N 位**成功打开的客户（openid→customer）占用名额，写入 `share_event_bindings`；名额满后他人 403。N 默认取环境变量 `SHARE_LIMIT_SLOTS`（默认 5），创建时可传 `slotLimit`。
 - **公开分享**（`open`）：不限人数、不占名额。
-- 客户路径：landing 静默 login → `GET /shares/:id/open` → ensureProfile +（限制则 claim 名额）→ 商品详情。访客自动成为客户档案。
+- 客户路径：landing 静默 login → `GET /shares/:id/open` → ensureProfile +（限制则 claim 名额）→ **`pages/product/view`**（客户专用详情）。访客自动成为客户档案。员工预览自己的分享卡片也进 view，不进管理 detail。
 
 ```
 员工 POST /shares { designated_only|open, slotLimit? } → shareId
-客户打开 landing?shareId= → 静默 login → GET /shares/:id/open
+客户打开 landing?shareId= → 静默 login → GET /shares/:id/open → redirect product/view
 ```
 
 ### 4.5 员工/业主邀请

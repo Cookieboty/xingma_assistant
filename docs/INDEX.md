@@ -42,7 +42,7 @@ wool-stall-miniapp/
     ├── components/sku-list/
     └── pages/
         ├── index/             # 员工登录分流
-        ├── product/{list,detail,edit,publish,promo,promo-gallery}/
+        ├── product/{list,detail,view,edit,publish,promo,promo-gallery}/  # detail=员工；view=客户分享
         ├── customer/{list,detail}/
         ├── jobs/list/         # 任务中心 Tab
         ├── inquiry/{list,detail}/
@@ -113,7 +113,7 @@ npm install && npm run build && npm run start:dev
 | 图序 / 封面 / 禁尺码表下图 | `vision/cover-select.ts`；编辑页调 `coverMediaIds`；`products.entity` |
 | SKU 一色一行 / 复制价格 | `miniprogram/components/sku-list/`；商品详情/编辑 SKU API |
 | 商品访问鉴权 / 分享策略 | `products/product-access.service.ts` `shares/`；`pages/share/landing/` `pages/product/detail/` |
-| 管理员 vs 客户详情 UI | `miniprogram/pages/product/detail/detail.{wxml,js}` |
+| 管理员 vs 客户详情 UI | 员工 `pages/product/detail/`；客户分享 `pages/product/view/`（landing 只进 view） |
 | 客户可否存相册 | `products.allow_customer_download`；编辑页开关；`utils/saveAlbum.js` |
 | 宣传图模板 / 生图 | `backend/src/promo/`；`pages/product/promo/`；历史稿 `生图模板设计.md`；风格样例设计 `PROMO_REF_IMAGE_DESIGN.md` |
 | 宣传多组 / 缩略 / 存相册 / 文案 | `promo_sets` + `promo.service`；`pages/product/promo-gallery/`；详情页素材缩略入口 |
