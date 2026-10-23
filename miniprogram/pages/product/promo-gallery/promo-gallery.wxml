@@ -1,10 +1,9 @@
 <view class="container">
   <view class="card head" wx:if="{{product}}">
     <view class="section-title">{{product.name || '宣传素材'}}</view>
-    <view class="muted">款号 {{product.styleNo}} · 图组与视频组同列表，可新建</view>
-    <view class="head-actions" wx:if="{{sets.length || showJobsEntry}}">
-      <view class="btn-primary {{showJobsEntry ? 'half' : 'full'}}" wx:if="{{sets.length}}" bindtap="goGenerate">新建素材</view>
-      <view class="btn-ghost {{sets.length ? 'half' : 'full'}}" wx:if="{{showJobsEntry}}" bindtap="goJobs">任务中心</view>
+    <view class="muted">款号 {{product.styleNo}} · 图组与视频组同列表</view>
+    <view class="head-actions" wx:if="{{showJobsEntry}}">
+      <view class="btn-ghost full" bindtap="goJobs">任务中心</view>
     </view>
   </view>
 
