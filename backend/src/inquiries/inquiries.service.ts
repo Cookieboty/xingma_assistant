@@ -98,7 +98,10 @@ export class InquiriesService {
 
   async create(user: AuthContext, body: CreateInquiryBody) {
     if (!body.productId) throw new BadRequestException('商品必填');
-    if (!user.customerId) throw new ForbiddenException('仅客户可发起询价');
+    // 员工/业主自测分享落地也会建 customer_profiles；JWT 可能仍无 customerId，
+    // 对任意已登录用户 ensureProfile 后以其客户档 id 写询价（owner/staff/customer 均可）。
+    const profile = await this.customers.ensureProfile(user);
+    const customerId = profile.id;
 
     const phone = body.phone != null ? String(body.phone).trim().slice(0, 32) : '';
     const contactName = String(body.name ?? body.nickname ?? '')
@@ -118,7 +121,7 @@ export class InquiriesService {
         .join('；') ||
       '客户询价';
 
-    // 回写客户档案（有填才写）
+    // 回写客户档案（有填才写）；ensureProfile 已保证档案存在，staff 亦可写 phone/nickname
     const profilePatch: { phone?: string | null; nickname?: string | null } = {};
     if (phone) profilePatch.phone = phone;
     if (contactName) profilePatch.nickname = contactName;
@@ -132,7 +135,7 @@ export class InquiriesService {
         repo.create({
           tenantId: user.tenantId,
           productId: body.productId,
-          customerId: user.customerId,
+          customerId,
           content,
           phone: phone || null,
           contactName: contactName || null,
@@ -149,7 +152,7 @@ export class InquiriesService {
       id: `inq_${String(this.seq++).padStart(6, '0')}`,
       tenantId: user.tenantId,
       productId: body.productId,
-      customerId: user.customerId,
+      customerId,
       content,
       phone: phone || null,
       contactName: contactName || null,

@@ -84,7 +84,7 @@ export class CustomersService {
     }
   }
 
-  /** 客户本人更新昵称/头像/手机 */
+  /** 本人更新昵称/头像/手机（按 openid ensureProfile；owner/staff 自测分享亦可写档案） */
   async updateSelfProfile(
     user: AuthContext,
     patch: { nickname?: string | null; avatarUrl?: string | null; phone?: string | null },

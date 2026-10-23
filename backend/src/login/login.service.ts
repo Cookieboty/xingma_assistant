@@ -82,7 +82,15 @@ export class LoginService {
 
     let payload: AuthContext;
     if (member) {
-      payload = { tenantId: tenant.id, openid, role: member.role, memberId: member.id };
+      // 成员仍为 owner/staff；同时 ensureProfile 写入 customerId，避免自测询价等接口再踩坑
+      const base: AuthContext = {
+        tenantId: tenant.id,
+        openid,
+        role: member.role,
+        memberId: member.id,
+      };
+      const customer = await this.customers.ensureProfile(base);
+      payload = { ...base, customerId: customer.id };
     } else {
       const base: AuthContext = { tenantId: tenant.id, openid, role: 'customer' };
       const customer = await this.customers.ensureProfile(base);
@@ -95,11 +103,13 @@ export class LoginService {
   async getMe(user: AuthContext) {
     if (user.role === 'owner' || user.role === 'staff') {
       const nickname = await this.tenants.getMemberNickname(user.tenantId, user.openid);
+      const customer = await this.customers.ensureProfile(user);
       return {
         role: user.role,
         tenantId: user.tenantId,
         openid: user.openid,
         memberId: user.memberId,
+        customerId: customer.id,
         nickname: nickname || null,
         avatarUrl: null,
       };
