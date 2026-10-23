@@ -14,6 +14,8 @@ import * as path from 'path';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { MediaAsset } from '../common/entities/media-asset.entity';
 import { ProductViewEvent } from '../common/entities/product-view-event.entity';
+import { ShareEventBinding } from '../common/entities/share-event-binding.entity';
+import { ShareEvent } from '../common/entities/share-event.entity';
 import { LevelsService } from '../levels/levels.service';
 import { ProductAccessService, SharePolicy } from './product-access.service';
 import {
@@ -128,12 +130,18 @@ export class ProductsService {
    */
   async listForCustomer(
     user: AuthContext,
-    opts?: { shareEventId?: string; boundCustomerId?: string } & ProductListQuery,
+    opts?: { shareEventId?: string; boundCustomerId?: string; boundCustomerIds?: string[] } & ProductListQuery,
   ) {
     const { items } = await this.repo.list(user.tenantId, {
       ...opts,
       status: opts?.status || 'on_sale',
     });
+    const boundIds = await this.resolveShareBoundIds(
+      user.tenantId,
+      opts?.shareEventId,
+      opts?.boundCustomerIds,
+      opts?.boundCustomerId,
+    );
     const out = [];
     for (const p of items) {
       const policy = await this.resolveSharePolicy(user.tenantId, p);
@@ -144,6 +152,7 @@ export class ProductsService {
         minCustomerRank: minRank,
         viaShareEventId: opts?.shareEventId,
         boundCustomerId: opts?.boundCustomerId,
+        boundCustomerIds: boundIds,
       });
       if (!verdict.ok) continue;
       const skus = await this.repo.listSkus(user.tenantId, p.id);
@@ -156,7 +165,12 @@ export class ProductsService {
   async getDetail(
     user: AuthContext,
     productId: string,
-    opts?: { shareEventId?: string; boundCustomerId?: string; ruleEffect?: 'allow' | 'deny' | null },
+    opts?: {
+      shareEventId?: string;
+      boundCustomerId?: string;
+      boundCustomerIds?: string[];
+      ruleEffect?: 'allow' | 'deny' | null;
+    },
   ) {
     const p = await this.repo.findById(user.tenantId, productId);
     if (!p) throw new NotFoundException('商品不存在');
@@ -167,6 +181,12 @@ export class ProductsService {
     }
     const policy = await this.resolveSharePolicy(user.tenantId, p);
     const minRank = await this.resolveMinRank(user.tenantId, p);
+    const boundIds = await this.resolveShareBoundIds(
+      user.tenantId,
+      opts?.shareEventId,
+      opts?.boundCustomerIds,
+      opts?.boundCustomerId,
+    );
     const verdict = this.access.canView(user, {
       productId: p.id,
       sharePolicy: policy,
@@ -174,6 +194,7 @@ export class ProductsService {
       ruleEffect: opts?.ruleEffect ?? null,
       viaShareEventId: opts?.shareEventId,
       boundCustomerId: opts?.boundCustomerId,
+      boundCustomerIds: boundIds,
     });
     if (!verdict.ok) {
       void this.recordView(user, productId, 'denied', opts?.shareEventId);
@@ -472,6 +493,44 @@ export class ProductsService {
     if (!input.styleNo?.trim()) throw new BadRequestException('款号必填');
     if (!input.name?.trim()) throw new BadRequestException('名称必填');
     if (!input.levelId) throw new BadRequestException('商品等级必填');
+  }
+
+
+  /**
+   * 经分享入口访问时，由服务端解析名额占用名单，不信任客户端伪造的 boundCustomerId。
+   * openShare 已占名额后，详情页带 shareEventId 即可。
+   */
+  private async resolveShareBoundIds(
+    tenantId: string,
+    shareEventId: string | undefined,
+    fallbackIds?: string[] | null,
+    fallbackSingle?: string | null,
+  ): Promise<string[] | undefined> {
+    if (!shareEventId) {
+      if (fallbackIds && fallbackIds.length) return fallbackIds;
+      if (fallbackSingle) return [fallbackSingle];
+      return undefined;
+    }
+    if (this.dataSource && process.env.DB_ENABLED === 'true') {
+      try {
+        const rows = await this.dataSource.getRepository(ShareEventBinding).find({
+          where: { tenantId, shareEventId },
+          order: { boundAt: 'ASC' },
+        });
+        if (rows.length) return rows.map((r) => r.customerId);
+        // 兼容尚未回填的旧行：读 share_events.bound_customer_id
+        const ev = await this.dataSource.getRepository(ShareEvent).findOne({
+          where: { id: shareEventId, tenantId },
+        });
+        if (ev?.boundCustomerId) return [ev.boundCustomerId];
+        return [];
+      } catch (e: any) {
+        this.logger.warn(`resolveShareBoundIds failed: ${String(e?.message || e).slice(0, 120)}`);
+      }
+    }
+    if (fallbackIds && fallbackIds.length) return fallbackIds;
+    if (fallbackSingle) return [fallbackSingle];
+    return undefined;
   }
 
   private async resolveSharePolicy(tenantId: string, p: ProductRec): Promise<SharePolicy> {

@@ -2,7 +2,7 @@
  * 分享落地页（客户无感）：
  * 1. 携带 shareId
  * 2. 后台静默 wx.login → 换 JWT（客户看不到登录 UI）
- * 3. GET /api/shares/:shareId/open —— 首访自动建档绑定
+ * 3. GET /api/shares/:shareId/open —— 限制分享占名额 / 公开放行；自动建档
  * 4. 立刻 redirect 到商品详情
  */
 const { request, ensureSilentSession } = require('../../../utils/request');

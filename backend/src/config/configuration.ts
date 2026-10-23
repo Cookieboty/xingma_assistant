@@ -44,6 +44,8 @@ export default () => ({
     objectAcl: (env('OSS_OBJECT_ACL') || 'private').toLowerCase() === 'public-read' ? 'public-read' : 'private',
   },
   appBaseUrl: process.env.APP_BASE_URL || 'http://127.0.0.1:3000',
+  /** 限制分享默认名额（前 N 位打开链接的客户） */
+  shareLimitSlots: parseInt(process.env.SHARE_LIMIT_SLOTS || '5', 10),
   wechat: {
     // 默认租户 AppID；多租户以 tenants 表为准。兼容旧变量 WX_APPID / WX_APP_SECRET
     defaultAppId: process.env.WECHAT_APP_ID || process.env.WX_APPID || '',

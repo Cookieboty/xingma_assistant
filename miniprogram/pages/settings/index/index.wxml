@@ -59,9 +59,9 @@
       <input class="input" placeholder="名称" value="{{plName}}" bindinput="onPlName" />
       <input class="input" placeholder="rank" value="{{plRank}}" bindinput="onPlRank" />
       <radio-group bindchange="onPlPolicy">
-        <label><radio value="open" checked="{{plPolicy==='open'}}"/>open</label>
-        <label><radio value="level_match" checked="{{plPolicy==='level_match'}}"/>level_match</label>
-        <label><radio value="designated_only" checked="{{plPolicy==='designated_only'}}"/>designated_only</label>
+        <label><radio value="open" checked="{{plPolicy==='open'}}"/>公开</label>
+        <label><radio value="level_match" checked="{{plPolicy==='level_match'}}"/>等级匹配</label>
+        <label><radio value="designated_only" checked="{{plPolicy==='designated_only'}}"/>限制分享</label>
       </radio-group>
       <input class="input" placeholder="最低客户 rank（可选）" value="{{plMinRank}}" bindinput="onPlMinRank" />
       <view class="btn-primary mini" bindtap="addProductLevel">添加商品等级</view>

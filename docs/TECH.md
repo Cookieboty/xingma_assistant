@@ -47,6 +47,7 @@ NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
 | `007_tenant_contact_qr.sql` | `tenants.contact_qr_url` |
 | `008_product_groups.sql` | `product_groups`；`products.group_id`；种子本季/过季 |
 | `009_member_invites.sql` | `member_invites`（邀请码/角色/次数/过期/小程序码 key） |
+| `010_share_limit_slots.sql` | `share_events.slot_limit` + `share_event_bindings`（限制分享前 N 位） |
 
 ### 关键字段速记
 
@@ -58,7 +59,7 @@ NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
 
 **media_assets**：`object_key`、`provider`、`product_id`、`promo_set_id`
 
-**share_events**：分享策略、`bound_customer_id`（首访绑定）
+**share_events**：分享策略、`slot_limit`、`bound_customer_id`（首位兼容）；**share_event_bindings**：限制分享名额占用
 
 实体代码：`backend/src/common/entities/`。
 
@@ -192,18 +193,16 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 风格样例（已实现）：向导「选参考图」卡内可选上传 0～4 张 + 强弱弱/中/强；API `styleRefObjectKeys` / `styleStrength`；见 [PROMO_REF_IMAGE_DESIGN.md](./PROMO_REF_IMAGE_DESIGN.md)。
 
-### 4.3 分享指定客户
+### 4.3 限制分享 / 公开分享
+
+- **限制分享**（API `sharePolicy=designated_only`，文案「限制分享」）：创建时**不**从客户列表/微信挑选；链接发出后，**前 N 位**成功打开的客户（openid→customer）占用名额，写入 `share_event_bindings`；名额满后他人 403。N 默认取环境变量 `SHARE_LIMIT_SLOTS`（默认 5），创建时可传 `slotLimit`。
+- **公开分享**（`open`）：不限人数、不占名额。
+- 客户路径：landing 静默 login → `GET /shares/:id/open` → ensureProfile +（限制则 claim 名额）→ 商品详情。访客自动成为客户档案。
 
 ```
-员工 POST /shares { designated_only } → shareId
-客户打开 landing?shareId
-  → 静默 login → GET /shares/:id/open
-  → ensureProfile；若 unbound 则绑定当前客户
-  → 他人再开同 shareId → 拒绝
-  → redirect detail?id&shareEventId
+员工 POST /shares { designated_only|open, slotLimit? } → shareId
+客户打开 landing?shareId= → 静默 login → GET /shares/:id/open
 ```
-
-公开分享：创建时策略为 open（或商品本身 open），不要求绑定同一人。
 
 ### 4.5 员工/业主邀请
 

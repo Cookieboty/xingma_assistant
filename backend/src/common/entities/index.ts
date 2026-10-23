@@ -10,6 +10,7 @@ export * from './product-group.entity';
 export * from './product-sku.entity';
 export * from './customer-product-rule.entity';
 export * from './share-event.entity';
+export * from './share-event-binding.entity';
 export * from './product-view-event.entity';
 export * from './inquiry.entity';
 export * from './follow-up.entity';

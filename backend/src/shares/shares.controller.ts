@@ -10,16 +10,16 @@ import { SharePolicy } from '../products/product-access.service';
 export class SharesController {
   constructor(private readonly sharesService: SharesService) {}
 
-  /** 创建分享（业主/员工；可不指定客户） */
+  /** 创建分享（业主/员工；限制分享=前N位打开者；公开=不限；不预先选客户） */
   @Post()
   create(
     @AuthUser() user: AuthContext,
-    @Body() body: { productId: string; sharePolicy?: SharePolicy },
+    @Body() body: { productId: string; sharePolicy?: SharePolicy; slotLimit?: number },
   ) {
     return this.sharesService.createShare(user, body);
   }
 
-  /** 打开分享：首访绑定 + 鉴权放行 */
+  /** 打开分享：限制分享占名额 / 公开放行 */
   @Get(':shareId/open')
   open(@AuthUser() user: AuthContext, @Param('shareId') shareId: string) {
     return this.sharesService.openShare(user, shareId);

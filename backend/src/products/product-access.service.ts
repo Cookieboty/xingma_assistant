@@ -12,19 +12,21 @@ export interface ProductAccessInput {
   customerRank?: number | null;
   /** 例外规则：allow | deny | null */
   ruleEffect?: 'allow' | 'deny' | null;
-  /** designated_only：分享绑定客户 */
+  /** 兼容：首位占用者 */
   boundCustomerId?: string | null;
+  /** 限制分享：已占用名额的客户 id 列表（服务端解析，勿信前端伪造） */
+  boundCustomerIds?: string[] | null;
   /** 当前是否经该分享入口 */
   viaShareEventId?: string | null;
 }
 
 /**
- * 商品访问判定公式（核心）：
- * 1. 业主/员工：始终允许（管理端）
+ * 商品访问判定：
+ * 1. 业主/员工：始终允许
  * 2. 例外 deny → 拒绝；例外 allow → 放行
  * 3. open → 放行
  * 4. level_match → customerRank >= minCustomerRank
- * 5. designated_only → 必须经分享且当前 customerId === boundCustomerId
+ * 5. designated_only（限制分享）→ 必须经分享且 customerId ∈ boundCustomerIds
  */
 @Injectable()
 export class ProductAccessService {
@@ -51,14 +53,19 @@ export class ProductAccessService {
         if (!input.viaShareEventId) {
           return { ok: false, reason: 'need_share_entry' };
         }
-        if (!input.boundCustomerId) {
-          // 尚未首访绑定：打开分享流程里会绑定，此处视为「待绑定」由 Share 服务处理
+        const ids =
+          input.boundCustomerIds && input.boundCustomerIds.length
+            ? input.boundCustomerIds
+            : input.boundCustomerId
+              ? [input.boundCustomerId]
+              : [];
+        if (!ids.length) {
           return { ok: false, reason: 'awaiting_bind' };
         }
-        if (user.customerId && user.customerId === input.boundCustomerId) {
-          return { ok: true, reason: 'designated_match' };
+        if (user.customerId && ids.includes(user.customerId)) {
+          return { ok: true, reason: 'limited_slot_match' };
         }
-        return { ok: false, reason: 'designated_mismatch' };
+        return { ok: false, reason: 'limited_slot_mismatch' };
       }
       default:
         return { ok: false, reason: 'unknown_policy' };
@@ -70,7 +77,6 @@ export class ProductAccessService {
     if (user.role === 'owner' || user.role === 'staff') return true;
     const view = this.canView(user, input);
     if (!view.ok) return false;
-    // 首期：能看即可转；后续可按商品等级收紧
     return true;
   }
 }

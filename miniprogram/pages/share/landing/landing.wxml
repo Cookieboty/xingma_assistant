@@ -2,6 +2,6 @@
   <view class="card" wx:if="{{loading}}">正在打开商品…</view>
   <view class="card" wx:if="{{error}}">
     <view style="color:#c00;">{{error}}</view>
-    <view class="muted" style="margin-top:12rpx;">该分享可能仅指定客户可看，或链接已失效。客户无需登录，请使用业主发给您的原分享卡片重新打开。</view>
+    <view class="muted" style="margin-top:12rpx;">该分享可能为限制分享且名额已满，或链接已失效。客户无需登录，请使用业主发给您的原分享卡片重新打开。</view>
   </view>
 </view>

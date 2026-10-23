@@ -36,7 +36,7 @@
   <block wx:if="{{isStaff}}">
     <view class="card">
       <view class="section-title">分享</view>
-      <view class="btn-primary" bindtap="createShare">分享给指定客户</view>
+      <view class="btn-primary" bindtap="createShare">限制分享</view>
       <view style="height:16rpx;"></view>
       <view class="btn-ghost" bindtap="createOpenShare">公开分享</view>
     </view>

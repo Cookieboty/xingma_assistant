@@ -101,7 +101,7 @@ npm install && npm run build && npm run start:dev
 | **promo_set** | 宣传素材组（表 `promo_sets`）：一商品多组；含模板、参数、caption、图片 JSON、关联 `job_id` |
 | **coverMediaIds** | 商品封面/图序：`products.cover_media_ids` JSON 数组，顺序即展示序；编辑页可调序写回 |
 
-其他常用：`shareEvent`（分享首访绑定）、`allowCustomerDownload`（客户是否可存图）、`sharePolicy`（`open` / `level_match` / `designated_only`）。
+其他常用：`shareEvent`（限制分享名额 / 公开分享）、`allowCustomerDownload`（客户是否可存图）、`sharePolicy`（`open` 公开 / `level_match` / `designated_only` 限制分享前N位，N=`SHARE_LIMIT_SLOTS`默认5）。
 
 ## 「改 XX 功能看这些文件」速查
 

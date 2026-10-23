@@ -227,9 +227,10 @@ Page({
         data: { productId: this.data.id, sharePolicy: 'designated_only' },
       });
       wx.setClipboardData({ data: res.path || res.shareId });
+      const n = res.slotLimit != null ? res.slotLimit : 5;
       wx.showModal({
-        title: '分享已创建',
-        content: `shareId=${res.shareId}\n落地页已复制；客户点开后静默打开详情并首访绑定`,
+        title: '限制分享已创建',
+        content: `仅前 ${n} 位打开链接的客户可查看（不挑选客户）。\nshareId=${res.shareId}\n落地路径已复制`,
         showCancel: false,
       });
     } catch (e) {
@@ -248,7 +249,7 @@ Page({
       }
       wx.showModal({
         title: '公开分享已创建',
-        content: `shareId=${res.shareId}\n落地路径已复制`,
+        content: `不限人数，任何人打开链接可查看。\nshareId=${res.shareId}\n落地路径已复制`,
         showCancel: false,
       });
     } catch (e) {

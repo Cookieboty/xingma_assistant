@@ -23,10 +23,10 @@ PID=$(echo "$P" | j o.id)
 curl -s "${H[@]}" "${A[@]}" "$BASE/api/products?q=S$TS" | j '(o.items||o).length+" found"'
 curl -s "${H[@]}" "${A[@]}" -X PATCH $BASE/api/products/$PID -d '{"name":"测试羊毛衫-改"}' | j o.name
 curl -s "${H[@]}" "${A[@]}" $BASE/api/products/$PID | j 'o.name+" skus="+(o.skus||[]).length'
-echo "--- 4 shares (designated_only)"
-SH=$(curl -s "${H[@]}" "${A[@]}" -X POST $BASE/api/shares -d "{\"productId\":\"$PID\"}"); echo "$SH" | j 'o.shareId+" "+o.path'
+echo "--- 4 shares (限制分享 designated_only，slotLimit=1 测满额)"
+SH=$(curl -s "${H[@]}" "${A[@]}" -X POST $BASE/api/shares -d "{\"productId\":\"$PID\",\"sharePolicy\":\"designated_only\",\"slotLimit\":1}"); echo "$SH" | j 'o.shareId+" slot="+o.slotLimit+" "+o.path'
 SID=$(echo "$SH" | j o.shareId)
-curl -s "${H[@]}" -H "Authorization: Bearer $C1T" $BASE/api/shares/$SID/open | j 'o.access+" bound="+(o.share&&o.share.boundCustomerId)+" "+(o.message||"")'
+curl -s "${H[@]}" -H "Authorization: Bearer $C1T" $BASE/api/shares/$SID/open | j 'o.access+" bound="+(o.share&&o.share.boundCustomerId)+" used="+(o.share&&o.share.slotsUsed)+" "+(o.message||"")'
 curl -s "${H[@]}" -H "Authorization: Bearer $C1T" $BASE/api/shares/$SID/open | j '"revisit: "+(o.access||o.message)'
 curl -s "${H[@]}" -H "Authorization: Bearer $C2T" $BASE/api/shares/$SID/open | j '"other customer: "+(o.statusCode||"")+" "+(o.message||o.access)'
 echo "--- 5 inquiries"
