@@ -118,18 +118,20 @@ export class ExternalOutfitClient {
       return { ok: false, imageUrls: [], raw: null, ms: 0, error: 'garmentImages 至少 1 张', agentCode: code };
     }
 
-    // 兼容常见 body 形态：顶层字段 + input 包裹（上游若只认其一则另一份无害或被忽略）
+    // 实测：workflow.input 经 messages[0].content（JSON 字符串）传入；
+    // OpenAPI 仅要求 messages；顶层 garmentImages 不会进 workflow.input。
+    const workflowInput: Record<string, unknown> = { garmentImages: images };
+    if (req.modelImageUrl) workflowInput.modelImageUrl = req.modelImageUrl;
+    if (req.instruction) workflowInput.instruction = req.instruction;
     const payload: Record<string, unknown> = {
       agentCode: code,
-      garmentImages: images,
-      input: {
-        garmentImages: images,
-        ...(req.modelImageUrl ? { modelImageUrl: req.modelImageUrl } : {}),
-        ...(req.instruction ? { instruction: req.instruction } : {}),
-      },
+      messages: [
+        {
+          role: 'user',
+          content: JSON.stringify(workflowInput),
+        },
+      ],
     };
-    if (req.modelImageUrl) payload.modelImageUrl = req.modelImageUrl;
-    if (req.instruction) payload.instruction = req.instruction;
 
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.timeoutMs);
@@ -172,6 +174,18 @@ export class ExternalOutfitClient {
           requestId: json?.error?.requestId || json?.requestId || res.headers.get('x-request-id') || undefined,
         };
       }
+      const status = String(json?.status || '').toUpperCase();
+      if (status === 'FAILED') {
+        return {
+          ok: false,
+          imageUrls: [],
+          raw: json,
+          ms: Date.now() - t0,
+          error: String(json?.errorMessage || json?.errorCode || '外部 Agent 执行失败').slice(0, 500),
+          agentCode: code,
+          requestId: json?.requestId || String(json?.id || '') || undefined,
+        };
+      }
       const imageUrls = extractImageUrls(json);
       return {
         ok: imageUrls.length > 0,
@@ -180,7 +194,7 @@ export class ExternalOutfitClient {
         ms: Date.now() - t0,
         error: imageUrls.length ? undefined : '响应无可识别结果图 URL',
         agentCode: code,
-        requestId: json?.requestId || json?.id || res.headers.get('x-request-id') || undefined,
+        requestId: json?.requestId || String(json?.id || '') || undefined,
       };
     } catch (e: any) {
       const msg = String(e?.message || e).slice(0, 300);
@@ -192,17 +206,28 @@ export class ExternalOutfitClient {
   }
 }
 
-/** 从多种可能响应结构里抠出图片 URL */
+/** 从多种可能响应结构里抠出图片 URL（优先 artifacts[].uri） */
 export function extractImageUrls(json: any): string[] {
   const out: string[] = [];
   const push = (u: unknown) => {
     const s = String(u || '').trim();
     if (/^https?:\/\//i.test(s) && !out.includes(s)) out.push(s);
   };
+  // LKB 同步调用：responsePayload.output.artifacts
+  const artifacts =
+    json?.responsePayload?.output?.artifacts ||
+    json?.output?.artifacts ||
+    [];
+  if (Array.isArray(artifacts)) {
+    for (const a of artifacts) {
+      if (a && (a.type === 'image' || a.media_type?.startsWith?.('image'))) push(a.uri || a.url);
+    }
+  }
   const walk = (node: any, depth: number) => {
     if (depth > 6 || node == null) return;
     if (typeof node === 'string') {
-      push(node);
+      // 避免把整段 JSON contentText 当 URL
+      if (/^https?:\/\//i.test(node)) push(node);
       return;
     }
     if (Array.isArray(node)) {
@@ -210,17 +235,16 @@ export function extractImageUrls(json: any): string[] {
       return;
     }
     if (typeof node !== 'object') return;
-    for (const k of ['imageUrls', 'images', 'outputImages', 'resultImages', 'urls', 'files']) {
+    for (const k of ['imageUrls', 'images', 'outputImages', 'resultImages', 'urls', 'files', 'artifacts']) {
       if (k in node) walk(node[k], depth + 1);
     }
-    for (const k of ['url', 'imageUrl', 'image_url', 'src', 'outputUrl', 'fileUrl']) {
+    for (const k of ['url', 'imageUrl', 'image_url', 'src', 'outputUrl', 'fileUrl', 'uri']) {
       if (k in node) push(node[k]);
     }
-    // 常见：output / data / result / outputs
-    for (const k of ['output', 'data', 'result', 'outputs', 'content', 'payload']) {
+    for (const k of ['output', 'data', 'result', 'outputs', 'content', 'payload', 'responsePayload']) {
       if (k in node) walk(node[k], depth + 1);
     }
   };
-  walk(json, 0);
+  if (!out.length) walk(json, 0);
   return out.slice(0, 12);
 }

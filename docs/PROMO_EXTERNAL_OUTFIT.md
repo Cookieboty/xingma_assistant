@@ -23,13 +23,15 @@ Content-Type: application/json
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `agentCode` | 是 | 固定 `ai-adaptive-outfit-workflow`（可用 env 覆盖） |
-| `garmentImages` | 是 | 字符串数组，**1～9** 张成衣图 URL（公网或短时签名） |
-| `modelImageUrl` | 否 | 模特参考图 URL |
-| `instruction` | 否 | 自然语言指令（姿势/场景/氛围等） |
+| `messages` | 是 | OpenAPI 必填；`[{ role:"user", content: "<JSON字符串>" }]` |
+| content JSON 内 `garmentImages` | 是 | 字符串数组，**1～9** 张成衣图 URL（公网或短时签名） |
+| content JSON 内 `modelImageUrl` | 否 | 模特参考图 URL |
+| content JSON 内 `instruction` | 否 | 自然语言指令（姿势/场景/氛围等） |
 
-客户端同时附带 `input: { garmentImages, modelImageUrl?, instruction? }`，兼容「顶层 / input 包裹」两种网关形态。
+**实测**：`workflow.input.garmentImages` 只认 `messages[0].content` 里的 JSON；顶层再挂 `garmentImages` **无效**。  
+成功时结果在 `responsePayload.output.artifacts[].uri`（`type=image`）。
 
-探测结论（无真实 Key）：缺 Key → `AUTHENTICATION_REQUIRED`「缺少 Agent 调用 Key」；`Authorization: Bearer` 非法 Key →「登录凭证无效」。故鉴权方案定为 **Bearer**。
+鉴权：`Authorization: Bearer <Agent调用Key>`（缺 Key →「缺少 Agent 调用 Key」；非法 →「登录凭证无效」）。
 
 ## 3. Token / secrets（勿入仓）
 
