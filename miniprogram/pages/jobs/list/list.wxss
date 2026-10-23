@@ -1,0 +1,105 @@
+.head { margin-bottom: 8rpx; }
+.chips-row {
+  white-space: nowrap;
+  margin: 0 0 16rpx;
+  padding: 0 4rpx 4rpx;
+}
+.chips-row .chip {
+  display: inline-block;
+  margin-right: 12rpx;
+  padding: 10rpx 22rpx;
+  background: #efeceb;
+  border-radius: 28rpx;
+  font-size: 24rpx;
+  color: #666;
+}
+.chips-row .chip.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.job { padding: 20rpx 24rpx; }
+.job-row {
+  display: flex;
+  gap: 20rpx;
+  align-items: stretch;
+}
+.thumb {
+  width: 128rpx;
+  height: 128rpx;
+  border-radius: 16rpx;
+  flex-shrink: 0;
+  background: #f0ebe6;
+}
+.thumb-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9a8f86;
+  font-size: 22rpx;
+  font-weight: 600;
+}
+.job-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+.job-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.job-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.small { font-size: 22rpx; }
+
+.job-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+.foot-left {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  min-width: 0;
+  flex: 1;
+}
+.foot-ops {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  flex-shrink: 0;
+}
+.st {
+  font-size: 22rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+  flex-shrink: 0;
+}
+.st-run { background: #fff7e6; color: #ad6800; }
+.st-warn { background: #f7ebe4; color: #8a4b28; }
+.st-ok { background: #e8f5e9; color: #2e7d32; }
+.st-err { background: #fdecea; color: #c62828; }
+.st-muted { background: #f0ebe6; color: #8a8a8a; }
+
+.err-hint {
+  font-size: 22rpx;
+  color: #c62828;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240rpx;
+}
+
+.foot-ops .link { color: var(--color-muted); font-size: 26rpx; }
+.foot-ops .link.primary { color: var(--color-primary); font-weight: 600; }
+.empty { text-align: center; padding: 48rpx; }

@@ -1,0 +1,15 @@
+import { Module, forwardRef } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
+import { ProductsModule } from '../products/products.module';
+import { JobsModule } from '../jobs/jobs.module';
+import { PromoController } from './promo.controller';
+import { PromoService } from './promo.service';
+import { ImageGenClient } from './image-gen.client';
+
+@Module({
+  imports: [AuthModule, forwardRef(() => ProductsModule), forwardRef(() => JobsModule)],
+  controllers: [PromoController],
+  providers: [PromoService, ImageGenClient],
+  exports: [PromoService],
+})
+export class PromoModule {}

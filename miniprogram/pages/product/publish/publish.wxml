@@ -1,0 +1,81 @@
+<view class="container with-footer">
+  <upload-float />
+  <!-- Step 1: 选图 + 异步发品 -->
+  <view class="card" wx:if="{{step===1}}">
+    <view class="section-title">上传商品图</view>
+    <view class="section-hint">一次可选多张（微信单次最多 9 张，可继续点「选图」累加到 60）。点发品后立刻离开本页，图片直传 OSS，后台分析建品；可同时开多批。锁屏后再打开会尽量续传。</view>
+    <view class="muted" wx:if="{{runningHint}}" style="margin-bottom:12rpx;">{{runningHint}}</view>
+    <view class="img-grid">
+      <view class="img-cell" wx:for="{{localPaths}}" wx:key="*this">
+        <image src="{{item}}" mode="aspectFill" class="thumb" />
+        <view class="img-del" data-index="{{index}}" catchtap="removeImage">×</view>
+      </view>
+      <view class="img-cell add" bindtap="chooseImages">
+        <text class="add-plus">+</text>
+        <text class="add-txt">选图</text>
+      </view>
+    </view>
+    <view class="muted" style="margin-top:16rpx;" wx:if="{{localPaths.length}}">已选 {{localPaths.length}} 张</view>
+  </view>
+
+  <view class="card" wx:if="{{step===1}}">
+    <view class="field-label">状态</view>
+    <view class="seg">
+      <view class="seg-item {{status==='on_sale'?'on':''}}" data-v="on_sale" bindtap="onStatusTap">直接上架</view>
+      <view class="seg-item {{status==='draft'?'on':''}}" data-v="draft" bindtap="onStatusTap">存草稿</view>
+    </view>
+  </view>
+
+  <!-- Step 2: 旧人工确认（主路径已异步建品，一般不会进入） -->
+  <block wx:if="{{step===2}}">
+    <view class="card">
+      <view class="section-title">图片角色</view>
+      <view class="section-hint">点角色标签可切换；建议可改</view>
+      <view class="img-grid roles">
+        <view class="img-cell role" wx:for="{{images}}" wx:key="mediaId">
+          <image src="{{item.url}}" mode="aspectFill" class="thumb" />
+          <view class="role-tag" data-index="{{index}}" bindtap="cycleRole">{{roleLabel[item.role] || item.role}}</view>
+        </view>
+      </view>
+      <view class="muted" wx:if="{{ocrNote}}">识别说明：{{ocrNote}}</view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">基本信息</view>
+      <view class="field-label">款号</view>
+      <input class="input" placeholder="必填" value="{{styleNo}}" bindinput="onStyle" />
+      <view class="field-label">名称</view>
+      <input class="input" placeholder="必填" value="{{name}}" bindinput="onName" />
+      <view class="field-label">成分</view>
+      <input class="input" placeholder="选填" value="{{material}}" bindinput="onMaterial" />
+      <view class="field-label">尺码说明</view>
+      <input class="input" placeholder="写入描述，不拆 SKU" value="{{sizeText}}" bindinput="onSizeText" />
+      <view class="field-label">其他说明</view>
+      <textarea class="textarea" value="{{description}}" bindinput="onDesc" />
+    </view>
+
+    <view class="card">
+      <sku-list skus="{{skus}}" title="颜色 SKU 草案" bind:change="onSkusChange" />
+    </view>
+
+    <view class="card">
+      <view class="field-label">状态</view>
+      <view class="seg">
+        <view class="seg-item {{status==='on_sale'?'on':''}}" data-v="on_sale" bindtap="onStatusTap">直接上架</view>
+        <view class="seg-item {{status==='draft'?'on':''}}" data-v="draft" bindtap="onStatusTap">存草稿</view>
+      </view>
+    </view>
+  </block>
+</view>
+
+<view class="btn-block-footer" wx:if="{{step===1}}">
+  <view class="btn-primary {{submitting||!localPaths.length?'disabled':''}}" bindtap="uploadAndPublish">
+    {{submitting ? '已提交…' : '上传并发品'}}
+  </view>
+</view>
+<view class="btn-block-footer dual" wx:if="{{step===2}}">
+  <view class="btn-ghost half" bindtap="backToSelect">重选图</view>
+  <view class="btn-primary half {{saving?'disabled':''}}" bindtap="confirmPublish">
+    {{saving ? '发布中…' : '确认发品'}}
+  </view>
+</view>

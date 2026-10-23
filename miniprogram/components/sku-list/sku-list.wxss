@@ -1,0 +1,69 @@
+.sku-block { width: 100%; }
+.sku-head { margin-bottom: 16rpx; }
+.sku-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+.sku-title { font-size: 30rpx; font-weight: 600; color: #1a1a2e; }
+.copy-price {
+  flex-shrink: 0;
+  font-size: 24rpx;
+  color: #c45c26;
+  padding: 8rpx 0;
+}
+.sku-sub { display: block; margin-top: 6rpx; font-size: 22rpx; }
+.muted { color: #8a8a8a; }
+
+.sku-cols {
+  display: flex;
+  align-items: center;
+  padding: 0 8rpx 12rpx;
+  font-size: 22rpx;
+}
+.col-color { flex: 1.2; }
+.col-price { flex: 1; }
+.col-del { width: 88rpx; text-align: center; flex-shrink: 0; }
+
+.card-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  background: #faf7f4;
+  border: 1rpx solid #f0e6df;
+  border-radius: 16rpx;
+  padding: 16rpx 16rpx;
+  margin-bottom: 12rpx;
+}
+.card-row .input {
+  background: #fff;
+  border-radius: 12rpx;
+  padding: 18rpx 20rpx;
+  font-size: 28rpx;
+  height: 72rpx;
+  box-sizing: border-box;
+  border: 1rpx solid #eee;
+}
+.card-row .col-color { flex: 1.2; }
+.card-row .col-price { flex: 1; }
+.del-btn {
+  width: 88rpx;
+  flex-shrink: 0;
+  text-align: center;
+  color: #c45c26;
+  font-size: 24rpx;
+  padding: 12rpx 0;
+}
+.del-btn.hidden { visibility: hidden; }
+.sku-empty { text-align: center; padding: 24rpx; font-size: 24rpx; }
+.sku-add {
+  margin-top: 8rpx;
+  text-align: center;
+  color: #c45c26;
+  font-size: 28rpx;
+  padding: 20rpx;
+  border: 1rpx dashed #e0b8a0;
+  border-radius: 16rpx;
+  background: #fffaf7;
+}

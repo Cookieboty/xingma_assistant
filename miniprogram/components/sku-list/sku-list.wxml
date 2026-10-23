@@ -1,0 +1,46 @@
+<view class="sku-block">
+  <view class="sku-head" wx:if="{{showHeader}}">
+    <view class="sku-head-row">
+      <text class="sku-title">{{title}}</text>
+      <text class="link copy-price" wx:if="{{!readonly}}" bindtap="onCopyPrice">一键复制价格</text>
+    </view>
+    <text class="sku-sub muted">一色一行，仅颜色与价格；可先填一行再复制到全部</text>
+  </view>
+
+  <view class="sku-cols muted">
+    <text class="col-color">颜色</text>
+    <text class="col-price">价格</text>
+    <text class="col-del"> </text>
+  </view>
+
+  <view class="sku-row card-row" wx:for="{{skus}}" wx:key="index">
+    <input
+      class="col-color input"
+      placeholder="如 米白"
+      value="{{item.color}}"
+      data-index="{{index}}"
+      data-field="color"
+      bindinput="onField"
+      disabled="{{readonly}}"
+    />
+    <input
+      class="col-price input"
+      placeholder="选填"
+      type="digit"
+      value="{{item.price}}"
+      data-index="{{index}}"
+      data-field="price"
+      bindinput="onField"
+      disabled="{{readonly}}"
+    />
+    <view
+      class="col-del del-btn {{readonly ? 'hidden' : ''}}"
+      data-index="{{index}}"
+      bindtap="onRemove"
+    >删除</view>
+  </view>
+
+  <view class="sku-empty muted" wx:if="{{!skus.length}}">暂无颜色，请添加</view>
+
+  <view class="sku-add" wx:if="{{!readonly}}" bindtap="onAdd">+ 添加颜色</view>
+</view>

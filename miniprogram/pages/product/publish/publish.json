@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "选图发品",
+  "usingComponents": {
+    "sku-list": "/components/sku-list/sku-list",
+    "upload-float": "/components/upload-float/upload-float"
+  }
+}

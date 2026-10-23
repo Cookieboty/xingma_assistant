@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "任务中心",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "upload-float": "/components/upload-float/upload-float"
+  }
+}

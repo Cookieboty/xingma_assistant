@@ -1,0 +1,8 @@
+{
+  "navigationBarTitleText": "商品",
+  "enablePullDownRefresh": true,
+  "onReachBottomDistance": 80,
+  "usingComponents": {
+    "upload-float": "/components/upload-float/upload-float"
+  }
+}

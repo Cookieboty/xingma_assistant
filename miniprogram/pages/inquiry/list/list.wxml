@@ -1,0 +1,7 @@
+<view class="container">
+  <view class="card" wx:for="{{list}}" wx:key="id" bindtap="goDetail" data-id="{{item.id}}">
+    <view>{{item.content}}</view>
+    <view class="muted">商品 {{item.productId}} · {{item.status}}</view>
+  </view>
+  <view class="muted" wx:if="{{!list.length}}" style="text-align:center;padding:40rpx;">暂无询价</view>
+</view>

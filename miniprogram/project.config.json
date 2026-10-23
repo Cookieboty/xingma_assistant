@@ -1,0 +1,20 @@
+{
+  "description": "羊毛衫档口商品与客户管理小程序",
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "setting": {
+    "bundle": false,
+    "es6": true,
+    "postcss": true,
+    "minified": true,
+    "urlCheck": false
+  },
+  "compileType": "miniprogram",
+  "libVersion": "3.5.5",
+  "appid": "wx394d23ea099d8a01",
+  "projectname": "wool-stall-miniapp",
+  "condition": {},
+  "simulatorPluginLibVersion": {}
+}

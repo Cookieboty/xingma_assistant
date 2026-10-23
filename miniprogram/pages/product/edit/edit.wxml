@@ -1,0 +1,160 @@
+<view class="container with-footer">
+  <!-- ===== 新建：笔记大框 ===== -->
+  <block wx:if="{{!id}}">
+    <view class="card" wx:if="{{!parsed}}">
+      <view class="section-title">粘贴笔记发品</view>
+      <view class="section-hint">从微信笔记复制文字粘贴到下方，点「解析」自动识别款号/名称/成分/颜色</view>
+      <textarea
+        class="textarea note-box"
+        placeholder="示例：&#10;【款号】72769&#10;【成分】100%山羊绒&#10;【款式】7G圆领长袖 人字纹 加厚&#10;【克重】466克&#10;【颜色】上青/米驼/浅浅灰&#10;【尺码】105-110-115-120-125&#10;&#10;也可写：上青 128　米驼 128"
+        value="{{noteText}}"
+        bindinput="onNoteInput"
+        maxlength="20000"
+        auto-height="{{false}}"
+        show-confirm-bar="{{false}}"
+      />
+      <view class="note-actions">
+        <view class="btn-ghost note-btn {{!noteText ? 'disabled' : ''}}" bindtap="clearNote" wx:if="{{noteText}}">清空</view>
+        <view class="btn-primary note-btn {{parsing || !noteText ? 'disabled' : ''}}" bindtap="parseNote">
+          {{parsing ? '解析中…' : '解析'}}
+        </view>
+      </view>
+    </view>
+
+    <!-- 解析后：可编辑摘要 -->
+    <block wx:if="{{parsed}}">
+      <view class="card">
+        <view class="row" style="margin-bottom:8rpx;">
+          <view class="section-title" style="margin-bottom:0;">解析结果</view>
+          <view class="link" bindtap="backToNote">改原文重析</view>
+        </view>
+        <view class="section-hint">{{parseHint || '可直接改下面字段，再保存上架'}}</view>
+
+        <view class="field-label">款号</view>
+        <input class="input" placeholder="如 72769" value="{{styleNo}}" bindinput="onStyle" />
+
+        <view class="field-label">名称</view>
+        <input class="input" placeholder="如 高领加厚羊毛衫" value="{{name}}" bindinput="onName" />
+
+        <view class="field-label">成分 / 材质</view>
+        <input class="input" placeholder="如 100% 山羊绒" value="{{material}}" bindinput="onMaterial" />
+
+        <view class="field-label">尺码说明（写入描述）</view>
+        <input class="input" placeholder="如 105-130 或均码" value="{{sizeText}}" bindinput="onSizeText" />
+
+        <view class="field-label">其他说明</view>
+        <textarea class="textarea" placeholder="克重、卖点等" value="{{description}}" bindinput="onDesc" />
+      </view>
+
+      <view class="card">
+        <view class="section-title">上架设置</view>
+        <view class="field-label">状态</view>
+        <view class="seg">
+          <view class="seg-item {{status==='draft'?'on':''}}" data-v="draft" bindtap="onStatusTap">草稿</view>
+          <view class="seg-item {{status==='on_sale'?'on':''}}" data-v="on_sale" bindtap="onStatusTap">在售</view>
+          <view class="seg-item {{status==='off_sale'?'on':''}}" data-v="off_sale" bindtap="onStatusTap">下架</view>
+        </view>
+        <view class="field-label">价格展示</view>
+        <view class="seg">
+          <view class="seg-item {{priceDisplay==='show'?'on':''}}" data-v="show" bindtap="onPriceDisplayTap">展示价格</view>
+          <view class="seg-item {{priceDisplay==='hide'?'on':''}}" data-v="hide" bindtap="onPriceDisplayTap">隐藏价格</view>
+        </view>
+        <view class="field-label">商品等级</view>
+        <picker mode="selector" range="{{productLevels}}" range-key="name" value="{{levelIndex}}" bindchange="onLevelChange">
+          <view class="picker">{{productLevels[levelIndex].name || '请选择'}}</view>
+        </picker>
+      </view>
+
+      <view class="card">
+        <sku-list skus="{{skus}}" bind:change="onSkusChange" />
+      </view>
+
+      <view class="card">
+        <view class="muted">图片可在保存后到商品编辑页再加；选图发品请用列表页「选图发品」。</view>
+      </view>
+    </block>
+  </block>
+
+  <!-- ===== 编辑已有商品：原表单 ===== -->
+  <block wx:else>
+    <view class="card">
+      <view class="section-title">商品图片</view>
+      <view class="section-hint">点图预览；角标删除；左移/右移/置顶调序（立即保存）；可多选追加</view>
+      <view class="img-grid">
+        <view class="img-cell" wx:for="{{images}}" wx:key="id">
+          <image src="{{item.url}}" mode="aspectFill" class="thumb" data-url="{{item.url}}" bindtap="previewImage" />
+          <view class="img-del" data-id="{{item.id}}" catchtap="removeImage">×</view>
+          <view class="img-mark" wx:if="{{item.isPromo}}">AI</view>
+          <view class="img-ord">
+            <view class="ord-btn {{index===0?'off':''}}" data-id="{{item.id}}" data-dir="left" catchtap="moveImage">◀</view>
+            <view class="ord-btn" data-id="{{item.id}}" data-dir="top" catchtap="moveImage">顶</view>
+            <view class="ord-btn {{index===images.length-1?'off':''}}" data-id="{{item.id}}" data-dir="right" catchtap="moveImage">▶</view>
+          </view>
+        </view>
+        <view class="img-cell add {{uploading ? 'disabled' : ''}}" bindtap="addImages">
+          <text class="add-plus">+</text>
+          <text class="add-txt">{{uploading ? '上传中' : '加图'}}</text>
+        </view>
+      </view>
+      <view class="muted" style="margin-top:12rpx;" wx:if="{{images.length}}">共 {{images.length}} 张 · 首张为列表封面</view>
+      <view class="muted" style="margin-top:12rpx;" wx:else>暂无图片，点「加图」从相册选择</view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">基本信息</view>
+      <view class="section-hint">款号租户内唯一；尺码写在说明里，不拆 SKU</view>
+
+      <view class="field-label">款号</view>
+      <input class="input" placeholder="如 72769" value="{{styleNo}}" bindinput="onStyle" />
+
+      <view class="field-label">名称</view>
+      <input class="input" placeholder="如 高领加厚羊毛衫" value="{{name}}" bindinput="onName" />
+
+      <view class="field-label">成分 / 材质</view>
+      <input class="input" placeholder="如 100% 羊毛" value="{{material}}" bindinput="onMaterial" />
+
+      <view class="field-label">尺码说明（写入描述）</view>
+      <input class="input" placeholder="如 M-XL 或均码" value="{{sizeText}}" bindinput="onSizeText" />
+
+      <view class="field-label">其他说明</view>
+      <textarea class="textarea" placeholder="克重、卖点等" value="{{description}}" bindinput="onDesc" />
+    </view>
+
+    <view class="card">
+      <view class="section-title">上架设置</view>
+      <view class="field-label">状态</view>
+      <view class="seg">
+        <view class="seg-item {{status==='draft'?'on':''}}" data-v="draft" bindtap="onStatusTap">草稿</view>
+        <view class="seg-item {{status==='on_sale'?'on':''}}" data-v="on_sale" bindtap="onStatusTap">在售</view>
+        <view class="seg-item {{status==='off_sale'?'on':''}}" data-v="off_sale" bindtap="onStatusTap">下架</view>
+      </view>
+      <view class="field-label">价格展示</view>
+      <view class="seg">
+        <view class="seg-item {{priceDisplay==='show'?'on':''}}" data-v="show" bindtap="onPriceDisplayTap">展示价格</view>
+        <view class="seg-item {{priceDisplay==='hide'?'on':''}}" data-v="hide" bindtap="onPriceDisplayTap">隐藏价格</view>
+      </view>
+      <view class="field-label">商品等级</view>
+      <picker mode="selector" range="{{productLevels}}" range-key="name" value="{{levelIndex}}" bindchange="onLevelChange">
+        <view class="picker">{{productLevels[levelIndex].name || '请选择'}}</view>
+      </picker>
+      <view class="field-label">客户下载图片</view>
+      <view class="seg">
+        <view class="seg-item {{!allowCustomerDownload?'on':''}}" data-v="0" bindtap="onDownloadTap">禁止</view>
+        <view class="seg-item {{allowCustomerDownload?'on':''}}" data-v="1" bindtap="onDownloadTap">允许</view>
+      </view>
+      <view class="section-hint">默认禁止：客户详情不可长按保存；开启后才可保存到相册</view>
+    </view>
+
+    <view class="card">
+      <sku-list skus="{{skus}}" bind:change="onSkusChange" />
+    </view>
+
+    <view class="card">
+      <view class="btn-weak" bindtap="copyProduct">复制为新款</view>
+    </view>
+  </block>
+</view>
+
+<view class="btn-block-footer" wx:if="{{id || parsed}}">
+  <view class="btn-primary {{saving?'disabled':''}}" bindtap="save">{{saving ? '保存中…' : '保存'}}</view>
+</view>

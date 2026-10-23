@@ -1,0 +1,393 @@
+/**
+ * 按场景区分的出图模板。每个模板有自己的步骤、参考图规则、可选项与 prompt 构造器。
+ * 设计说明见 docs/生图模板设计.md
+ */
+
+export type Platform = 'moments' | 'xiaohongshu';
+export type PromoStep = 'reference' | 'feature' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count';
+
+export interface Option {
+  id: string;
+  name: string;
+  /** 英文提示词片段（不出现在图上） */
+  prompt: string;
+}
+
+export interface SizeOption {
+  id: string;
+  name: string;
+  /** 请求上游的尺寸 */
+  upstream: string;
+  /** 产品语义尺寸 */
+  target: string;
+}
+
+export interface ReferenceRule {
+  /** 建议使用的图片类别 */
+  prefer: Array<'main' | 'detail' | 'sku'>;
+  min: number;
+  max: number;
+  hint: string;
+}
+
+export interface PromoModel {
+  id: string;
+  name: string;
+  desc: string;
+  prompt: string;
+  /** 小程序本地头像路径（包内 /images/models/…） */
+  avatar: string;
+}
+
+export interface PromptContext {
+  feature: string;
+  model?: PromoModel | null;
+  pose?: Option | null;
+  scene?: Option | null;
+  /** 用户自由描述的姿势/呈现（优先于 pose.prompt） */
+  poseText?: string;
+  /** 用户自由描述的场景/背景（优先于 scene.prompt） */
+  sceneText?: string;
+  colors?: string[];
+  index: number;
+  total: number;
+}
+
+export interface PromoTemplate {
+  id: string;
+  name: string;
+  desc: string;
+  platforms: Platform[];
+  defaultSize: string;
+  sizes: string[];
+  /** none=不用模特；optional=可选；required=必选 */
+  model: 'none' | 'optional' | 'required';
+  poses: Option[];
+  scenes: Option[];
+  sceneLabel: string;
+  reference: ReferenceRule;
+  count: { min: number; max: number; default: number };
+  steps: PromoStep[];
+  buildPrompt: (c: PromptContext) => string;
+}
+
+export const SIZES: Record<string, SizeOption> = {
+  square: { id: 'square', name: '朋友圈方图 1080×1080', upstream: '1:1', target: '1080x1080' },
+  portrait: { id: 'portrait', name: '小红书竖图 1080×1440 (3:4)', upstream: '3:4', target: '1080x1440' },
+};
+
+export const MODELS: PromoModel[] = [
+  { id: 'f_young', name: '亚洲女 · 22-28 岁', desc: '清爽自然、黑长直', prompt: 'a natural-looking East Asian woman in her mid twenties, long straight black hair, light natural makeup, slim build', avatar: '/images/models/f_young.png' },
+  { id: 'f_mature', name: '亚洲女 · 30-40 岁', desc: '知性温柔、齐肩发', prompt: 'an elegant East Asian woman in her thirties, shoulder-length hair, gentle confident expression', avatar: '/images/models/f_mature.png' },
+  { id: 'f_mom', name: '亚洲女 · 45-55 岁', desc: '端庄大方、妈妈款', prompt: 'a graceful East Asian woman in her fifties, short neat hair, warm smile, healthy figure', avatar: '/images/models/f_mom.png' },
+  { id: 'm_young', name: '亚洲男 · 25-35 岁', desc: '干净利落、短发', prompt: 'a clean-cut East Asian man in his late twenties, short black hair, relaxed posture', avatar: '/images/models/m_young.png' },
+  { id: 'm_mature', name: '亚洲男 · 40-55 岁', desc: '稳重儒雅', prompt: 'a refined East Asian man in his late forties, neat short hair, calm and steady look', avatar: '/images/models/m_mature.png' },
+];
+
+/** 所有模板通用的约束：服装不变、不画字（颜色与参考图一致） */
+const KEEP = 'The garment must stay exactly the same as in the reference image: identical color, knit stitch texture, yarn thickness, neckline, sleeve length, cut and every detail. Do not redesign, recolor or add patterns.';
+/** multi_color：本张只跟「该色」参考图，颜色必须匹配该色参考，而非其它色 */
+const KEEP_COLOR_VARIANT = (colorLabel?: string) =>
+  `The garment must match THIS color variant's reference image exactly: knit stitch texture, yarn thickness, neckline, sleeve length, cut and every detail, and the garment COLOR must match that reference${colorLabel ? ` (${colorLabel})` : ''}. Do not redesign, add patterns, or blend colors from other variants.`;
+const NO_TEXT = 'Absolutely no text, letters, watermark, logo or captions anywhere in the image.';
+/** 全模板：真实相机摄影感，抑制塑料皮/蜡像脸/CGI */
+const PHOTOREAL =
+  'Photorealistic real-camera photograph only: natural skin with visible pores and subtle imperfections (never plastic, waxy, or airbrushed), realistic fabric knit texture, authentic lens depth of field and gentle film grain, natural lighting and color, documentary / premium e-commerce fashion photography. Not CGI, not 3D render, not illustration, not AI-looking, no unnatural glow or over-smoothed faces, no deformed hands.';
+const FEATURE = (f: string) => (f ? `Garment notes (Chinese, for reference only, do not render as text): ${f}.` : '');
+
+/** 风格样例强度：影响 STYLE_REF 段措辞；默认 medium */
+export type StyleStrength = 'weak' | 'medium' | 'strong';
+
+const STYLE_STRENGTH_LINE: Record<StyleStrength, string> = {
+  weak: 'Apply style references subtly: only a light influence on lighting and mood; keep composition and camera largely driven by the template and pose/scene text.',
+  medium: 'Apply style references moderately for lighting, color grading, framing and mood, while still obeying template and pose/scene instructions.',
+  strong: 'Lean strongly on the style references for lighting, color grading, camera angle, framing and lifestyle mood, but never above garment KEEP or explicit pose/scene text.',
+};
+
+/**
+ * 追加到 prompt 的 STYLE_REF 段。
+ * 优先级写死：商品 KEEP > 模板/姿势场景文案 > 风格样例。
+ * 明确禁止抄样例服装 / 人脸 / 品牌 logo / 商标。
+ */
+export function buildStyleRefPrompt(opts: {
+  garmentRefCount: number;
+  styleRefCount: number;
+  strength?: StyleStrength | string | null;
+}): string {
+  const n = Math.max(0, Number(opts.styleRefCount) || 0);
+  if (!n) return '';
+  const g = Math.max(1, Number(opts.garmentRefCount) || 1);
+  const raw = String(opts.strength || 'medium');
+  const strength: StyleStrength =
+    raw === 'weak' || raw === 'strong' ? raw : 'medium';
+  return [
+    `Additional style reference image(s) are provided AFTER the first ${g} garment reference image(s) (${n} style-only image(s)).`,
+    'Use style references ONLY for lighting, color grading, camera angle, framing, depth of field and lifestyle mood.',
+    'Do NOT copy clothing, garment cut, knit patterns, faces or person identity, brand logos, trademarks, watermarks or text from the style references.',
+    'If a preset model was selected, keep that model identity; never clone faces from style samples.',
+    'Priority when conflicting: garment KEEP > template / pose / scene text > style samples.',
+    STYLE_STRENGTH_LINE[strength],
+    'The knit garment must still match the garment reference exactly (KEEP).',
+  ].join(' ');
+}
+
+/** 下发给前端的风格样例规则（所有模板共用；非独立步骤） */
+export const STYLE_REF_RULE = {
+  min: 0,
+  max: 4,
+  hint: '上传你喜欢的成片风格，系统尽量学构图和氛围；衣服仍以商品图为准',
+};
+
+const MODEL_SCENES: Option[] = [
+  { id: 'street', name: '城市街拍', prompt: 'a stylish city street with soft-focus storefronts, overcast diffused daylight' },
+  { id: 'cafe', name: '咖啡馆', prompt: 'a cozy cafe interior with wooden furniture, large window, warm ambient light' },
+  { id: 'home', name: '室内温暖', prompt: 'a warm minimalist living room with a beige sofa, soft lamp light, knit blanket' },
+  { id: 'autumn', name: '秋冬户外', prompt: 'an autumn park with golden fallen leaves, low warm sunlight, shallow depth of field' },
+  { id: 'studio', name: '纯色影棚', prompt: 'a clean light-beige seamless studio backdrop, soft even studio lighting' },
+];
+
+const MODEL_POSES: Option[] = [
+  { id: 'stand', name: '正面站立', prompt: 'standing facing the camera, relaxed arms, full upper body visible' },
+  { id: 'walk', name: '自然走动', prompt: 'walking naturally toward the camera, candid mid-stride' },
+  { id: 'side', name: '侧身回眸', prompt: 'three-quarter side pose looking back over the shoulder' },
+  { id: 'sit', name: '坐姿', prompt: 'sitting casually, hands resting on knees, garment clearly visible' },
+  { id: 'pocket', name: '手插兜/抱臂', prompt: 'one hand in pocket or arms lightly crossed, confident pose' },
+  { id: 'closeup', name: '半身近景', prompt: 'waist-up close shot emphasizing neckline and knit texture' },
+];
+
+export const TEMPLATES: PromoTemplate[] = [
+  {
+    id: 'detail_closeup',
+    name: '细节特写',
+    desc: '不用模特，突出织纹、领口、袖口、颜色质感；换光线和背景',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'square',
+    sizes: ['square', 'portrait'],
+    model: 'none',
+    poses: [],
+    sceneLabel: '背景风格',
+    scenes: [
+      { id: 'wood', name: '原木桌面', prompt: 'resting on a warm natural oak wooden table' },
+      { id: 'linen', name: '亚麻布', prompt: 'laid on soft oatmeal linen fabric with gentle folds' },
+      { id: 'window', name: '窗边自然光', prompt: 'by a window with soft natural side light and delicate shadows' },
+      { id: 'dark', name: '深色质感', prompt: 'on a dark charcoal felt surface with moody directional light' },
+    ],
+    reference: { prefer: ['detail', 'main'], min: 1, max: 2, hint: '选 1-2 张细节图或主图（织纹清晰的优先）' },
+    count: { min: 1, max: 4, default: 2 },
+    steps: ['reference', 'feature', 'pose_scene', 'count'],
+    buildPrompt: (c) =>
+      [
+        'Macro close-up product photograph of a knitwear garment, focusing on the knit stitch texture, ribbing, neckline and cuff details.',
+        (c.sceneText || c.scene?.prompt) ? `Setting: ${effectivePrompt(c.scene, c.sceneText)}.` : '',
+        'Shallow depth of field, crisp texture, true-to-life color, premium e-commerce detail shot.',
+        c.total > 1 ? `Variation ${c.index + 1} of ${c.total}: use a different crop / angle of the details.` : '',
+        FEATURE(c.feature), KEEP, PHOTOREAL, NO_TEXT,
+      ].filter(Boolean).join(' '),
+  },
+  {
+    id: 'flatlay',
+    name: '平铺 / 挂拍静物',
+    desc: '不用模特，整件平铺或挂拍；极简背景或生活道具',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'square',
+    sizes: ['square', 'portrait'],
+    model: 'none',
+    poses: [
+      { id: 'flat', name: '平铺', prompt: 'neatly laid flat, shot from directly above' },
+      { id: 'hang', name: '衣架挂拍', prompt: 'hanging on a wooden hanger against the wall' },
+      { id: 'fold', name: '折叠叠放', prompt: 'neatly folded with the collar visible' },
+    ],
+    sceneLabel: '背景 / 道具',
+    scenes: [
+      { id: 'minimal', name: '极简浅色', prompt: 'on a clean off-white seamless background, minimal composition' },
+      { id: 'props', name: '生活道具', prompt: 'surrounded by tasteful lifestyle props: a coffee cup, an open book, dried flowers, glasses' },
+      { id: 'autumn', name: '秋冬氛围', prompt: 'with autumn leaves, pine cones and a warm scarf as props' },
+      { id: 'wood', name: '原木地板', prompt: 'on light wooden floorboards with soft daylight' },
+    ],
+    reference: { prefer: ['main'], min: 1, max: 1, hint: '选 1 张能看到整件衣服的主图' },
+    count: { min: 1, max: 4, default: 2 },
+    steps: ['reference', 'feature', 'pose_scene', 'count'],
+    buildPrompt: (c) =>
+      [
+        'Still-life e-commerce product photograph of the whole knit garment, entire garment visible, no person.',
+        (c.poseText || c.pose?.prompt) ? `Presentation: ${effectivePrompt(c.pose, c.poseText)}.` : 'Presentation: neatly laid flat, shot from above.',
+        (c.sceneText || c.scene?.prompt) ? `Setting: ${effectivePrompt(c.scene, c.sceneText)}.` : '',
+        'Soft natural light, accurate colors, clean composition.',
+        c.total > 1
+          ? `Variation ${c.index + 1} of ${c.total}: rearrange props slightly and/or use a mild different camera angle; keep the same presentation style.`
+          : '',
+        FEATURE(c.feature), KEEP, PHOTOREAL, NO_TEXT,
+      ].filter(Boolean).join(' '),
+  },
+  {
+    id: 'model_scene',
+    name: '模特上身 · 场景图',
+    desc: '选模特、动作、场景；衣服颜色款式保持不变',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'portrait',
+    sizes: ['portrait', 'square'],
+    model: 'required',
+    poses: MODEL_POSES,
+    sceneLabel: '场景',
+    scenes: MODEL_SCENES,
+    reference: { prefer: ['main'], min: 1, max: 2, hint: '选 1-2 张清晰主图（正面整件）' },
+    count: { min: 1, max: 6, default: 2 },
+    steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
+    buildPrompt: (c) =>
+      [
+        `Fashion lifestyle photograph: ${c.model?.prompt || 'an East Asian model'} wearing the exact knit garment from the reference image.`,
+        (c.poseText || c.pose?.prompt) ? `Pose: ${effectivePrompt(c.pose, c.poseText)}.` : '',
+        (c.sceneText || c.scene?.prompt) ? `Scene: ${effectivePrompt(c.scene, c.sceneText)}.` : '',
+        'Pair with simple neutral bottoms that do not distract. Realistic skin, natural proportions, professional e-commerce fashion photography.',
+        c.total > 1
+          ? `Shot ${c.index + 1} of ${c.total}: if pose and scene are the same as other shots, add natural micro-variation (expression, weight shift, hand position) so images are not clones; do not change garment or framing style.`
+          : '',
+        FEATURE(c.feature), KEEP, PHOTOREAL, NO_TEXT,
+      ].filter(Boolean).join(' '),
+  },
+  {
+    id: 'multi_color',
+    name: '多色展示',
+    desc: '同一模特同一姿势，每个颜色各生成一张上身图',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'square',
+    sizes: ['square', 'portrait'],
+    model: 'required',
+    poses: MODEL_POSES,
+    sceneLabel: '场景',
+    scenes: MODEL_SCENES,
+    reference: {
+      prefer: ['sku'],
+      min: 2,
+      max: 6,
+      hint: '每个颜色选 1 张对应主图，选几个颜色就出几张',
+    },
+    count: { min: 2, max: 6, default: 2 },
+    steps: ['reference', 'colors', 'feature', 'model', 'pose_scene'],
+    buildPrompt: (c) => {
+      const colorName = (c.colors && c.colors[0]) || '';
+      return [
+        `Fashion e-commerce photograph: ${c.model?.prompt || 'an East Asian model'} wearing ONE color variant of the knit garment — only the ${colorName || 'selected'} color from its matching reference image.`,
+        'This is a single-image shot of one color only. Do NOT collage, grid, or show multiple colors in the same frame.',
+        (c.poseText || c.pose?.prompt) ? `Pose: ${effectivePrompt(c.pose, c.poseText)}.` : '',
+        (c.sceneText || c.scene?.prompt) ? `Scene: ${effectivePrompt(c.scene, c.sceneText)}.` : '',
+        c.total > 1
+          ? `Part ${c.index + 1} of a ${c.total}-color set: keep pose, framing, camera distance, and scene identical across the set; only the garment color changes to match this variant's reference.`
+          : '',
+        'Pair with simple neutral bottoms that do not distract. Realistic skin, natural proportions.',
+        FEATURE(c.feature),
+        KEEP_COLOR_VARIANT(colorName),
+        PHOTOREAL,
+        NO_TEXT,
+      ].filter(Boolean).join(' ');
+    },
+  },
+  {
+    id: 'xhs_cover',
+    name: '小红书封面风',
+    desc: '竖版 3:4，生活感、氛围感；模特可选',
+    platforms: ['xiaohongshu'],
+    defaultSize: 'portrait',
+    sizes: ['portrait'],
+    model: 'optional',
+    poses: [
+      { id: 'mirror', name: '对镜自拍感', prompt: 'mirror-selfie style framing, phone partially covering the face' },
+      { id: 'candid', name: '抓拍感', prompt: 'candid unposed moment, slightly off-center composition' },
+      { id: 'still', name: '无人氛围静物', prompt: 'no person, the garment casually draped over a chair with lifestyle props' },
+      { id: 'closeup', name: '半身近景', prompt: 'waist-up close shot, soft smile' },
+    ],
+    sceneLabel: '氛围',
+    scenes: [
+      { id: 'morning', name: '清晨卧室', prompt: 'a sunlit cozy bedroom in the morning, white bedding, warm tones' },
+      { id: 'cafe', name: '咖啡馆午后', prompt: 'an afternoon cafe corner with latte art and soft window light' },
+      { id: 'autumn', name: '秋日街角', prompt: 'an autumn street corner with golden ginkgo leaves' },
+      { id: 'winter', name: '冬日暖光', prompt: 'a winter evening with fairy lights and warm bokeh' },
+    ],
+    reference: { prefer: ['main'], min: 1, max: 2, hint: '选 1-2 张主图' },
+    count: { min: 1, max: 4, default: 2 },
+    steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
+    buildPrompt: (c) => {
+      const poseId = c.pose?.id || '';
+      const hasModel = !!c.model;
+      const poseP = effectivePrompt(c.pose, c.poseText);
+      const sceneP = effectivePrompt(c.scene, c.sceneText);
+      let shotLine = '';
+      if (c.poseText && (!c.pose || c.pose.id === 'custom')) {
+        shotLine = hasModel
+          ? `Shot: ${poseP}.`
+          : `Still-life / composition: ${poseP} (no person unless the description requires one).`;
+      } else if (!hasModel) {
+        if (poseId === 'still' || !c.pose) {
+          shotLine = 'Still-life: no person; the garment casually draped or styled with lifestyle props.';
+        } else {
+          shotLine = 'Still-life product focus, no person in frame (ignore human-pose options).';
+        }
+      } else if (poseId === 'still') {
+        shotLine = 'Waist-up lifestyle portrait, soft natural pose (not a empty still-life).';
+      } else if (poseP) {
+        shotLine = `Shot: ${poseP}.`;
+      }
+      return [
+        'Vertical 3:4 Xiaohongshu-style lifestyle cover photo, airy film-like color grading, warm and cozy mood, eye-catching but natural.',
+        hasModel
+          ? `${c.model!.prompt} wears the exact knit garment from the reference.`
+          : 'Feature the exact knit garment from the reference; no person.',
+        shotLine,
+        sceneP ? `Atmosphere: ${sceneP}.` : '',
+        'Leave some clean negative space at the top (empty, no text).',
+        FEATURE(c.feature), KEEP, PHOTOREAL, NO_TEXT,
+      ].filter(Boolean).join(' ');
+    },
+  },
+];
+
+
+/** 将自由文本匹配到最近预设；匹配不上则返回自定义 Option */
+export function resolveOption(
+  options: Option[],
+  selectedIds: string[] | undefined,
+  freeText: string | undefined,
+  kind: 'pose' | 'scene',
+): Option | null {
+  const text = String(freeText || '').trim();
+  if (text) {
+    const lower = text.toLowerCase();
+    const hit =
+      options.find((o) => o.name === text || o.id === text) ||
+      options.find((o) => text.includes(o.name) || o.name.includes(text)) ||
+      options.find((o) => lower.includes(o.id) || o.prompt.toLowerCase().includes(lower));
+    if (hit) return hit;
+    const label = kind === 'pose' ? 'Pose/presentation' : 'Scene/setting';
+    return {
+      id: 'custom',
+      name: '自定义',
+      prompt: `${label} described by merchant (follow closely, Chinese ok): ${text}`,
+    };
+  }
+  const ids = (selectedIds || []).filter(Boolean);
+  const picked = options.filter((o) => ids.includes(o.id));
+  if (picked.length) return picked[0];
+  return options[0] || null;
+}
+
+/** buildPrompt 用：有 poseText/sceneText 时覆盖 option.prompt */
+export function effectivePrompt(opt: Option | null | undefined, freeText?: string): string {
+  const t = String(freeText || '').trim();
+  // 自定义文案（可能已是 enrich 后的英文片段）始终优先于芯片预设
+  if (t) return t;
+  return opt?.prompt || '';
+}
+
+export function findTemplate(id: string) {
+  return TEMPLATES.find((t) => t.id === id);
+}
+
+/** 给前端的纯数据（去掉函数） */
+export function templateDto(t: PromoTemplate) {
+  const { buildPrompt, ...rest } = t;
+  return {
+    ...rest,
+    sizeOptions: t.sizes.map((s) => SIZES[s]),
+    styleRef: STYLE_REF_RULE,
+  };
+}

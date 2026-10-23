@@ -1,0 +1,33 @@
+<view class="container">
+  <view class="hero card">
+    <view class="title">羊毛衫档口</view>
+    <view class="muted">管款 · 选图发品 · 分享给客户</view>
+  </view>
+
+  <view class="card" wx:if="{{!role}}">
+    <view class="section-title">客户看货</view>
+    <view class="muted">无需登录。通过业主分享的商品卡片即可查看。</view>
+    <view class="hint" wx:if="{{customerHint}}">{{customerHint}}</view>
+    <view style="height:32rpx;"></view>
+    <view class="section-title">档口管理</view>
+    <view class="btn-primary" bindtap="enterWithWechat">微信登录</view>
+    <block wx:if="{{showDevLogin}}">
+      <view style="height:20rpx;"></view>
+      <view class="muted">本地开发</view>
+      <view style="height:12rpx;"></view>
+      <view class="btn-ghost" bindtap="enterAsStaff">假登录：员工</view>
+    </block>
+  </view>
+
+  <view class="card" wx:elif="{{isStaff}}">
+    <view class="muted">正在进入工作台…</view>
+  </view>
+
+  <view class="card" wx:else>
+    <view class="section-title">客户会话已就绪</view>
+    <view class="muted">请从分享卡片打开商品，无需在此登录。</view>
+    <view class="hint">请通过分享卡片打开</view>
+    <view style="height:24rpx;"></view>
+    <view class="btn-weak" bindtap="logout">清除本地会话</view>
+  </view>
+</view>

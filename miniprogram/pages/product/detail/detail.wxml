@@ -1,0 +1,134 @@
+<view class="container" wx:if="{{product}}">
+  <view class="card">
+    <view class="name">{{product.name}}</view>
+    <view class="muted" style="margin-top:8rpx;">款号 {{product.styleNo}}</view>
+    <view class="muted" wx:if="{{product.material}}" style="margin-top:6rpx;">{{product.material}}</view>
+    <view class="price" style="margin-top:20rpx;font-size:40rpx;">{{product.priceText}}</view>
+    <view class="desc muted" wx:if="{{product.description}}" style="margin-top:16rpx;white-space:pre-wrap;">{{product.description}}</view>
+  </view>
+
+  <view class="card" wx:if="{{product.images && product.images.length}}">
+    <view class="section-title">商品图片</view>
+    <view class="img-grid">
+      <view class="img-cell" wx:for="{{product.images}}" wx:key="id">
+        <image
+          src="{{item.url}}"
+          mode="aspectFill"
+          class="thumb"
+          data-url="{{item.url}}"
+          show-menu-by-longpress="{{canDownload}}"
+          bindtap="previewImage"
+        />
+      </view>
+    </view>
+    <view class="muted small" style="margin-top:12rpx;" wx:if="{{!isStaff && !canDownload}}">业主未开放图片下载，长按无法保存</view>
+    <view class="btn-ghost" style="margin-top:16rpx;" wx:if="{{canDownload}}" bindtap="saveAllImages">保存图片到相册</view>
+  </view>
+
+  <view class="card" wx:if="{{product.skus && product.skus.length}}">
+    <view class="section-title">颜色与价格</view>
+    <view class="sku-line" wx:for="{{product.skus}}" wx:key="id">
+      <text class="sku-color">{{item.color || "-"}}</text>
+      <text class="price">{{item.price || "询价"}}</text>
+    </view>
+  </view>
+
+  <block wx:if="{{isStaff}}">
+    <view class="card">
+      <view class="section-title">分享</view>
+      <view class="btn-primary" bindtap="createShare">分享给指定客户</view>
+      <view style="height:16rpx;"></view>
+      <view class="btn-ghost" bindtap="createOpenShare">公开分享</view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">宣传素材</view>
+      <view class="muted small" wx:if="{{promoSetsLoading && !promoSets.length}}">加载素材组…</view>
+      <view class="muted small" wx:elif="{{!promoSets.length}}">暂无素材组，点下方进入素材列表新建</view>
+      <view class="set-list" wx:if="{{promoSets.length}}">
+        <view
+          class="set-card"
+          wx:for="{{promoSets}}"
+          wx:key="id"
+          data-id="{{item.id}}"
+          bindtap="goPromoSet"
+        >
+          <view class="set-thumb-wrap">
+            <block wx:if="{{item.isVideo}}">
+              <image wx:if="{{item.thumbUrl}}" src="{{item.thumbUrl}}" mode="aspectFill" class="set-thumb" />
+              <view wx:else class="set-thumb set-thumb-ph">{{item.typeShort}}</view>
+              <view class="video-badge">▶</view>
+            </block>
+            <block wx:elif="{{item.thumbCount >= 2}}">
+              <view class="collage collage-{{item.thumbCount}}">
+                <image
+                  wx:for="{{item.thumbUrls}}"
+                  wx:for-item="tu"
+                  wx:for-index="ti"
+                  wx:key="ti"
+                  src="{{tu}}"
+                  mode="aspectFill"
+                  class="collage-cell"
+                />
+              </view>
+            </block>
+            <block wx:else>
+              <image wx:if="{{item.thumbUrl}}" src="{{item.thumbUrl}}" mode="aspectFill" class="set-thumb" />
+              <view wx:else class="set-thumb set-thumb-ph">{{item.typeShort}}</view>
+            </block>
+            <view class="set-type">{{item.typeLabel}}</view>
+          </view>
+          <view class="set-body">
+            <view class="set-title">{{item.title}}</view>
+            <view class="set-meta muted small">
+              <text class="st {{item.statusClass}}">{{item.statusLabel}}</text>
+              <text wx:if="{{item.metaText}}"> · {{item.metaText}}</text>
+            </view>
+          </view>
+          <view class="set-arrow muted">›</view>
+        </view>
+      </view>
+      <view class="btn-ghost" style="margin-top:20rpx;" bindtap="goPromoMaterials">宣传素材</view>
+    </view>
+
+    <view class="card">
+      <view class="btn-weak" bindtap="goEdit">编辑商品</view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view class="card">
+      <view class="btn-primary" bindtap="goInquiry">对该款询价</view>
+    </view>
+
+    <view class="card" wx:if="{{moreProducts.length}}">
+      <view class="section-title">查看更多商品</view>
+      <view class="more-grid">
+        <view class="more-cell" wx:for="{{moreProducts}}" wx:key="id" data-id="{{item.id}}" bindtap="goMoreProduct">
+          <image wx:if="{{item.coverUrl}}" src="{{item.coverUrl}}" mode="aspectFill" class="more-thumb" />
+          <view wx:else class="more-thumb more-ph"></view>
+          <view class="more-name">{{item.name}}</view>
+          <view class="more-price">{{item.priceText}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">联系业主</view>
+      <view class="qr-box">
+        <image wx:if="{{contactQrUrl}}" src="{{contactQrUrl}}" mode="aspectFit" class="qr-img" show-menu-by-longpress />
+        <view wx:else class="qr-ph">业主微信二维码位</view>
+        <view class="muted small" style="margin-top:12rpx;">{{contactQrUrl ? '长按识别或保存二维码' : '业主可在设置中上传二维码'}}</view>
+      </view>
+    </view>
+  </block>
+</view>
+
+<view class="container" wx:else>
+  <view class="card muted">加载中或无权查看该商品</view>
+</view>
+
+<view class="preview-mask" wx:if="{{previewUrl}}" bindtap="closePreview">
+  <image src="{{previewUrl}}" mode="aspectFit" class="preview-img" catchtap="noop" />
+  <view class="preview-hint muted">点击空白处关闭</view>
+</view>

@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "手工发品",
+  "usingComponents": {
+    "sku-list": "/components/sku-list/sku-list"
+  }
+}

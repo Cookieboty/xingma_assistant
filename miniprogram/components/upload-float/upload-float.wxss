@@ -1,0 +1,67 @@
+.uf-wrap {
+  position: fixed;
+  left: 24rpx;
+  right: 24rpx;
+  bottom: calc(120rpx + env(safe-area-inset-bottom));
+  z-index: 1000;
+  pointer-events: auto;
+}
+.uf-bar {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 20rpx 24rpx;
+  background: rgba(26, 26, 46, 0.92);
+  border-radius: 20rpx;
+  box-shadow: 0 12rpx 40rpx rgba(0, 0, 0, 0.18);
+  color: #fff;
+}
+.uf-main { flex: 1; min-width: 0; }
+.uf-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.uf-sub {
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.72);
+}
+.uf-track {
+  margin-top: 12rpx;
+  height: 8rpx;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 8rpx;
+  overflow: hidden;
+}
+.uf-fill {
+  height: 100%;
+  background: #c45c26;
+  border-radius: 8rpx;
+  transition: width 0.2s ease;
+}
+.uf-actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+.uf-btn {
+  padding: 10rpx 18rpx;
+  font-size: 22rpx;
+  border-radius: 12rpx;
+  background: #c45c26;
+  color: #fff;
+}
+.uf-btn.ghost {
+  background: transparent;
+  border: 1rpx solid rgba(255, 255, 255, 0.45);
+}
+.uf-x {
+  width: 44rpx;
+  height: 44rpx;
+  line-height: 40rpx;
+  text-align: center;
+  font-size: 32rpx;
+  color: rgba(255, 255, 255, 0.7);
+}

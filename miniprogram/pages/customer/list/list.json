@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "客户",
+  "usingComponents": {
+    "upload-float": "/components/upload-float/upload-float"
+  }
+}

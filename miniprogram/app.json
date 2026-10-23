@@ -1,0 +1,54 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/product/list/list",
+    "pages/customer/list/list",
+    "pages/jobs/list/list",
+    "pages/product/detail/detail",
+    "pages/product/publish/publish",
+    "pages/product/edit/edit",
+    "pages/product/promo/promo",
+    "pages/product/promo-gallery/promo-gallery",
+    "pages/customer/detail/detail",
+    "pages/inquiry/list/list",
+    "pages/inquiry/detail/detail",
+    "pages/share/landing/landing",
+    "pages/invite/accept/accept",
+    "pages/settings/index/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "羊毛衫档口",
+    "navigationBarBackgroundColor": "#c45c26",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f6f3f0",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#8a8a8a",
+    "selectedColor": "#c45c26",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/product/list/list",
+        "text": "商品",
+        "iconPath": "images/tab/product-normal.png",
+        "selectedIconPath": "images/tab/product-active.png"
+      },
+      {
+        "pagePath": "pages/customer/list/list",
+        "text": "客户",
+        "iconPath": "images/tab/customer-normal.png",
+        "selectedIconPath": "images/tab/customer-active.png"
+      },
+      {
+        "pagePath": "pages/jobs/list/list",
+        "text": "任务",
+        "iconPath": "images/tab/task-normal.png",
+        "selectedIconPath": "images/tab/task-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

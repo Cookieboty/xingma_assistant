@@ -1,0 +1,65 @@
+<upload-float />
+<view class="container">
+  <view class="card head">
+    <view class="section-title">任务中心</view>
+    <view class="muted">发品、宣传图等后台任务：看进度、失败重试、点查看看结果</view>
+  </view>
+
+  <scroll-view scroll-x class="chips-row" enable-flex>
+    <text
+      class="chip {{status===item.id?'active':''}}"
+      wx:for="{{statusChips}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="onStatus"
+    >{{item.name}}</text>
+  </scroll-view>
+  <scroll-view scroll-x class="chips-row" enable-flex>
+    <text
+      class="chip {{type===item.id?'active':''}}"
+      wx:for="{{typeChips}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="onType"
+    >{{item.name}}</text>
+  </scroll-view>
+
+  <view class="card muted" wx:if="{{loading && !list.length}}">加载中…</view>
+  <view class="card muted empty" wx:elif="{{!list.length}}">暂无任务</view>
+
+  <view class="card job" wx:for="{{list}}" wx:key="id">
+    <view class="job-row">
+      <image
+        class="thumb"
+        wx:if="{{item.productThumb}}"
+        src="{{item.productThumb}}"
+        mode="aspectFill"
+        lazy-load
+      />
+      <view class="thumb thumb-ph" wx:else>
+        <text>{{item.styleNo ? item.styleNo.slice(0, 4) : '货'}}</text>
+      </view>
+
+      <view class="job-main">
+        <view class="job-title-block">
+          <text class="job-title">{{item.title}}</text>
+          <text class="muted small" wx:if="{{item.styleNo}}">款号 {{item.styleNo}}</text>
+          <text class="muted small" wx:elif="{{item.createdText}}">{{item.createdText}}</text>
+        </view>
+
+        <view class="job-foot">
+          <view class="foot-left">
+            <text class="st st-{{item.tone}}">{{item.statusLabel}}</text>
+            <text class="muted small" wx:if="{{item.busyHint}}">{{item.busyHint}}</text>
+            <text class="err-hint" wx:elif="{{item.errHint}}">{{item.errHint}}</text>
+          </view>
+          <view class="foot-ops">
+            <text class="link" wx:if="{{item.canView}}" data-id="{{item.id}}" bindtap="openView">查看</text>
+            <text class="link" wx:if="{{item.canCancel}}" data-id="{{item.id}}" bindtap="cancel">取消</text>
+            <text class="link primary" wx:if="{{item.canRetry}}" data-id="{{item.id}}" bindtap="retry">重试</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

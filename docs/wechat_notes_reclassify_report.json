@@ -1,0 +1,1942 @@
+{
+  "generatedAt": "2026-10-20T12:21:49.499Z",
+  "timezone": "Asia/Shanghai",
+  "strategy": {
+    "highConfidence": "NoteCache 笔记打开 mtime 与 temp「微信图片_{ts}_*」时间戳前缀对齐（±约3秒）；同 ts 组内文件指纹与已关联 NoteCache batch 图重叠验证通过",
+    "lowConfidence": "下午批次 161900/161902 与八月残留：无笔记 mtime 对齐；macOS Vision OCR 抽样未命中 11 个已入库款号 → _needs_review",
+    "ocr": {
+      "tesseract": "eng/snum only，无 chi_sim，款号不可靠，未用于归类",
+      "vision": "已用 /tmp/vision_ocr（zh-Hans）；下午/八月抽样未见已有款号"
+    },
+    "signalsUsed": [
+      "filename_timestamp_prefix",
+      "note_htm_mtime_proximity",
+      "same_ts_group_fingerprint_overlap_with_associated",
+      "vision_ocr_sample_negative_for_afternoon_august"
+    ],
+    "notUsed": [
+      "mid/data/thumb raw fingerprint (WeChat V2 encrypted)",
+      "favorite.db (encrypted)"
+    ]
+  },
+  "preservedExistingMedia": 121,
+  "perStyle": {
+    "51137": {
+      "addedImages": 16,
+      "sample": [
+        "微信图片_20261020175833_49.jpg",
+        "微信图片_20261020175833_53.jpg",
+        "微信图片_20261020175833_57.jpg"
+      ]
+    },
+    "69322": {
+      "addedImages": 19,
+      "sample": [
+        "微信图片_20261020175841_265.jpg",
+        "微信图片_20261020175841_269.jpg",
+        "微信图片_20261020175841_273.jpg"
+      ]
+    },
+    "72516": {
+      "addedImages": 12,
+      "sample": [
+        "微信图片_20261020175855_420.jpg",
+        "微信图片_20261020175855_424.jpg",
+        "微信图片_20261020175855_428.jpg"
+      ]
+    },
+    "72733": {
+      "addedImages": 14,
+      "sample": [
+        "微信图片_20261020175859_466.jpg",
+        "微信图片_20261020175859_470.jpg",
+        "微信图片_20261020175859_474.jpg"
+      ]
+    },
+    "72768": {
+      "addedImages": 14,
+      "sample": [
+        "微信图片_20261020175903_515.jpg",
+        "微信图片_20261020175903_519.jpg",
+        "微信图片_20261020175903_523.jpg"
+      ]
+    },
+    "72769": {
+      "addedImages": 16,
+      "sample": [
+        "微信图片_20261020175828_11.jpg",
+        "微信图片_20261020175828_15.jpg",
+        "微信图片_20261020175828_19.jpg"
+      ]
+    },
+    "72773": {
+      "addedImages": 26,
+      "sample": [
+        "微信图片_20261020175906_566.jpg",
+        "微信图片_20261020175906_570.jpg",
+        "微信图片_20261020175906_574.jpg"
+      ]
+    },
+    "72778": {
+      "addedImages": 14,
+      "sample": [
+        "微信图片_20261020175910_675.jpg",
+        "微信图片_20261020175910_679.jpg",
+        "微信图片_20261020175910_683.jpg"
+      ]
+    },
+    "76877": {
+      "addedImages": 14,
+      "sample": [
+        "微信图片_20261020175849_367.jpg",
+        "微信图片_20261020175849_371.jpg",
+        "微信图片_20261020175849_375.jpg"
+      ]
+    },
+    "79922": {
+      "addedImages": 16,
+      "sample": [
+        "微信图片_20261020175915_728.jpg",
+        "微信图片_20261020175915_732.jpg",
+        "微信图片_20261020175915_736.jpg"
+      ]
+    },
+    "81029": {
+      "addedImages": 51,
+      "sample": [
+        "微信图片_20261020175837_103.jpg",
+        "微信图片_20261020175837_107.jpg",
+        "微信图片_20261020175837_113.jpg"
+      ]
+    }
+  },
+  "moved": [
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_49.jpg",
+      "to": "09.jpg",
+      "mediaId": "3cabdc9c-048c-4e92-9fb0-428d8fea4dda",
+      "objectKey": "tenants/tenant_dev_001/products/51137/09.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_53.jpg",
+      "to": "10.jpg",
+      "mediaId": "a08a9d45-fa8a-42a6-8fb1-d6097b2da921",
+      "objectKey": "tenants/tenant_dev_001/products/51137/10.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_57.jpg",
+      "to": "11.jpg",
+      "mediaId": "b89bc31f-7133-4e40-bd49-3ccb35990c65",
+      "objectKey": "tenants/tenant_dev_001/products/51137/11.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_61.jpg",
+      "to": "12.jpg",
+      "mediaId": "09181abe-c8b3-4e5c-8deb-7241926947a4",
+      "objectKey": "tenants/tenant_dev_001/products/51137/12.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_65.jpg",
+      "to": "13.jpg",
+      "mediaId": "3d40ee4c-e87c-4ba8-b340-20e977102f96",
+      "objectKey": "tenants/tenant_dev_001/products/51137/13.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_69.jpg",
+      "to": "14.jpg",
+      "mediaId": "c27bbd7e-9be2-4631-ab64-8d6dbad27368",
+      "objectKey": "tenants/tenant_dev_001/products/51137/14.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_73.jpg",
+      "to": "15.jpg",
+      "mediaId": "43f7b946-8337-438c-ac6b-4867f8302496",
+      "objectKey": "tenants/tenant_dev_001/products/51137/15.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_77.jpg",
+      "to": "16.jpg",
+      "mediaId": "cd75ca6b-c826-43b7-a865-c5601729c57e",
+      "objectKey": "tenants/tenant_dev_001/products/51137/16.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_80.jpg",
+      "to": "17.jpg",
+      "mediaId": "892f0bdf-bfd6-4597-be76-f45e9321c4bb",
+      "objectKey": "tenants/tenant_dev_001/products/51137/17.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_81.jpg",
+      "to": "18.jpg",
+      "mediaId": "9cd778e8-0ff1-4c98-8a09-6e64bd6b177d",
+      "objectKey": "tenants/tenant_dev_001/products/51137/18.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_82.jpg",
+      "to": "19.jpg",
+      "mediaId": "10dc88a8-2c76-43e6-a571-38ba65ffaa11",
+      "objectKey": "tenants/tenant_dev_001/products/51137/19.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_83.jpg",
+      "to": "20.jpg",
+      "mediaId": "1ebc651a-90c0-49e6-b7ee-1e2eaf14ffc3",
+      "objectKey": "tenants/tenant_dev_001/products/51137/20.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_86.jpg",
+      "to": "21.jpg",
+      "mediaId": "ded574a0-c8e6-40b0-ae0d-0af6ad14f114",
+      "objectKey": "tenants/tenant_dev_001/products/51137/21.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_87.jpg",
+      "to": "22.jpg",
+      "mediaId": "f4502ea9-3a16-4272-a842-775e0490c9a3",
+      "objectKey": "tenants/tenant_dev_001/products/51137/22.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_88.jpg",
+      "to": "23.jpg",
+      "mediaId": "16fe662d-ed88-4c07-839e-a96ea0bb6d7d",
+      "objectKey": "tenants/tenant_dev_001/products/51137/23.jpg"
+    },
+    {
+      "style": "51137",
+      "from": "微信图片_20261020175833_89.jpg",
+      "to": "24.jpg",
+      "mediaId": "09db93d1-0794-472f-9de2-83c265ce6309",
+      "objectKey": "tenants/tenant_dev_001/products/51137/24.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_265.jpg",
+      "to": "11.jpg",
+      "mediaId": "60aa3065-47cf-40e0-950e-fe03296e2afe",
+      "objectKey": "tenants/tenant_dev_001/products/69322/11.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_269.jpg",
+      "to": "12.jpg",
+      "mediaId": "a540db70-e6e7-4bf1-a619-9db5e48799c6",
+      "objectKey": "tenants/tenant_dev_001/products/69322/12.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_273.jpg",
+      "to": "13.jpg",
+      "mediaId": "2ab76c74-4e7c-4038-9047-3d4561244373",
+      "objectKey": "tenants/tenant_dev_001/products/69322/13.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_277.jpg",
+      "to": "14.jpg",
+      "mediaId": "e3fb0b27-57f9-4175-9ed2-ed25ebcdb31b",
+      "objectKey": "tenants/tenant_dev_001/products/69322/14.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_281.jpg",
+      "to": "15.jpg",
+      "mediaId": "bd0a65fb-2e12-43a2-b232-52ef18f27059",
+      "objectKey": "tenants/tenant_dev_001/products/69322/15.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_285.jpg",
+      "to": "16.jpg",
+      "mediaId": "94fc12b3-eb83-4c84-80b2-9d1a2b496e10",
+      "objectKey": "tenants/tenant_dev_001/products/69322/16.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_289.jpg",
+      "to": "17.jpg",
+      "mediaId": "3a567ecb-02bb-4de8-80bd-c347c56f2203",
+      "objectKey": "tenants/tenant_dev_001/products/69322/17.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_293.jpg",
+      "to": "18.jpg",
+      "mediaId": "b2841973-7708-4d92-b9cc-3e836103cd4c",
+      "objectKey": "tenants/tenant_dev_001/products/69322/18.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_297.jpg",
+      "to": "19.jpg",
+      "mediaId": "0c42632d-318b-4bf7-ba0e-d28660b5c491",
+      "objectKey": "tenants/tenant_dev_001/products/69322/19.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_301.jpg",
+      "to": "20.jpg",
+      "mediaId": "c0e4aeed-0ed8-479a-8188-76622cafe96c",
+      "objectKey": "tenants/tenant_dev_001/products/69322/20.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_304.jpg",
+      "to": "21.jpg",
+      "mediaId": "b60353f6-43f1-4760-b768-5a038c6cc857",
+      "objectKey": "tenants/tenant_dev_001/products/69322/21.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_307.jpg",
+      "to": "22.jpg",
+      "mediaId": "9b516196-9b28-4f98-a337-7e70799b580d",
+      "objectKey": "tenants/tenant_dev_001/products/69322/22.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_308.jpg",
+      "to": "23.jpg",
+      "mediaId": "c27a1a3c-6c47-482f-a215-6e42eceb63b4",
+      "objectKey": "tenants/tenant_dev_001/products/69322/23.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_310.jpg",
+      "to": "24.jpg",
+      "mediaId": "bb035fe5-7b3e-4179-9c83-66a25a271e7c",
+      "objectKey": "tenants/tenant_dev_001/products/69322/24.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_311.jpg",
+      "to": "25.jpg",
+      "mediaId": "de31afbc-c35e-45d0-a9d5-ad0f0bd6ad45",
+      "objectKey": "tenants/tenant_dev_001/products/69322/25.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_312.jpg",
+      "to": "26.jpg",
+      "mediaId": "67a4ca34-884f-4884-9b90-1a3dc785d340",
+      "objectKey": "tenants/tenant_dev_001/products/69322/26.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_313.jpg",
+      "to": "27.jpg",
+      "mediaId": "28bffa53-97ad-49ec-8272-d79320228698",
+      "objectKey": "tenants/tenant_dev_001/products/69322/27.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_314.jpg",
+      "to": "28.jpg",
+      "mediaId": "666277af-e83c-493b-a855-313ebe21d153",
+      "objectKey": "tenants/tenant_dev_001/products/69322/28.jpg"
+    },
+    {
+      "style": "69322",
+      "from": "微信图片_20261020175841_315.jpg",
+      "to": "29.jpg",
+      "mediaId": "59e4443a-1ac7-4f27-98e5-922430204fdf",
+      "objectKey": "tenants/tenant_dev_001/products/69322/29.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_420.jpg",
+      "to": "09.jpg",
+      "mediaId": "ff17b62d-a8d5-4fd5-9804-fe67fc47295a",
+      "objectKey": "tenants/tenant_dev_001/products/72516/09.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_424.jpg",
+      "to": "10.jpg",
+      "mediaId": "abaafa3a-55cd-4914-9f84-11961c3f3bab",
+      "objectKey": "tenants/tenant_dev_001/products/72516/10.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_428.jpg",
+      "to": "11.jpg",
+      "mediaId": "66f0878b-4965-40fa-b0bd-841bca314e2a",
+      "objectKey": "tenants/tenant_dev_001/products/72516/11.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_432.jpg",
+      "to": "12.jpg",
+      "mediaId": "4c6beaa7-1c5a-4fc7-921e-70047cc983f0",
+      "objectKey": "tenants/tenant_dev_001/products/72516/12.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_436.jpg",
+      "to": "13.jpg",
+      "mediaId": "4f36e6fe-148a-48c7-94f1-4a977c486d8e",
+      "objectKey": "tenants/tenant_dev_001/products/72516/13.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_440.jpg",
+      "to": "14.jpg",
+      "mediaId": "fd7e616c-a53d-4ea0-ba5b-e23e26f4c589",
+      "objectKey": "tenants/tenant_dev_001/products/72516/14.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_451.jpg",
+      "to": "15.jpg",
+      "mediaId": "c98156a7-edb8-49b1-b60a-f19097e692e7",
+      "objectKey": "tenants/tenant_dev_001/products/72516/15.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_452.jpg",
+      "to": "16.jpg",
+      "mediaId": "7a6fdce8-e1af-4fa7-b714-d89bd054ddb0",
+      "objectKey": "tenants/tenant_dev_001/products/72516/16.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_453.jpg",
+      "to": "17.jpg",
+      "mediaId": "5466a92d-4106-43b2-8efc-880bbf8ad794",
+      "objectKey": "tenants/tenant_dev_001/products/72516/17.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_457.jpg",
+      "to": "18.jpg",
+      "mediaId": "840cb659-6ffe-4bcb-88d0-4eb48e0588fc",
+      "objectKey": "tenants/tenant_dev_001/products/72516/18.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_459.jpg",
+      "to": "19.jpg",
+      "mediaId": "83b9a997-03b4-40a9-b051-3a2fce381e13",
+      "objectKey": "tenants/tenant_dev_001/products/72516/19.jpg"
+    },
+    {
+      "style": "72516",
+      "from": "微信图片_20261020175855_460.jpg",
+      "to": "20.jpg",
+      "mediaId": "3bee7d35-0ae8-4bb9-8d5f-e056abdc7a92",
+      "objectKey": "tenants/tenant_dev_001/products/72516/20.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_466.jpg",
+      "to": "10.jpg",
+      "mediaId": "b0b19a03-67d7-4575-a970-fc3bfa31322d",
+      "objectKey": "tenants/tenant_dev_001/products/72733/10.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_470.jpg",
+      "to": "11.jpg",
+      "mediaId": "0124d960-ce39-4536-8f2e-40c551372419",
+      "objectKey": "tenants/tenant_dev_001/products/72733/11.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_474.jpg",
+      "to": "12.jpg",
+      "mediaId": "7001beb6-6208-4f4b-9b9d-89bde52f41cb",
+      "objectKey": "tenants/tenant_dev_001/products/72733/12.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_478.jpg",
+      "to": "13.jpg",
+      "mediaId": "e4eb7107-6f76-465e-a9ca-09463855d1fc",
+      "objectKey": "tenants/tenant_dev_001/products/72733/13.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_482.jpg",
+      "to": "14.jpg",
+      "mediaId": "b5c9d79f-470a-4d7b-841e-ec8167ab9f15",
+      "objectKey": "tenants/tenant_dev_001/products/72733/14.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_486.jpg",
+      "to": "15.jpg",
+      "mediaId": "e403f159-e8ba-424f-8d9a-bfafa6b70273",
+      "objectKey": "tenants/tenant_dev_001/products/72733/15.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_490.jpg",
+      "to": "16.jpg",
+      "mediaId": "00dd729c-4c89-44ed-b1c9-830238b69c91",
+      "objectKey": "tenants/tenant_dev_001/products/72733/16.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_501.jpg",
+      "to": "17.jpg",
+      "mediaId": "0f81acf0-ff7a-4839-8f05-c54ec892caf3",
+      "objectKey": "tenants/tenant_dev_001/products/72733/17.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_502.jpg",
+      "to": "18.jpg",
+      "mediaId": "2858fc34-6e7d-4217-a181-7f6d77766b99",
+      "objectKey": "tenants/tenant_dev_001/products/72733/18.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_503.jpg",
+      "to": "19.jpg",
+      "mediaId": "87b1cf38-095c-4267-af60-c4df57e36711",
+      "objectKey": "tenants/tenant_dev_001/products/72733/19.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_505.jpg",
+      "to": "20.jpg",
+      "mediaId": "812e3795-93a0-48e0-9783-f7f86b8f90a5",
+      "objectKey": "tenants/tenant_dev_001/products/72733/20.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_506.jpg",
+      "to": "21.jpg",
+      "mediaId": "1c8e5d47-20ef-40a4-9b93-f8c72308636c",
+      "objectKey": "tenants/tenant_dev_001/products/72733/21.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_507.jpg",
+      "to": "22.jpg",
+      "mediaId": "b22a0734-2e55-4fdb-b4f6-a4c6be14df6d",
+      "objectKey": "tenants/tenant_dev_001/products/72733/22.jpg"
+    },
+    {
+      "style": "72733",
+      "from": "微信图片_20261020175859_509.jpg",
+      "to": "23.jpg",
+      "mediaId": "92120198-08a3-4e45-8420-3294b70f2b4d",
+      "objectKey": "tenants/tenant_dev_001/products/72733/23.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_515.jpg",
+      "to": "10.jpg",
+      "mediaId": "45cbeecd-ef81-4dbf-aaa0-8f4d8609c13d",
+      "objectKey": "tenants/tenant_dev_001/products/72768/10.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_519.jpg",
+      "to": "11.jpg",
+      "mediaId": "8a22b4c3-cc8d-4da3-ab03-54db2b768db5",
+      "objectKey": "tenants/tenant_dev_001/products/72768/11.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_523.jpg",
+      "to": "12.jpg",
+      "mediaId": "68e210b1-0895-4214-8450-653933d7a422",
+      "objectKey": "tenants/tenant_dev_001/products/72768/12.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_527.jpg",
+      "to": "13.jpg",
+      "mediaId": "94e5c422-a277-4bf2-b312-e6ddf6ec5070",
+      "objectKey": "tenants/tenant_dev_001/products/72768/13.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_531.jpg",
+      "to": "14.jpg",
+      "mediaId": "f2781a62-dd59-48a2-9912-a19e17d0c09e",
+      "objectKey": "tenants/tenant_dev_001/products/72768/14.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_535.jpg",
+      "to": "15.jpg",
+      "mediaId": "b4936908-aa48-4512-a580-f251a003427a",
+      "objectKey": "tenants/tenant_dev_001/products/72768/15.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_539.jpg",
+      "to": "16.jpg",
+      "mediaId": "3e27a0bb-08a1-4426-bd54-af3197c72cc0",
+      "objectKey": "tenants/tenant_dev_001/products/72768/16.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_550.jpg",
+      "to": "17.jpg",
+      "mediaId": "0dd5c41b-ce7d-40ac-8d44-d984232062e2",
+      "objectKey": "tenants/tenant_dev_001/products/72768/17.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_552.jpg",
+      "to": "18.jpg",
+      "mediaId": "e50603b1-6358-440f-b509-6958a8d53e71",
+      "objectKey": "tenants/tenant_dev_001/products/72768/18.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_553.jpg",
+      "to": "19.jpg",
+      "mediaId": "edab64af-ffce-4f96-80f6-83ed9363beef",
+      "objectKey": "tenants/tenant_dev_001/products/72768/19.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_554.jpg",
+      "to": "20.jpg",
+      "mediaId": "e0e60e11-846b-497d-b1ca-510e005dd3c2",
+      "objectKey": "tenants/tenant_dev_001/products/72768/20.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_557.jpg",
+      "to": "21.jpg",
+      "mediaId": "70662027-969f-432e-96ff-ea32226a7529",
+      "objectKey": "tenants/tenant_dev_001/products/72768/21.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_559.jpg",
+      "to": "22.jpg",
+      "mediaId": "20deb442-6b82-4cac-b0d5-c523e962aa4f",
+      "objectKey": "tenants/tenant_dev_001/products/72768/22.jpg"
+    },
+    {
+      "style": "72768",
+      "from": "微信图片_20261020175903_560.jpg",
+      "to": "23.jpg",
+      "mediaId": "f859cec9-55c3-437a-b6ff-87df048a5b1b",
+      "objectKey": "tenants/tenant_dev_001/products/72768/23.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_11.jpg",
+      "to": "09.jpg",
+      "mediaId": "0af9bf9f-8713-4631-a234-baff370098fa",
+      "objectKey": "tenants/tenant_dev_001/products/72769/09.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_15.jpg",
+      "to": "10.jpg",
+      "mediaId": "41fb9bbf-f8ab-4e41-8891-5026746568a3",
+      "objectKey": "tenants/tenant_dev_001/products/72769/10.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_19.jpg",
+      "to": "11.jpg",
+      "mediaId": "6b072060-34a2-4c18-be83-03018966a6d3",
+      "objectKey": "tenants/tenant_dev_001/products/72769/11.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_23.jpg",
+      "to": "12.jpg",
+      "mediaId": "104609f8-dc62-4601-89a4-409af4f781d1",
+      "objectKey": "tenants/tenant_dev_001/products/72769/12.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_27.jpg",
+      "to": "13.jpg",
+      "mediaId": "54b5abae-3102-462f-ac81-33f882185223",
+      "objectKey": "tenants/tenant_dev_001/products/72769/13.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_3.jpg",
+      "to": "14.jpg",
+      "mediaId": "b2370529-9a6e-4319-aa4f-4a802de60681",
+      "objectKey": "tenants/tenant_dev_001/products/72769/14.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_31.jpg",
+      "to": "15.jpg",
+      "mediaId": "5f798388-9398-40a8-a210-5609f3f99f31",
+      "objectKey": "tenants/tenant_dev_001/products/72769/15.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_34.jpg",
+      "to": "16.jpg",
+      "mediaId": "28ea0e2d-a5ca-4685-91c0-da61f563ec34",
+      "objectKey": "tenants/tenant_dev_001/products/72769/16.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_35.jpg",
+      "to": "17.jpg",
+      "mediaId": "b7d2f98c-4bbd-40b9-8c58-452754666c5b",
+      "objectKey": "tenants/tenant_dev_001/products/72769/17.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_36.jpg",
+      "to": "18.jpg",
+      "mediaId": "6322f3f0-db38-48a9-a58f-b9e9fd525325",
+      "objectKey": "tenants/tenant_dev_001/products/72769/18.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_37.jpg",
+      "to": "19.jpg",
+      "mediaId": "db6475c5-2353-4b25-9a55-772f08151b0d",
+      "objectKey": "tenants/tenant_dev_001/products/72769/19.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_38.jpg",
+      "to": "20.jpg",
+      "mediaId": "183602a5-35fc-4960-8fb8-8028180fa972",
+      "objectKey": "tenants/tenant_dev_001/products/72769/20.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_39.jpg",
+      "to": "21.jpg",
+      "mediaId": "036163b1-1915-4935-bc88-414f02e2c67b",
+      "objectKey": "tenants/tenant_dev_001/products/72769/21.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_40.jpg",
+      "to": "22.jpg",
+      "mediaId": "0c37ca55-0550-4337-a172-5f5a391eefd1",
+      "objectKey": "tenants/tenant_dev_001/products/72769/22.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_43.jpg",
+      "to": "23.jpg",
+      "mediaId": "a1f28587-79e5-4db3-8e1d-00b0556ecbea",
+      "objectKey": "tenants/tenant_dev_001/products/72769/23.jpg"
+    },
+    {
+      "style": "72769",
+      "from": "微信图片_20261020175828_7.jpg",
+      "to": "24.jpg",
+      "mediaId": "a3d18016-5889-4d67-9755-e9a60f4b5174",
+      "objectKey": "tenants/tenant_dev_001/products/72769/24.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_566.jpg",
+      "to": "16.jpg",
+      "mediaId": "cb66a48b-5a23-4079-9b44-e366a3b99aea",
+      "objectKey": "tenants/tenant_dev_001/products/72773/16.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_570.jpg",
+      "to": "17.jpg",
+      "mediaId": "4313767a-ab1f-4f9a-b751-3fe6b0282e94",
+      "objectKey": "tenants/tenant_dev_001/products/72773/17.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_574.jpg",
+      "to": "18.jpg",
+      "mediaId": "f1ca25de-379b-4bf7-b0a4-9296bda22bb4",
+      "objectKey": "tenants/tenant_dev_001/products/72773/18.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_578.jpg",
+      "to": "19.jpg",
+      "mediaId": "689ec124-f3a1-4d35-8f6d-039b47c03a4d",
+      "objectKey": "tenants/tenant_dev_001/products/72773/19.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_582.jpg",
+      "to": "20.jpg",
+      "mediaId": "e545e844-5672-436b-bc1c-4690cf4de726",
+      "objectKey": "tenants/tenant_dev_001/products/72773/20.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_586.jpg",
+      "to": "21.jpg",
+      "mediaId": "79b09277-d7e8-4aa7-a496-20e7cd38af6c",
+      "objectKey": "tenants/tenant_dev_001/products/72773/21.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_590.jpg",
+      "to": "22.jpg",
+      "mediaId": "cced455a-3192-4021-9c15-796f75b5762f",
+      "objectKey": "tenants/tenant_dev_001/products/72773/22.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_592.jpg",
+      "to": "23.jpg",
+      "mediaId": "e1bbfd99-6fca-4ef2-bef5-1753c6dc54c7",
+      "objectKey": "tenants/tenant_dev_001/products/72773/23.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_594.jpg",
+      "to": "24.jpg",
+      "mediaId": "2abf5264-660d-40d9-b9f0-41c0689e5383",
+      "objectKey": "tenants/tenant_dev_001/products/72773/24.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_596.jpg",
+      "to": "25.jpg",
+      "mediaId": "5ad5cf67-9528-42a8-b78e-c72db2b8aa58",
+      "objectKey": "tenants/tenant_dev_001/products/72773/25.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_600.jpg",
+      "to": "26.jpg",
+      "mediaId": "ce23cbb3-a631-489d-a663-b4c2b0053500",
+      "objectKey": "tenants/tenant_dev_001/products/72773/26.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_604.jpg",
+      "to": "27.jpg",
+      "mediaId": "e0b3e23b-efd7-40f3-811d-76e29a3b49c5",
+      "objectKey": "tenants/tenant_dev_001/products/72773/27.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_608.jpg",
+      "to": "28.jpg",
+      "mediaId": "80c758e9-f609-494e-96df-8635facc166f",
+      "objectKey": "tenants/tenant_dev_001/products/72773/28.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_620.jpg",
+      "to": "29.jpg",
+      "mediaId": "a3bf49d1-11f3-49d7-b771-6a589c515588",
+      "objectKey": "tenants/tenant_dev_001/products/72773/29.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_621.jpg",
+      "to": "30.jpg",
+      "mediaId": "e9d89dbd-c90e-4094-bc73-2b066a4642ed",
+      "objectKey": "tenants/tenant_dev_001/products/72773/30.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_622.jpg",
+      "to": "31.jpg",
+      "mediaId": "85e6cfd8-1dd8-4961-a277-350a6d1aff9c",
+      "objectKey": "tenants/tenant_dev_001/products/72773/31.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_624.jpg",
+      "to": "32.jpg",
+      "mediaId": "17e6e80d-006b-4268-8f81-aa314800a87f",
+      "objectKey": "tenants/tenant_dev_001/products/72773/32.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_626.jpg",
+      "to": "33.jpg",
+      "mediaId": "fe9399df-ad61-4fcb-8da5-b06a82f52942",
+      "objectKey": "tenants/tenant_dev_001/products/72773/33.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_627.jpg",
+      "to": "34.jpg",
+      "mediaId": "0b306cff-24bc-4660-a20d-8c3a56fb7068",
+      "objectKey": "tenants/tenant_dev_001/products/72773/34.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_628.jpg",
+      "to": "35.jpg",
+      "mediaId": "43d8117a-0bc3-4fd0-95f6-6e5c65d3eb88",
+      "objectKey": "tenants/tenant_dev_001/products/72773/35.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_632.jpg",
+      "to": "36.jpg",
+      "mediaId": "140d4de4-0010-4009-a86e-2f847239cbeb",
+      "objectKey": "tenants/tenant_dev_001/products/72773/36.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_633.jpg",
+      "to": "37.jpg",
+      "mediaId": "7179bff1-70d7-47f8-9fe7-3d47f6839830",
+      "objectKey": "tenants/tenant_dev_001/products/72773/37.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_634.jpg",
+      "to": "38.jpg",
+      "mediaId": "c0690d01-1cbd-4c3e-b169-23e05298260a",
+      "objectKey": "tenants/tenant_dev_001/products/72773/38.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_636.jpg",
+      "to": "39.jpg",
+      "mediaId": "5fcac063-69ac-4951-9bf9-c8c38a770986",
+      "objectKey": "tenants/tenant_dev_001/products/72773/39.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_637.jpg",
+      "to": "40.jpg",
+      "mediaId": "cb8fc3c5-dded-4417-96e5-d27a08a8ea36",
+      "objectKey": "tenants/tenant_dev_001/products/72773/40.jpg"
+    },
+    {
+      "style": "72773",
+      "from": "微信图片_20261020175906_638.jpg",
+      "to": "41.jpg",
+      "mediaId": "8bf1258f-410f-44fa-aa57-59b7d8cac04c",
+      "objectKey": "tenants/tenant_dev_001/products/72773/41.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_675.jpg",
+      "to": "10.jpg",
+      "mediaId": "3a663911-20e0-4c85-8e16-e4970a5bef80",
+      "objectKey": "tenants/tenant_dev_001/products/72778/10.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_679.jpg",
+      "to": "11.jpg",
+      "mediaId": "147f3866-d3b6-44ff-bdf8-7e3aaff2375c",
+      "objectKey": "tenants/tenant_dev_001/products/72778/11.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_683.jpg",
+      "to": "12.jpg",
+      "mediaId": "2af082f1-19f0-45ba-a717-44935b0d8e08",
+      "objectKey": "tenants/tenant_dev_001/products/72778/12.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_687.jpg",
+      "to": "13.jpg",
+      "mediaId": "8bf86102-3ad3-4615-8e24-6f88cc598db3",
+      "objectKey": "tenants/tenant_dev_001/products/72778/13.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_691.jpg",
+      "to": "14.jpg",
+      "mediaId": "335f5232-be0b-4ec3-848e-0e163eb3cad4",
+      "objectKey": "tenants/tenant_dev_001/products/72778/14.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_695.jpg",
+      "to": "15.jpg",
+      "mediaId": "242566a4-3086-4b19-b1c7-3221fde0c429",
+      "objectKey": "tenants/tenant_dev_001/products/72778/15.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_699.jpg",
+      "to": "16.jpg",
+      "mediaId": "191ce1e5-e698-47f5-9dc9-5e36c73fa8fa",
+      "objectKey": "tenants/tenant_dev_001/products/72778/16.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_710.jpg",
+      "to": "17.jpg",
+      "mediaId": "5fdfc524-76d2-48ff-bd85-556a6180043e",
+      "objectKey": "tenants/tenant_dev_001/products/72778/17.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_711.jpg",
+      "to": "18.jpg",
+      "mediaId": "b66236ed-d185-4de6-88cd-3ce792ac3dc0",
+      "objectKey": "tenants/tenant_dev_001/products/72778/18.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_712.jpg",
+      "to": "19.jpg",
+      "mediaId": "4ccc8eca-bc2e-4c9c-a22e-7468f47646fb",
+      "objectKey": "tenants/tenant_dev_001/products/72778/19.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_715.jpg",
+      "to": "20.jpg",
+      "mediaId": "cf9b4140-1e7a-4023-9680-c4e5dd9b24c0",
+      "objectKey": "tenants/tenant_dev_001/products/72778/20.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_716.jpg",
+      "to": "21.jpg",
+      "mediaId": "990369b3-5eda-4159-9603-df98fdd2de3b",
+      "objectKey": "tenants/tenant_dev_001/products/72778/21.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_717.jpg",
+      "to": "22.jpg",
+      "mediaId": "8704d535-34e4-4847-82ba-23d375650741",
+      "objectKey": "tenants/tenant_dev_001/products/72778/22.jpg"
+    },
+    {
+      "style": "72778",
+      "from": "微信图片_20261020175910_720.jpg",
+      "to": "23.jpg",
+      "mediaId": "0c67e8e7-5fde-4387-a109-eced68a1b0d7",
+      "objectKey": "tenants/tenant_dev_001/products/72778/23.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_367.jpg",
+      "to": "10.jpg",
+      "mediaId": "cdae2c67-c8e6-4c2e-b3b0-ac3e6c2997a0",
+      "objectKey": "tenants/tenant_dev_001/products/76877/10.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_371.jpg",
+      "to": "11.jpg",
+      "mediaId": "be614d57-dcbc-4ed1-85fe-1784b3ff3b2d",
+      "objectKey": "tenants/tenant_dev_001/products/76877/11.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_375.jpg",
+      "to": "12.jpg",
+      "mediaId": "dd886a82-1303-402a-9a09-d148553ea13c",
+      "objectKey": "tenants/tenant_dev_001/products/76877/12.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_379.jpg",
+      "to": "13.jpg",
+      "mediaId": "5c03cacd-3aef-4ba1-8fe9-c77cb84fb788",
+      "objectKey": "tenants/tenant_dev_001/products/76877/13.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_383.jpg",
+      "to": "14.jpg",
+      "mediaId": "cade0ddf-a5a7-4cd4-b3c7-ed17ea33a959",
+      "objectKey": "tenants/tenant_dev_001/products/76877/14.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_387.jpg",
+      "to": "15.jpg",
+      "mediaId": "8ee57ac8-3cc0-4fc3-8d72-9027eeddddb7",
+      "objectKey": "tenants/tenant_dev_001/products/76877/15.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_391.jpg",
+      "to": "16.jpg",
+      "mediaId": "c6b240fc-6bb9-4ba0-9ab9-a76fb6ccd35c",
+      "objectKey": "tenants/tenant_dev_001/products/76877/16.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_402.jpg",
+      "to": "17.jpg",
+      "mediaId": "19cca178-710a-412e-9e1d-be332bb12913",
+      "objectKey": "tenants/tenant_dev_001/products/76877/17.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_406.jpg",
+      "to": "18.jpg",
+      "mediaId": "5efd594e-18ba-4a46-9cb9-8d3491b993cd",
+      "objectKey": "tenants/tenant_dev_001/products/76877/18.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_407.jpg",
+      "to": "19.jpg",
+      "mediaId": "b6aa8f34-eb58-4495-a530-417c3ca029e5",
+      "objectKey": "tenants/tenant_dev_001/products/76877/19.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_408.jpg",
+      "to": "20.jpg",
+      "mediaId": "62741048-8b31-4315-8fb2-946d8c98b83f",
+      "objectKey": "tenants/tenant_dev_001/products/76877/20.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_409.jpg",
+      "to": "21.jpg",
+      "mediaId": "b5497501-eeb9-472e-b56f-fb448a17601f",
+      "objectKey": "tenants/tenant_dev_001/products/76877/21.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_411.jpg",
+      "to": "22.jpg",
+      "mediaId": "2a3e7571-3e3f-45a4-81c2-bd08c2b3ebe7",
+      "objectKey": "tenants/tenant_dev_001/products/76877/22.jpg"
+    },
+    {
+      "style": "76877",
+      "from": "微信图片_20261020175849_412.jpg",
+      "to": "23.jpg",
+      "mediaId": "0095b3d2-6ff5-48aa-acfd-a089cc4bc941",
+      "objectKey": "tenants/tenant_dev_001/products/76877/23.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_728.jpg",
+      "to": "11.jpg",
+      "mediaId": "8a1605df-58ce-4bf5-ae4a-fef487901779",
+      "objectKey": "tenants/tenant_dev_001/products/79922/11.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_732.jpg",
+      "to": "12.jpg",
+      "mediaId": "3dc39ba9-d85c-498a-b7b2-176a9a417326",
+      "objectKey": "tenants/tenant_dev_001/products/79922/12.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_736.jpg",
+      "to": "13.jpg",
+      "mediaId": "98983b3c-1e54-4986-a0be-ee5ad1b273a3",
+      "objectKey": "tenants/tenant_dev_001/products/79922/13.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_740.jpg",
+      "to": "14.jpg",
+      "mediaId": "20940cd5-1306-4af8-b743-edb65a6ba6b3",
+      "objectKey": "tenants/tenant_dev_001/products/79922/14.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_744.jpg",
+      "to": "15.jpg",
+      "mediaId": "cd3cbd5e-bcd4-4a8b-a60b-7b2f6ce77997",
+      "objectKey": "tenants/tenant_dev_001/products/79922/15.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_748.jpg",
+      "to": "16.jpg",
+      "mediaId": "87d840f4-9ff0-446a-88bd-7ec217af8b9f",
+      "objectKey": "tenants/tenant_dev_001/products/79922/16.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_752.jpg",
+      "to": "17.jpg",
+      "mediaId": "2693fe8a-bda8-4299-b4e0-19dd1ea95355",
+      "objectKey": "tenants/tenant_dev_001/products/79922/17.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_756.jpg",
+      "to": "18.jpg",
+      "mediaId": "072d13a6-96b6-44fa-a526-0ab151b9e5b7",
+      "objectKey": "tenants/tenant_dev_001/products/79922/18.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_769.jpg",
+      "to": "19.jpg",
+      "mediaId": "aba6338e-75d1-4774-81ec-fc09f1ddf9f3",
+      "objectKey": "tenants/tenant_dev_001/products/79922/19.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_770.jpg",
+      "to": "20.jpg",
+      "mediaId": "ec550fef-9176-42da-aa22-c7f13b1a17aa",
+      "objectKey": "tenants/tenant_dev_001/products/79922/20.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_771.jpg",
+      "to": "21.jpg",
+      "mediaId": "f5c1ecf2-4ec3-46e6-9912-877db1e77fe3",
+      "objectKey": "tenants/tenant_dev_001/products/79922/21.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_773.jpg",
+      "to": "22.jpg",
+      "mediaId": "713726d4-9abe-4a80-b685-6c9d8b028e9d",
+      "objectKey": "tenants/tenant_dev_001/products/79922/22.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_774.jpg",
+      "to": "23.jpg",
+      "mediaId": "8b90e8d8-7679-402e-9323-eb6750893633",
+      "objectKey": "tenants/tenant_dev_001/products/79922/23.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_776.jpg",
+      "to": "24.jpg",
+      "mediaId": "0e195587-e175-4407-b5d5-81cc9d6fff42",
+      "objectKey": "tenants/tenant_dev_001/products/79922/24.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_777.jpg",
+      "to": "25.jpg",
+      "mediaId": "6bc21df1-73c0-4ecc-b74a-30d47e210bd8",
+      "objectKey": "tenants/tenant_dev_001/products/79922/25.jpg"
+    },
+    {
+      "style": "79922",
+      "from": "微信图片_20261020175915_778.jpg",
+      "to": "26.jpg",
+      "mediaId": "10d298c9-6949-4aa7-9e16-98f6678b4b2f",
+      "objectKey": "tenants/tenant_dev_001/products/79922/26.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_103.jpg",
+      "to": "27.jpg",
+      "mediaId": "c22d78e9-20fc-4dd5-b99f-81aab71cdb2e",
+      "objectKey": "tenants/tenant_dev_001/products/81029/27.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_107.jpg",
+      "to": "28.jpg",
+      "mediaId": "b35a7fd7-2680-4fa0-bf35-f99700867af8",
+      "objectKey": "tenants/tenant_dev_001/products/81029/28.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_113.jpg",
+      "to": "29.jpg",
+      "mediaId": "e3cd11a9-1590-4b63-8cc9-1f2d66648c14",
+      "objectKey": "tenants/tenant_dev_001/products/81029/29.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_115.jpg",
+      "to": "30.jpg",
+      "mediaId": "67699c36-f802-4c0b-9763-94a67c767c18",
+      "objectKey": "tenants/tenant_dev_001/products/81029/30.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_117.jpg",
+      "to": "31.jpg",
+      "mediaId": "a1d51464-752f-4b0c-a217-c078a4c098fe",
+      "objectKey": "tenants/tenant_dev_001/products/81029/31.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_121.jpg",
+      "to": "32.jpg",
+      "mediaId": "99616994-7b58-41b8-8649-8310ae686ef8",
+      "objectKey": "tenants/tenant_dev_001/products/81029/32.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_123.jpg",
+      "to": "33.jpg",
+      "mediaId": "91bfa1ea-477b-4599-a579-b3f842fadcdb",
+      "objectKey": "tenants/tenant_dev_001/products/81029/33.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_125.jpg",
+      "to": "34.jpg",
+      "mediaId": "4d23d09f-8ec2-4987-a866-bd1da8b655e9",
+      "objectKey": "tenants/tenant_dev_001/products/81029/34.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_129.jpg",
+      "to": "35.jpg",
+      "mediaId": "595d9764-919a-4dda-9fba-8445df182b5a",
+      "objectKey": "tenants/tenant_dev_001/products/81029/35.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_133.jpg",
+      "to": "36.jpg",
+      "mediaId": "6cd412f3-9baa-4643-b8ce-e9237261885e",
+      "objectKey": "tenants/tenant_dev_001/products/81029/36.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_137.jpg",
+      "to": "37.jpg",
+      "mediaId": "7a43709a-f27e-4213-a3b7-9cce28fe8656",
+      "objectKey": "tenants/tenant_dev_001/products/81029/37.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_141.jpg",
+      "to": "38.jpg",
+      "mediaId": "c8cad1b6-554a-44b7-9c45-07eb172709cb",
+      "objectKey": "tenants/tenant_dev_001/products/81029/38.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_145.jpg",
+      "to": "39.jpg",
+      "mediaId": "2fc30f6c-c948-4c7a-b83d-6187664d4576",
+      "objectKey": "tenants/tenant_dev_001/products/81029/39.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_149.jpg",
+      "to": "40.jpg",
+      "mediaId": "14f9be03-5023-4a2f-a731-389b6e0b4c69",
+      "objectKey": "tenants/tenant_dev_001/products/81029/40.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_153.jpg",
+      "to": "41.jpg",
+      "mediaId": "b6e26a87-def6-419c-9667-34f29dfd5ac2",
+      "objectKey": "tenants/tenant_dev_001/products/81029/41.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_157.jpg",
+      "to": "42.jpg",
+      "mediaId": "57454e5c-bdfc-4b9d-9600-520570ef77eb",
+      "objectKey": "tenants/tenant_dev_001/products/81029/42.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_161.jpg",
+      "to": "43.jpg",
+      "mediaId": "faae5c5e-ee3f-4d51-ab07-64c99fbd7ef6",
+      "objectKey": "tenants/tenant_dev_001/products/81029/43.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_164.jpg",
+      "to": "44.jpg",
+      "mediaId": "8f5d1fd0-0f47-4cbc-bac2-98a076a578b7",
+      "objectKey": "tenants/tenant_dev_001/products/81029/44.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_165.jpg",
+      "to": "45.jpg",
+      "mediaId": "7910a45f-056d-406e-83df-8e1f9efbf6a0",
+      "objectKey": "tenants/tenant_dev_001/products/81029/45.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_166.jpg",
+      "to": "46.jpg",
+      "mediaId": "df925255-bf77-4045-9578-c8a0edef5517",
+      "objectKey": "tenants/tenant_dev_001/products/81029/46.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_167.jpg",
+      "to": "47.jpg",
+      "mediaId": "affd4994-0e9c-41d5-ab70-45aa6a7abb33",
+      "objectKey": "tenants/tenant_dev_001/products/81029/47.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_169.jpg",
+      "to": "48.jpg",
+      "mediaId": "6e89717e-0e90-4acd-9804-73dd39c9e661",
+      "objectKey": "tenants/tenant_dev_001/products/81029/48.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_170.jpg",
+      "to": "49.jpg",
+      "mediaId": "b869b3f8-7660-4279-a7b5-103fc719e048",
+      "objectKey": "tenants/tenant_dev_001/products/81029/49.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_171.jpg",
+      "to": "50.jpg",
+      "mediaId": "a5500255-5e18-46da-8fff-d1ca54be7b76",
+      "objectKey": "tenants/tenant_dev_001/products/81029/50.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_173.jpg",
+      "to": "51.jpg",
+      "mediaId": "53441a1a-9bb2-4c10-84b2-3f6cde4188f3",
+      "objectKey": "tenants/tenant_dev_001/products/81029/51.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_174.jpg",
+      "to": "52.jpg",
+      "mediaId": "c28f2e91-73d5-420b-9a0a-4bf4b4709041",
+      "objectKey": "tenants/tenant_dev_001/products/81029/52.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_176.jpg",
+      "to": "53.jpg",
+      "mediaId": "16802c66-6150-4f24-b851-0eb46a6a4b52",
+      "objectKey": "tenants/tenant_dev_001/products/81029/53.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_177.jpg",
+      "to": "54.jpg",
+      "mediaId": "50a248b6-d9cf-4119-8e1f-2cb1d3d605c9",
+      "objectKey": "tenants/tenant_dev_001/products/81029/54.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_178.jpg",
+      "to": "55.jpg",
+      "mediaId": "e80f87d2-5431-4b8b-84c3-7f31c7ee4290",
+      "objectKey": "tenants/tenant_dev_001/products/81029/55.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_179.jpg",
+      "to": "56.jpg",
+      "mediaId": "23a20942-618d-43ef-93e2-4f6715f4a1c8",
+      "objectKey": "tenants/tenant_dev_001/products/81029/56.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_181.jpg",
+      "to": "57.jpg",
+      "mediaId": "5f0b7a23-8185-4b15-8a53-f4fa072deac8",
+      "objectKey": "tenants/tenant_dev_001/products/81029/57.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_182.jpg",
+      "to": "58.jpg",
+      "mediaId": "eb2dbda3-9036-41f2-832c-f832add437f7",
+      "objectKey": "tenants/tenant_dev_001/products/81029/58.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_183.jpg",
+      "to": "59.jpg",
+      "mediaId": "53f5a82a-bcfb-4473-a9e1-def7cbbb0b5b",
+      "objectKey": "tenants/tenant_dev_001/products/81029/59.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_184.jpg",
+      "to": "60.jpg",
+      "mediaId": "3c671840-87b7-437e-812d-170ce39df4a7",
+      "objectKey": "tenants/tenant_dev_001/products/81029/60.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_186.jpg",
+      "to": "61.jpg",
+      "mediaId": "5eb12d90-00a6-4244-88e3-734484aab114",
+      "objectKey": "tenants/tenant_dev_001/products/81029/61.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_187.jpg",
+      "to": "62.jpg",
+      "mediaId": "402d9c07-954d-417e-addc-71c0e34c7df7",
+      "objectKey": "tenants/tenant_dev_001/products/81029/62.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_189.jpg",
+      "to": "63.jpg",
+      "mediaId": "651aebc8-9b00-4ff7-9a3d-ee9f59dfcb11",
+      "objectKey": "tenants/tenant_dev_001/products/81029/63.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_190.jpg",
+      "to": "64.jpg",
+      "mediaId": "ffbd5c87-1a99-4f5c-b540-f89816797057",
+      "objectKey": "tenants/tenant_dev_001/products/81029/64.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_192.jpg",
+      "to": "65.jpg",
+      "mediaId": "c2d4cf51-90ca-46f1-a56c-ef5b88ca14a4",
+      "objectKey": "tenants/tenant_dev_001/products/81029/65.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_193.jpg",
+      "to": "66.jpg",
+      "mediaId": "88f7e143-591b-4d73-a8f5-e090f08390fb",
+      "objectKey": "tenants/tenant_dev_001/products/81029/66.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_195.jpg",
+      "to": "67.jpg",
+      "mediaId": "118fb517-3bc3-4dba-95da-4a1e7a062a67",
+      "objectKey": "tenants/tenant_dev_001/products/81029/67.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_196.jpg",
+      "to": "68.jpg",
+      "mediaId": "a292bcb7-b4ea-47ba-bfcb-a3665bb51223",
+      "objectKey": "tenants/tenant_dev_001/products/81029/68.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_197.jpg",
+      "to": "69.jpg",
+      "mediaId": "37e3d931-470c-4aaa-bbe9-e3c516b0778e",
+      "objectKey": "tenants/tenant_dev_001/products/81029/69.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_200.jpg",
+      "to": "70.jpg",
+      "mediaId": "f80ae597-5ff7-4541-bf55-c66e57e1e716",
+      "objectKey": "tenants/tenant_dev_001/products/81029/70.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_201.jpg",
+      "to": "71.jpg",
+      "mediaId": "d5c4dba2-28a5-4c1c-a0d0-19844993f37e",
+      "objectKey": "tenants/tenant_dev_001/products/81029/71.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_203.jpg",
+      "to": "72.jpg",
+      "mediaId": "82c11330-6afc-4663-896c-30869e8a9d64",
+      "objectKey": "tenants/tenant_dev_001/products/81029/72.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_204.jpg",
+      "to": "73.jpg",
+      "mediaId": "24681033-c1b9-4cd9-83b8-439f8bafd574",
+      "objectKey": "tenants/tenant_dev_001/products/81029/73.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_206.jpg",
+      "to": "74.jpg",
+      "mediaId": "df20474f-5dde-4d29-aed8-4268e82700f2",
+      "objectKey": "tenants/tenant_dev_001/products/81029/74.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_207.jpg",
+      "to": "75.jpg",
+      "mediaId": "8252e269-7fc8-4f4a-b796-70b37bcc0099",
+      "objectKey": "tenants/tenant_dev_001/products/81029/75.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_95.jpg",
+      "to": "76.jpg",
+      "mediaId": "e8830185-0d71-4db2-b2c6-43bf10117618",
+      "objectKey": "tenants/tenant_dev_001/products/81029/76.jpg"
+    },
+    {
+      "style": "81029",
+      "from": "微信图片_20261020175837_99.jpg",
+      "to": "77.jpg",
+      "mediaId": "c8c42d1a-efb8-40a8-aad4-79399dd64f62",
+      "objectKey": "tenants/tenant_dev_001/products/81029/77.jpg"
+    }
+  ],
+  "needsReview": [
+    "微信图片_202608121433078_2.jpg",
+    "微信图片_202608121433078_3.jpg",
+    "微信图片_202608121433078_4.jpg",
+    "微信图片_202608121433078_5.jpg",
+    "微信图片_202608121433078_6.jpg",
+    "微信图片_202608121433078_7.jpg",
+    "微信图片_20260812231601_59_sm",
+    "微信图片_20260812231601_61_sm",
+    "微信图片_202608131231476_2.jpg",
+    "微信图片_20261020161900_46.jpg",
+    "微信图片_20261020161900_48.jpg",
+    "微信图片_20261020161900_50.jpg",
+    "微信图片_20261020161900_52.jpg",
+    "微信图片_20261020161900_54.jpg",
+    "微信图片_20261020161900_56.jpg",
+    "微信图片_20261020161900_58.jpg",
+    "微信图片_20261020161900_60.jpg",
+    "微信图片_20261020161900_62.jpg",
+    "微信图片_20261020161900_64.jpg",
+    "微信图片_20261020161900_66.jpg",
+    "微信图片_20261020161900_68.jpg",
+    "微信图片_20261020161900_70.jpg",
+    "微信图片_20261020161900_72.jpg",
+    "微信图片_20261020161900_73.jpg",
+    "微信图片_20261020161900_74.jpg",
+    "微信图片_20261020161900_75.jpg",
+    "微信图片_20261020161900_76.jpg",
+    "微信图片_20261020161900_79.jpg",
+    "微信图片_20261020161900_80.jpg",
+    "微信图片_20261020161900_81.jpg",
+    "微信图片_20261020161902_101.jpg",
+    "微信图片_20261020161902_103.jpg",
+    "微信图片_20261020161902_105.jpg",
+    "微信图片_20261020161902_107.jpg",
+    "微信图片_20261020161902_109.jpg",
+    "微信图片_20261020161902_111.jpg",
+    "微信图片_20261020161902_113.jpg",
+    "微信图片_20261020161902_115.jpg",
+    "微信图片_20261020161902_116.jpg",
+    "微信图片_20261020161902_117.jpg",
+    "微信图片_20261020161902_118.jpg",
+    "微信图片_20261020161902_121.jpg",
+    "微信图片_20261020161902_122.jpg",
+    "微信图片_20261020161902_123.jpg",
+    "微信图片_20261020161902_124.jpg",
+    "微信图片_20261020161902_125.jpg",
+    "微信图片_20261020161902_85.jpg",
+    "微信图片_20261020161902_87.jpg",
+    "微信图片_20261020161902_89.jpg",
+    "微信图片_20261020161902_91.jpg",
+    "微信图片_20261020161902_93.jpg",
+    "微信图片_20261020161902_95.jpg",
+    "微信图片_20261020161902_97.jpg",
+    "微信图片_20261020161902_99.jpg"
+  ],
+  "stillUnclassified": [],
+  "skuFix": {
+    "51137": {
+      "before": 36,
+      "after": 6,
+      "colors": [
+        "伦敦雾",
+        "平上青",
+        "洋红紫",
+        "深麻灰",
+        "马鞍棕",
+        "黑色"
+      ]
+    },
+    "69322": {
+      "before": 24,
+      "after": 4,
+      "colors": [
+        "兰棕",
+        "沙海蓝",
+        "花石灰",
+        "靓褐"
+      ]
+    },
+    "72516": {
+      "before": 10,
+      "after": 2,
+      "colors": [
+        "灰色",
+        "米驼"
+      ]
+    },
+    "72733": {
+      "before": 20,
+      "after": 4,
+      "colors": [
+        "上青",
+        "奶白",
+        "淡黄",
+        "白灰"
+      ]
+    },
+    "72768": {
+      "before": 10,
+      "after": 2,
+      "colors": [
+        "浅浅灰",
+        "米色"
+      ]
+    },
+    "72769": {
+      "before": 15,
+      "after": 3,
+      "colors": [
+        "上青",
+        "浅浅灰",
+        "米驼"
+      ]
+    },
+    "72773": {
+      "before": 45,
+      "after": 9,
+      "colors": [
+        "上青",
+        "卡其",
+        "咖啡色",
+        "奶白",
+        "枣红",
+        "浅军绿",
+        "淡黄",
+        "灰色",
+        "童浅兰"
+      ]
+    },
+    "72778": {
+      "before": 15,
+      "after": 3,
+      "colors": [
+        "AB驼棕",
+        "夹花灰AB",
+        "夹花驼AB"
+      ]
+    },
+    "76877": {
+      "before": 15,
+      "after": 3,
+      "colors": [
+        "上青",
+        "白",
+        "黑"
+      ]
+    },
+    "79922": {
+      "before": 20,
+      "after": 4,
+      "colors": [
+        "卡其",
+        "咖啡色",
+        "奶白",
+        "灰色"
+      ]
+    },
+    "81029": {
+      "before": 108,
+      "after": 18,
+      "colors": [
+        "中麻灰",
+        "伦敦雾",
+        "兰色",
+        "太空岩",
+        "平上青",
+        "新翠绿",
+        "暗橙红",
+        "橄榄绿",
+        "欧柏绿",
+        "沙漠驼",
+        "洋红紫",
+        "深麻灰",
+        "烟紫",
+        "珍珠杏",
+        "白色",
+        "红焦糖",
+        "马鞍棕",
+        "黑色"
+      ]
+    }
+  },
+  "totals": {
+    "highConfidenceMoved": 212,
+    "needsReview": 54,
+    "stillUnclassified": 0,
+    "mediaBefore": 121,
+    "mediaAfter": 333,
+    "mediaAdded": 212,
+    "skuTotalAfter": 58,
+    "diskImagesByStyle": {
+      "51137": 24,
+      "69322": 29,
+      "72516": 20,
+      "72733": 23,
+      "72768": 23,
+      "72769": 24,
+      "72773": 41,
+      "72778": 23,
+      "76877": 23,
+      "79922": 26,
+      "81029": 77
+    },
+    "reviewDirCount": 54
+  },
+  "summaryByStyle": {
+    "51137": {
+      "addedImages": 16,
+      "diskImages": 24,
+      "skuCount": 6,
+      "skuColors": [
+        "伦敦雾",
+        "平上青",
+        "洋红紫",
+        "深麻灰",
+        "马鞍棕",
+        "黑色"
+      ]
+    },
+    "69322": {
+      "addedImages": 19,
+      "diskImages": 29,
+      "skuCount": 4,
+      "skuColors": [
+        "兰棕",
+        "沙海蓝",
+        "花石灰",
+        "靓褐"
+      ]
+    },
+    "72516": {
+      "addedImages": 12,
+      "diskImages": 20,
+      "skuCount": 2,
+      "skuColors": [
+        "灰色",
+        "米驼"
+      ]
+    },
+    "72733": {
+      "addedImages": 14,
+      "diskImages": 23,
+      "skuCount": 4,
+      "skuColors": [
+        "上青",
+        "奶白",
+        "淡黄",
+        "白灰"
+      ]
+    },
+    "72768": {
+      "addedImages": 14,
+      "diskImages": 23,
+      "skuCount": 2,
+      "skuColors": [
+        "浅浅灰",
+        "米色"
+      ]
+    },
+    "72769": {
+      "addedImages": 16,
+      "diskImages": 24,
+      "skuCount": 3,
+      "skuColors": [
+        "上青",
+        "浅浅灰",
+        "米驼"
+      ]
+    },
+    "72773": {
+      "addedImages": 26,
+      "diskImages": 41,
+      "skuCount": 9,
+      "skuColors": [
+        "上青",
+        "卡其",
+        "咖啡色",
+        "奶白",
+        "枣红",
+        "浅军绿",
+        "淡黄",
+        "灰色",
+        "童浅兰"
+      ]
+    },
+    "72778": {
+      "addedImages": 14,
+      "diskImages": 23,
+      "skuCount": 3,
+      "skuColors": [
+        "AB驼棕",
+        "夹花灰AB",
+        "夹花驼AB"
+      ]
+    },
+    "76877": {
+      "addedImages": 14,
+      "diskImages": 23,
+      "skuCount": 3,
+      "skuColors": [
+        "上青",
+        "白",
+        "黑"
+      ]
+    },
+    "79922": {
+      "addedImages": 16,
+      "diskImages": 26,
+      "skuCount": 4,
+      "skuColors": [
+        "卡其",
+        "咖啡色",
+        "奶白",
+        "灰色"
+      ]
+    },
+    "81029": {
+      "addedImages": 51,
+      "diskImages": 77,
+      "skuCount": 18,
+      "skuColors": [
+        "中麻灰",
+        "伦敦雾",
+        "兰色",
+        "太空岩",
+        "平上青",
+        "新翠绿",
+        "暗橙红",
+        "橄榄绿",
+        "欧柏绿",
+        "沙漠驼",
+        "洋红紫",
+        "深麻灰",
+        "烟紫",
+        "珍珠杏",
+        "白色",
+        "红焦糖",
+        "马鞍棕",
+        "黑色"
+      ]
+    }
+  }
+}

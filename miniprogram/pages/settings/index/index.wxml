@@ -1,0 +1,117 @@
+<view class="container">
+  <view class="card" wx:if="{{showProfile}}">
+    <view class="section">我的资料</view>
+    <view class="muted">用于客户列表展示；可跳过</view>
+    <view class="form" style="margin-top:16rpx;">
+      <button class="avatar-btn" open-type="chooseAvatar" bind:chooseavatar="onChooseAvatar">
+        <image wx:if="{{avatarUrl}}" src="{{avatarUrl}}" class="avatar-preview" mode="aspectFill" />
+        <text wx:else>选头像</text>
+      </button>
+      <input class="input" type="nickname" placeholder="昵称" value="{{nickname}}" bindblur="onNickname" bindinput="onNickname" />
+      <view class="btn-primary mini" bindtap="saveProfile">保存资料</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section">联系业主二维码</view>
+    <view class="muted">客户详情页展示，方便加微信</view>
+    <image wx:if="{{contactQrUrl}}" src="{{contactQrUrl}}" mode="aspectFit" class="qr-preview" style="margin-top:16rpx;" />
+    <view class="btn-ghost mini" style="margin-top:16rpx;" bindtap="pickContactQr">{{contactQrUrl ? '更换二维码' : '上传二维码'}}</view>
+    <view class="link danger" wx:if="{{contactQrUrl}}" style="margin-top:12rpx;" bindtap="clearContactQr">清除</view>
+  </view>
+
+<view class="card">
+    <view class="section">客户等级</view>
+    <view class="muted">纯人工调整，无自动升降级</view>
+    <view class="row item" wx:for="{{customerLevels}}" wx:key="id">
+      <view>
+        <text>{{item.name}}</text>
+        <text class="muted"> {{item.code}} · rank {{item.rank}}</text>
+        <text class="tag" wx:if="{{item.isDefault}}">默认</text>
+      </view>
+      <view class="ops">
+        <text class="link" wx:if="{{!item.isDefault}}" data-id="{{item.id}}" bindtap="setDefaultCl">设默认</text>
+        <text class="link danger" wx:if="{{!item.isDefault}}" data-id="{{item.id}}" bindtap="deleteCl">删</text>
+      </view>
+    </view>
+    <view class="form">
+      <input class="input" placeholder="编码 L3" value="{{clCode}}" bindinput="onClCode" />
+      <input class="input" placeholder="名称" value="{{clName}}" bindinput="onClName" />
+      <input class="input" placeholder="排序 rank" value="{{clRank}}" bindinput="onClRank" />
+      <checkbox-group bindchange="onClDefault">
+        <label><checkbox value="1" checked="{{clDefault}}"/>设为默认</label>
+      </checkbox-group>
+      <view class="btn-primary mini" bindtap="addCustomerLevel">添加客户等级</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section">商品等级与默认分享策略</view>
+    <view class="row item" wx:for="{{productLevels}}" wx:key="id">
+      <view>
+        <text>{{item.name}}</text>
+        <text class="muted"> {{item.code}} · {{item.defaultSharePolicy}}</text>
+      </view>
+      <text class="link danger" data-id="{{item.id}}" bindtap="deletePl">删</text>
+    </view>
+    <view class="form">
+      <input class="input" placeholder="编码" value="{{plCode}}" bindinput="onPlCode" />
+      <input class="input" placeholder="名称" value="{{plName}}" bindinput="onPlName" />
+      <input class="input" placeholder="rank" value="{{plRank}}" bindinput="onPlRank" />
+      <radio-group bindchange="onPlPolicy">
+        <label><radio value="open" checked="{{plPolicy==='open'}}"/>open</label>
+        <label><radio value="level_match" checked="{{plPolicy==='level_match'}}"/>level_match</label>
+        <label><radio value="designated_only" checked="{{plPolicy==='designated_only'}}"/>designated_only</label>
+      </radio-group>
+      <input class="input" placeholder="最低客户 rank（可选）" value="{{plMinRank}}" bindinput="onPlMinRank" />
+      <view class="btn-primary mini" bindtap="addProductLevel">添加商品等级</view>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{isOwner}}">
+    <view class="section">员工邀请</view>
+    <view class="muted">生成邀请码/小程序码，对方扫码微信登录后成为业主或营业员。客户请用商品分享，勿扫此码。</view>
+
+    <view class="form" style="margin-top:16rpx;">
+      <view class="muted" style="margin-bottom:8rpx;">邀请角色</view>
+      <radio-group bindchange="onInviteRole">
+        <label style="margin-right:24rpx;"><radio value="staff" checked="{{inviteRole==='staff'}}"/>营业员</label>
+        <label><radio value="owner" checked="{{inviteRole==='owner'}}"/>业主</label>
+      </radio-group>
+      <view class="btn-primary mini" bindtap="createInvite">生成邀请</view>
+    </view>
+
+    <view wx:if="{{latestInvite}}" class="invite-box">
+      <view class="muted">最新邀请码（可复制发给对方）</view>
+      <view class="invite-code" bindtap="copyInviteCode" data-code="{{latestInvite.code}}">{{latestInvite.code}}</view>
+      <image wx:if="{{latestInvite.wxacodeUrl}}" src="{{latestInvite.wxacodeUrl}}" mode="aspectFit" class="qr-preview" show-menu-by-longpress="{{true}}" />
+      <view class="muted" wx:if="{{!latestInvite.wxacodeUrl}}">小程序码未生成时仍可用上方邀请码；让对方打开「加入档口」页或由你长按转发码图。</view>
+    </view>
+
+    <view class="section" style="margin-top:24rpx;">邀请记录</view>
+    <view class="row item" wx:for="{{invites}}" wx:key="id">
+      <view>
+        <text>{{item.role === 'owner' ? '业主' : '营业员'}}</text>
+        <text class="muted"> {{item.code}} · {{item.status}}</text>
+        <text class="muted" wx:if="{{item.useCount}}"> · 已用{{item.useCount}}</text>
+      </view>
+      <view class="ops">
+        <text class="link" data-code="{{item.code}}" bindtap="copyInviteCode">复制</text>
+        <text class="link danger" wx:if="{{item.status==='active'}}" data-id="{{item.id}}" bindtap="revokeInvite">撤销</text>
+      </view>
+    </view>
+    <view class="muted" wx:if="{{!invites.length}}">暂无邀请</view>
+  </view>
+
+  <view class="card">
+    <view class="section">当前成员</view>
+    <view class="row item" wx:for="{{members}}" wx:key="id">
+      <view>
+        <text>{{item.nickname || '未设昵称'}}</text>
+        <text class="tag">{{item.role === 'owner' ? '业主' : '营业员'}}</text>
+      </view>
+      <text class="muted" style="font-size:22rpx;">{{item.openid}}</text>
+    </view>
+    <view class="muted" wx:if="{{!members.length}}">暂无成员</view>
+  </view>
+</view>

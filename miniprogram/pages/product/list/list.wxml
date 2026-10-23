@@ -1,0 +1,106 @@
+<upload-float />
+<view class="container">
+  <view class="toolbar card">
+    <view class="toolbar-left">
+      <view class="section-title toolbar-title">{{currentGroupName || '本季款式'}}</view>
+      <view class="muted tiny">共 {{total}} 款</view>
+    </view>
+    <view class="toolbar-actions">
+      <view class="btn-ghost tool-btn" bindtap="goEdit">手工录入</view>
+      <view class="btn-primary tool-btn" bindtap="goPublish">选图发品</view>
+    </view>
+  </view>
+
+  <view class="card search-bar">
+    <input class="input" placeholder="搜索款号 / 名称" value="{{q}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="onSearch" />
+    <view class="search-btn" bindtap="onSearch">搜索</view>
+  </view>
+
+  <scroll-view scroll-x class="chips-row" enable-flex>
+    <block wx:if="{{groups.length}}">
+      <text
+        class="chip {{groupId===item.id?'active':''}}"
+        wx:for="{{groups}}"
+        wx:key="id"
+        data-id="{{item.id}}"
+        bindtap="onGroupFilter"
+      >{{item.name}}<text wx:if="{{item.isLatest}}" class="chip-badge">本季</text></text>
+    </block>
+    <text class="chip chip-manage" bindtap="manageGroups">管理</text>
+  </scroll-view>
+
+  <view class="filters">
+    <text class="chip {{status===''?'active':''}}" data-status="" bindtap="onStatusFilter">全部</text>
+    <text class="chip {{status==='on_sale'?'active':''}}" data-status="on_sale" bindtap="onStatusFilter">在售</text>
+    <text class="chip {{status==='off_sale'?'active':''}}" data-status="off_sale" bindtap="onStatusFilter">下架</text>
+    <text class="chip {{status==='draft'?'active':''}}" data-status="draft" bindtap="onStatusFilter">草稿</text>
+  </view>
+
+  <view class="product-card card" wx:for="{{list}}" wx:key="id">
+    <view class="pc-body" bindtap="goDetail" data-id="{{item.id}}">
+      <view class="pc-cover-wrap">
+        <image wx:if="{{item.coverUrl}}" class="pc-cover" src="{{item.coverUrl}}" mode="aspectFill" lazy-load />
+        <view wx:else class="pc-cover pc-cover-ph">暂无图</view>
+        <text class="pc-badge" wx:if="{{item.status !== 'on_sale'}}">{{statusLabel[item.status] || item.status}}</text>
+      </view>
+      <view class="pc-info">
+        <view class="pc-name-row">
+          <text class="pc-name">{{item.name}}</text>
+          <text class="tag" wx:if="{{item.status === 'on_sale'}}">在售</text>
+        </view>
+        <view class="pc-style">款号 {{item.styleNo}}</view>
+        <view class="pc-meta">
+          <text wx:if="{{item.colorCount}}">{{item.colorCount}} 色</text>
+          <text wx:if="{{item.colorCount && item.materialShort}}"> · </text>
+          <text wx:if="{{item.materialShort}}">{{item.materialShort}}</text>
+        </view>
+        <view class="pc-price {{item.priceMuted ? 'muted-price' : ''}}">{{item.priceText}}</view>
+      </view>
+    </view>
+    <view class="pc-actions">
+      <view class="pc-act" catchtap="goEdit" data-id="{{item.id}}">编辑</view>
+      <view class="pc-act-div"></view>
+      <view class="pc-act" catchtap="goDetail" data-id="{{item.id}}">分享</view>
+      <view class="pc-act-div"></view>
+      <view class="pc-act" catchtap="toggleSale" data-id="{{item.id}}" data-status="{{item.status}}">
+        {{item.status==='on_sale'?'下架':'上架'}}
+      </view>
+      <view class="pc-act-div"></view>
+      <view class="pc-act" catchtap="moveGroup" data-id="{{item.id}}">调组</view>
+    </view>
+  </view>
+
+  <view class="muted empty" wx:if="{{!list.length && !loading}}">暂无商品，点上方「选图发品」开始</view>
+  <view class="muted footer-tip" wx:if="{{loading}}">加载中…</view>
+  <view class="muted footer-tip" wx:elif="{{loadingMore}}">加载更多…</view>
+  <view class="muted footer-tip" wx:elif="{{list.length && !hasMore}}">没有更多了</view>
+  <view class="muted footer-tip" wx:elif="{{list.length && hasMore}}">上拉加载更多</view>
+
+  <view class="gm-mask" wx:if="{{groupPanelVisible}}" catchtouchmove="noop" bindtap="closeGroupPanel">
+    <view class="gm-sheet card" catchtap="noop">
+      <view class="gm-head">
+        <text class="gm-title">{{groupPanelMode==='move'?'选择目标分组':'管理分组'}}</text>
+        <text class="gm-close" bindtap="closeGroupPanel">关闭</text>
+      </view>
+      <view class="gm-create" wx:if="{{groupPanelMode==='manage'}}" bindtap="createGroup">＋ 新建分组</view>
+      <scroll-view scroll-y class="gm-list">
+        <view
+          class="gm-row"
+          wx:for="{{groups}}"
+          wx:key="id"
+          data-id="{{item.id}}"
+          bindtap="onGroupPanelRowTap"
+        >
+          <view class="gm-row-main">
+            <text class="gm-name">{{item.name}}</text>
+            <text class="gm-tag" wx:if="{{item.isLatest}}">本季</text>
+          </view>
+          <text class="gm-hint" wx:if="{{groupPanelMode==='manage'}}">改名 / 本季 / 删除</text>
+          <text class="gm-hint" wx:else>移入此组</text>
+        </view>
+        <view class="muted empty" wx:if="{{!groups.length}}" style="padding:40rpx;">暂无分组</view>
+      </scroll-view>
+    </view>
+  </view>
+
+</view>

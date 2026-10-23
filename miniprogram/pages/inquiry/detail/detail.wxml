@@ -1,0 +1,12 @@
+<view class="container">
+  <view class="card" wx:if="{{mode==='create'}}">
+    <view>关联商品：{{productId}}</view>
+    <textarea placeholder="请输入询价内容，如：这款藏青 XL 出厂价多少？" value="{{content}}" bindinput="onContent" style="width:100%;min-height:160rpx;margin-top:16rpx;background:#f7f7f7;padding:16rpx;"></textarea>
+    <view style="height: 20rpx;"></view>
+    <view class="btn-primary" bindtap="submit">提交询价</view>
+  </view>
+  <view class="card" wx:if="{{inquiry}}">
+    <view>{{inquiry.content}}</view>
+    <view class="muted">状态 {{inquiry.status}}</view>
+  </view>
+</view>

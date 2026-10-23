@@ -1,0 +1,222 @@
+<view class="container">
+  <view class="card muted" wx:if="{{loading}}">加载中…</view>
+
+  <!-- 0. 选模板 -->
+  <block wx:if="{{!loading && !tpl}}">
+    <view class="card">
+      <view class="section-title">选择出图模板</view>
+      <view class="muted">不同用途的出图方式、步骤和提示词都不同</view>
+    </view>
+    <view class="card tpl" wx:for="{{templates}}" wx:key="id" data-id="{{item.id}}" bindtap="pickTemplate">
+      <view class="tpl-head">
+        <text class="tpl-name">{{item.name}}</text>
+        <text class="tag" wx:for="{{item.platforms}}" wx:for-item="p" wx:key="*this">{{p === 'xiaohongshu' ? '小红书' : '朋友圈'}}</text>
+      </view>
+      <view class="muted" style="margin-top:8rpx;">{{item.desc}}</view>
+      <view class="muted small" style="margin-top:8rpx;">{{item.model === 'none' ? '无需模特' : (item.model === 'required' ? '需选模特' : '模特可选')}} · {{item.id === 'multi_color' ? '按颜色出图' : (item.count.min + '-' + item.count.max + ' 张')}}</view>
+    </view>
+  </block>
+
+  <!-- 步骤 -->
+  <block wx:if="{{tpl && stepKey !== 'result'}}">
+    <view class="card">
+      <view class="tpl-head"><text class="tpl-name">{{tpl.name}}</text><text class="link" bindtap="backToTemplates">换模板</text></view>
+      <view class="progress">
+        <text wx:for="{{steps}}" wx:key="*this" class="dot {{index <= stepIdx ? 'on' : ''}}">{{stepNames[item]}}</text>
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'reference'}}">
+      <view class="section-title">{{stepNames.reference}}</view>
+      <view class="section-hint">{{tpl.reference.hint}} · 可多选（已选 {{sel.refs.length}}/{{tpl.reference.max}}）</view>
+      <view class="grid">
+        <view class="cell {{item.checked ? 'checked' : ''}}" wx:for="{{assets}}" wx:key="id" data-id="{{item.id}}" bindtap="toggleRef" bindlongpress="previewAsset" data-url="{{item.url}}">
+          <image src="{{item.url}}" mode="aspectFill" lazy-load />
+          <view class="check {{item.checked ? 'on' : ''}}">{{item.checked ? item.order : ''}}</view>
+          <view class="mark" wx:if="{{item.isPromo}}">AI</view>
+        </view>
+      </view>
+      <view class="muted small">点选切换勾选（可多张）· 长按预览</view>
+
+      <!-- 风格样例（可选）：卡片内次级区，非独立步骤 -->
+      <view class="style-ref-block">
+        <view class="sub-label">风格样例（可选）</view>
+        <view class="section-hint">{{tpl.styleRef.hint || '上传你喜欢的成片风格，系统尽量学构图和氛围；衣服仍以商品图为准'}} · {{styleRefs.length}}/{{styleRefMax}}</view>
+        <view class="grid">
+          <view class="cell style-cell" wx:for="{{styleRefs}}" wx:key="index" data-index="{{index}}">
+            <image src="{{item.url}}" mode="aspectFill" lazy-load data-url="{{item.url}}" bindtap="previewStyleRef" />
+            <view class="style-del" data-index="{{index}}" catchtap="removeStyleRef">×</view>
+            <view class="mark" wx:if="{{item.uploading}}">上传中</view>
+          </view>
+          <view
+            class="cell style-add {{styleRefs.length >= styleRefMax || styleUploading ? 'disabled' : ''}}"
+            bindtap="addStyleRef"
+            wx:if="{{styleRefs.length < styleRefMax}}"
+          >
+            <text class="style-add-plus">＋</text>
+            <text class="style-add-txt">{{styleUploading ? '上传中…' : '上传风格样例'}}</text>
+          </view>
+        </view>
+        <view class="sub-label" style="margin-top:8rpx;">风格强弱</view>
+        <view class="chips">
+          <text
+            class="chip {{styleStrength === item.id ? 'on' : ''}}"
+            wx:for="{{styleStrengthOpts}}"
+            wx:key="id"
+            data-id="{{item.id}}"
+            bindtap="pickStyleStrength"
+          >{{item.name}}</text>
+        </view>
+        <view class="muted small">弱=轻微借鉴光影；中=默认；强=更像样例构图氛围。衣服始终以商品参考图为准，不会抄样例人脸/品牌。</view>
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'colors'}}">
+      <view class="section-title">{{stepNames.colors}}</view>
+      <view class="section-hint">{{tpl.id === 'multi_color' ? '按参考图顺序选对应颜色（几色出几张，须与参考图数量一致）' : '按参考图顺序选对应颜色（可不选，则由模型按图识别）'}}</view>
+      <view class="chips">
+        <text class="chip {{item.checked ? 'on' : ''}}" wx:for="{{colors}}" wx:key="name" data-name="{{item.name}}" bindtap="toggleColor">{{item.name}}</text>
+      </view>
+      <view class="muted small" wx:if="{{sel.colors.length}}">顺序：{{sel.colors}}</view>
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'feature'}}">
+      <view class="section-title">{{stepNames.feature}}</view>
+      <view class="section-hint">根据商品信息自动生成，可修改；仅作提示，不会画进图里</view>
+      <textarea class="textarea" style="height:360rpx;" maxlength="2000" value="{{feature}}" bindinput="onFeature" />
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'model'}}">
+      <view class="section-title">{{stepNames.model}}{{tpl.model === 'optional' ? '（可不选）' : ''}}</view>
+      <view class="section-hint">点选头像卡片选择模特</view>
+      <view class="model-grid">
+        <view
+          class="model-card {{sel.modelId === item.id ? 'on' : ''}}"
+          wx:for="{{models}}"
+          wx:key="id"
+          data-id="{{item.id}}"
+          bindtap="pickModel"
+        >
+          <image class="model-avatar" src="{{item.avatar}}" mode="aspectFill" />
+          <text class="model-name">{{item.name}}</text>
+          <text class="model-desc">{{item.desc}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 兼容旧 steps：单独 pose / scene -->
+    <view class="card" wx:if="{{stepKey === 'pose'}}">
+      <view class="section-title">{{stepNames.pose}}</view>
+      <view class="section-hint">{{singlePoseScene ? '整组共用同一姿势（单选）' : '可多选，多张图会轮换使用'}}</view>
+      <view class="chips">
+        <text class="chip {{item.on ? 'on' : ''}}" wx:for="{{poseOpts}}" wx:key="id" data-kind="poses" data-id="{{item.id}}" bindtap="toggleMulti">{{item.name}}</text>
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'scene'}}">
+      <view class="section-title">{{tpl.sceneLabel}}</view>
+      <view class="section-hint">{{singlePoseScene ? '整组共用同一场景（单选）' : '可多选，多张图会轮换使用'}}</view>
+      <view class="chips">
+        <text class="chip {{item.on ? 'on' : ''}}" wx:for="{{sceneOpts}}" wx:key="id" data-kind="scenes" data-id="{{item.id}}" bindtap="toggleMulti">{{item.name}}</text>
+      </view>
+    </view>
+
+    <!-- 合并步：姿势 + 场景 + 自由描述 + 语音 -->
+    <view class="card" wx:if="{{stepKey === 'pose_scene'}}">
+      <view class="section-title">姿势与场景</view>
+      <view class="section-hint">{{singlePoseScene ? '整组共用同一姿势与场景（单选）；也可自己描述' : '可点选预设（多选会轮换）；也可打字或语音补充'}}</view>
+
+      <block wx:if="{{poseOpts.length}}">
+        <view class="sub-label">姿势 / 呈现</view>
+        <view class="chips">
+          <text class="chip {{item.on ? 'on' : ''}}" wx:for="{{poseOpts}}" wx:key="id" data-kind="poses" data-id="{{item.id}}" bindtap="toggleMulti">{{item.name}}</text>
+        </view>
+        <view class="free-row">
+          <textarea class="free-input" maxlength="200" placeholder="可整句描述，如：在咖啡馆门口靠着墙眼睛微眯看着远方的英伦风" value="{{sel.poseText}}" bindinput="onPoseText" />
+          <view
+            class="voice-btn {{voiceListening && voiceTarget==='pose' ? 'on' : ''}}"
+            data-target="pose"
+            bindtouchstart="onVoiceStart"
+            bindtouchend="onVoiceEnd"
+            bindtouchcancel="onVoiceCancel"
+          >{{voiceListening && voiceTarget==='pose' ? '松手' : '按住说话'}}</view>
+        </view>
+      </block>
+
+      <block wx:if="{{sceneOpts.length}}">
+        <view class="sub-label" style="margin-top:24rpx;">{{tpl.sceneLabel || '场景'}}</view>
+        <view class="chips">
+          <text class="chip {{item.on ? 'on' : ''}}" wx:for="{{sceneOpts}}" wx:key="id" data-kind="scenes" data-id="{{item.id}}" bindtap="toggleMulti">{{item.name}}</text>
+        </view>
+        <view class="free-row">
+          <textarea class="free-input" maxlength="200" placeholder="场景可写在上面一句里，或单独补充：秋日公园落叶 / 暖色窗边" value="{{sel.sceneText}}" bindinput="onSceneText" />
+          <view
+            class="voice-btn {{voiceListening && voiceTarget==='scene' ? 'on' : ''}}"
+            data-target="scene"
+            bindtouchstart="onVoiceStart"
+            bindtouchend="onVoiceEnd"
+            bindtouchcancel="onVoiceCancel"
+          >{{voiceListening && voiceTarget==='scene' ? '松手' : '按住说话'}}</view>
+        </view>
+      </block>
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'count'}}">
+      <view class="section-title">{{stepNames.count}}</view>
+      <view class="counter">
+        <text class="cbtn" bindtap="countMinus">－</text><text class="cnum">{{sel.count}}</text><text class="cbtn" bindtap="countPlus">＋</text>
+        <text class="muted small">（{{tpl.count.min}}-{{tpl.count.max}} 张，每张约 30-60 秒）</text>
+      </view>
+      <view class="opt {{sel.sizeId === item.id ? 'on' : ''}}" wx:for="{{tpl.sizeOptions}}" wx:key="id" data-id="{{item.id}}" bindtap="pickSize">
+        <text class="opt-name">{{item.name}}</text>
+      </view>
+    </view>
+
+    <view class="footer">
+      <view class="btn-weak half" bindtap="prev">上一步</view>
+      <view class="btn-primary half" bindtap="next">{{stepIdx >= steps.length - 1 ? (submitting ? '提交中…' : (styleUploading ? '上传中…' : '开始生成')) : '下一步'}}</view>
+    </view>
+  </block>
+
+  <!-- 结果 -->
+  <block wx:if="{{stepKey === 'result' && job}}">
+    <view class="card">
+      <view class="section-title">{{tpl.name}} · {{job.status === 'done' || job.status === 'succeeded' ? '已完成' : (job.status === 'failed' ? '生成失败' : (job.status === 'partial' ? '部分完成' : (job.status === 'queued' ? '排队中…' : '生成中…')))}}</view>
+      <view class="muted">{{job.done}} / {{job.total}} 张</view>
+      <view class="album-bar" wx:if="{{job.done}}">
+        <text class="link" bindtap="toggleSelectAllAlbum">{{albumAllSelected ? '取消全选' : '全选'}}</text>
+        <text class="muted">已选 {{albumSelectedCount}} 张 · 点勾选，点图预览</text>
+      </view>
+      <view class="grid">
+        <view class="cell big {{item.albumSelected ? 'checked' : ''}}" wx:for="{{job.items}}" wx:key="index">
+          <image wx:if="{{item.url}}" src="{{item.url}}" mode="aspectFill" data-url="{{item.url}}" bindtap="previewResult" />
+          <view class="placeholder" wx:elif="{{item.status === 'failed'}}">失败</view>
+          <view class="placeholder" wx:else>生成中…</view>
+          <view
+            class="check {{item.albumSelected ? 'on' : ''}}"
+            wx:if="{{item.url}}"
+            data-index="{{index}}"
+            catchtap="toggleAlbumItem"
+          >{{item.albumSelected ? '✓' : ''}}</view>
+          <view class="mark" wx:if="{{item.saved}}">已存</view>
+        </view>
+      </view>
+    </view>
+    <view class="caption-box" wx:if="{{job.caption && (job.status==='done' || job.status==='partial' || job.status==='succeeded')}}">
+      <view class="caption-head">
+        <text class="caption-title">种草文案（已关联商品）</text>
+        <text class="link" bindtap="copyCaption">一键复制</text>
+      </view>
+      <text class="caption-body" user-select>{{job.caption}}</text>
+    </view>
+    <view class="footer footer-3">
+      <view class="btn-weak" bindtap="again">再来一组</view>
+      <view
+        class="btn-ghost {{savingAlbum ? 'disabled' : ''}}"
+        wx:if="{{job.done || job.status==='partial' || job.status==='succeeded'}}"
+        bindtap="saveToAlbum"
+      >{{savingAlbum ? '保存中…' : albumSaveLabel}}</view>
+      <view class="btn-primary" wx:if="{{job.done || job.status==='partial' || job.status==='succeeded'}}" bindtap="goGallery">查看图组</view>
+    </view>
+  </block>
+</view>

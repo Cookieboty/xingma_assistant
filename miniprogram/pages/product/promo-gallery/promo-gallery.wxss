@@ -1,0 +1,166 @@
+.head-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+.half { flex: 1; padding: 20rpx; font-size: 28rpx; }
+.full { flex: 1; padding: 20rpx; font-size: 28rpx; width: 100%; }
+
+.job { padding: 24rpx; }
+.job-head { margin-bottom: 12rpx; }
+.job-name { font-size: 30rpx; font-weight: 600; margin-right: 12rpx; }
+.small { font-size: 22rpx; margin-top: 6rpx; word-break: break-all; }
+
+.st {
+  display: inline-block;
+  font-size: 22rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 8rpx;
+  vertical-align: middle;
+}
+.st.run { background: #fff7e6; color: #ad6800; }
+.st.ok { background: #e8f5e9; color: #2e7d32; }
+.st.err { background: #fdecea; color: #c62828; }
+
+.bar-wrap { margin: 12rpx 0 8rpx; }
+.bar {
+  height: 10rpx;
+  background: #f0ebe6;
+  border-radius: 999rpx;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #d4783a, #c45c26);
+  border-radius: 999rpx;
+}
+
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+.cell {
+  position: relative;
+  width: 210rpx;
+  height: 280rpx;
+  border-radius: 16rpx;
+  overflow: hidden;
+  background: #f6f3f0;
+}
+.cell image { width: 100%; height: 100%; }
+.placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9a8f86;
+  font-size: 24rpx;
+}
+.mark {
+  position: absolute;
+  left: 8rpx;
+  bottom: 8rpx;
+  font-size: 20rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  background: rgba(0,0,0,.5);
+  color: #fff;
+}
+
+.empty { text-align: center; padding: 48rpx 28rpx; }
+
+.album-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-top: 12rpx;
+}
+.cell.checked { outline: 4rpx solid #c45c26; outline-offset: -4rpx; }
+.check {
+  position: absolute; top: 8rpx; right: 8rpx; z-index: 2;
+  width: 40rpx; height: 40rpx; line-height: 40rpx; text-align: center;
+  border-radius: 50%; border: 3rpx solid rgba(255,255,255,.95);
+  background: rgba(0,0,0,.25); color: #fff; font-size: 22rpx; box-sizing: border-box;
+}
+.check.on { background: #c45c26; border-color: #c45c26; }
+.ops {
+  margin-top: 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.caption-box {
+  margin-top: 16rpx;
+  padding: 16rpx;
+  background: #faf7f4;
+  border-radius: 12rpx;
+}
+.caption-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8rpx;
+}
+.caption-title { font-size: 26rpx; font-weight: 600; color: #5c4a3a; }
+.caption-body {
+  font-size: 24rpx;
+  color: #6b5b4f;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.regen-one {
+  position: absolute;
+  right: 8rpx;
+  bottom: 8rpx;
+  font-size: 20rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  background: rgba(196, 92, 38, 0.85);
+  color: #fff;
+}
+.ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 20rpx;
+}
+.ops .btn-ghost, .ops .btn-weak, .ops .btn-primary {
+  flex: 1 1 40%;
+  text-align: center;
+  padding: 16rpx 12rpx;
+  font-size: 26rpx;
+}
+.cell.checked { outline: 4rpx solid #c45c26; }
+.check {
+  position: absolute;
+  right: 8rpx;
+  top: 8rpx;
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  background: rgba(255,255,255,.85);
+  border: 2rpx solid #c45c26;
+  color: #c45c26;
+  font-size: 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.check.on { background: #c45c26; color: #fff; }
+.link { color: #c45c26; font-size: 26rpx; }
+
+.type-badge {
+  display: inline-block;
+  font-size: 20rpx;
+  padding: 2rpx 10rpx;
+  margin-right: 8rpx;
+  border-radius: 6rpx;
+  background: var(--color-primary-soft, #f7ebe4);
+  color: #8a4b28;
+  vertical-align: middle;
+}

@@ -1,0 +1,16 @@
+<view class="uf-wrap" wx:if="{{visible}}" catchtouchmove="noop">
+  <view class="uf-bar" bindtap="onTap">
+    <view class="uf-main">
+      <view class="uf-title">{{title}}</view>
+      <view class="uf-sub" wx:if="{{subtitle}}">{{subtitle}}</view>
+      <view class="uf-track" wx:if="{{showBar}}">
+        <view class="uf-fill" style="width: {{percent}}%;"></view>
+      </view>
+    </view>
+    <view class="uf-actions">
+      <view class="uf-btn" wx:if="{{canRetry}}" catchtap="onRetry">重试</view>
+      <view class="uf-btn ghost" wx:if="{{canOpen}}" catchtap="onOpen">查看</view>
+      <view class="uf-x" catchtap="onDismiss" wx:if="{{canDismiss}}">×</view>
+    </view>
+  </view>
+</view>
