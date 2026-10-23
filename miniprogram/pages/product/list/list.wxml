@@ -6,6 +6,7 @@
       <view class="muted tiny">共 {{total}} 款</view>
     </view>
     <view class="toolbar-actions">
+      <view class="btn-ghost tool-btn" bindtap="goSettings">设置</view>
       <view class="btn-ghost tool-btn" bindtap="goEdit">手工录入</view>
       <view class="btn-primary tool-btn" bindtap="goPublish">选图发品</view>
     </view>
