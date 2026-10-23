@@ -17,3 +17,6 @@ backend/storage/
 # 本机 secrets（Token 勿入仓）
 backend/.secrets/
 *.secret
+
+backend/secrets/
+backend/.secrets/

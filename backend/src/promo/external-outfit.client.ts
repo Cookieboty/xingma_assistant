@@ -63,15 +63,28 @@ export class ExternalOutfitClient {
 
   /** 从 env 或本机 key 文件读 Token；永不打日志全文 */
   private resolveApiKey(): string {
-    const direct = String(process.env.OUTFIT_AGENT_API_KEY || '').trim();
+    const direct = String(
+      process.env.OUTFIT_AGENT_API_KEY || process.env.LKB_AGENT_TOKEN || '',
+    ).trim();
     if (direct) return direct;
-    const file = String(process.env.OUTFIT_AGENT_API_KEY_FILE || '').trim();
-    if (!file) return '';
-    const abs = path.isAbsolute(file) ? file : path.join(process.cwd(), file);
-    try {
-      if (fs.existsSync(abs)) return fs.readFileSync(abs, 'utf8').trim();
-    } catch (e: any) {
-      this.logger.warn(`读 OUTFIT_AGENT_API_KEY_FILE 失败: ${String(e?.message || e).slice(0, 80)}`);
+    const candidates = [
+      String(process.env.OUTFIT_AGENT_API_KEY_FILE || '').trim(),
+      '.secrets/outfit-agent.key',
+      '.secrets/lkb-agent.env',
+    ].filter(Boolean);
+    for (const file of candidates) {
+      const abs = path.isAbsolute(file) ? file : path.join(process.cwd(), file);
+      try {
+        if (!fs.existsSync(abs)) continue;
+        const raw = fs.readFileSync(abs, 'utf8').trim();
+        // 支持纯 key 文件，或 KEY=value 的 env 片段
+        const m = raw.match(/^(?:OUTFIT_AGENT_API_KEY|LKB_AGENT_TOKEN)=(.+)$/m);
+        const key = (m ? m[1] : raw.split('\n')[0]).trim();
+        if (key && !key.includes('=')) return key;
+        if (m) return m[1].trim();
+      } catch (e: any) {
+        this.logger.warn(`读 Agent Key 文件失败: ${String(e?.message || e).slice(0, 80)}`);
+      }
     }
     return '';
   }
