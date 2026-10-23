@@ -17,14 +17,23 @@
         bindblur="onNickname"
         bindconfirm="onNickname"
       />
-      <input
-        class="input"
-        type="number"
-        maxlength="20"
-        placeholder="手机号（可选）"
-        value="{{phone}}"
-        bindinput="onPhone"
-      />
+      <view class="phone-row">
+        <button
+          class="phone-wx-btn"
+          open-type="getPhoneNumber"
+          bindgetphonenumber="onGetPhoneNumber"
+          disabled="{{phoneBinding}}"
+        >{{phone ? '已绑定 ' + phone + '（可重绑）' : '微信手机号一键填写'}}</button>
+        <view class="phone-hint">需非个人主体且已微信认证；失败时可下方手填</view>
+        <input
+          class="input"
+          type="number"
+          maxlength="20"
+          placeholder="或手填手机号（可选）"
+          value="{{phone}}"
+          bindinput="onPhone"
+        />
+      </view>
       <view class="btn-primary mini" bindtap="saveProfileTap">保存资料</view>
     </view>
   </view>

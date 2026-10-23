@@ -106,6 +106,59 @@ export class WechatService {
   }
 
   /**
+   * 手机号快速验证：用 button getPhoneNumber 返回的 code 换取手机号。
+   * POST https://api.weixin.qq.com/wxa/business/getuserphonenumber
+   */
+  async getUserPhoneNumber(opts: {
+    appId: string;
+    secret: string;
+    code: string;
+    openid?: string;
+  }): Promise<{ phoneNumber: string; purePhoneNumber: string; countryCode: string }> {
+    const code = String(opts.code || '').trim();
+    if (!code) throw new BadGatewayException('缺少手机号 code');
+    const token = await this.getAccessToken(opts.appId, opts.secret);
+    const url = `https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=${token}`;
+    const body: { code: string; openid?: string } = { code };
+    if (opts.openid) body.openid = opts.openid;
+    let data: {
+      errcode?: number;
+      errmsg?: string;
+      phone_info?: { phoneNumber?: string; purePhoneNumber?: string; countryCode?: string };
+    };
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8000),
+      });
+      data = (await res.json()) as typeof data;
+    } catch (e) {
+      this.logger.error(`getuserphonenumber 请求失败: ${(e as Error).message}`);
+      throw new BadGatewayException('调用微信手机号接口失败，请稍后重试或手填');
+    }
+    if ((data.errcode && data.errcode !== 0) || !data.phone_info) {
+      this.logger.warn(`getuserphonenumber errcode=${data.errcode} errmsg=${data.errmsg}`);
+      throw new BadGatewayException(
+        `微信手机号不可用(${data.errcode ?? 'unknown'}): ${data.errmsg || '可手填手机号'}`,
+      );
+    }
+    const phone =
+      data.phone_info.purePhoneNumber ||
+      data.phone_info.phoneNumber ||
+      '';
+    if (!phone) {
+      throw new BadGatewayException('微信未返回手机号，请手填');
+    }
+    return {
+      phoneNumber: data.phone_info.phoneNumber || phone,
+      purePhoneNumber: data.phone_info.purePhoneNumber || phone,
+      countryCode: data.phone_info.countryCode || '86',
+    };
+  }
+
+  /**
    * 生成小程序码（无限量）。scene ≤32 字节；成功返回 PNG buffer。
    * page 须为已发布页面路径（无前导 /）；开发期可 checkPath=false。
    */

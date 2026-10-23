@@ -110,8 +110,9 @@ export class LoginService {
         openid: user.openid,
         memberId: user.memberId,
         customerId: customer.id,
-        nickname: nickname || null,
-        avatarUrl: null,
+        nickname: nickname || customer.nickname || null,
+        avatarUrl: customer.avatarUrl || null,
+        phone: customer.phone || null,
       };
     }
     const c = await this.customers.ensureProfile(user);
@@ -156,6 +157,32 @@ export class LoginService {
     }
     await this.customers.updateSelfProfile(user, patch);
     return this.getMe(user);
+  }
+
+  /**
+   * 消费 getPhoneNumber 的 code，写入 customer_profiles.phone（员工同步档案）。
+   * 个人主体/未认证/额度不足时微信侧会失败，前端应保留手填。
+   */
+  async bindPhoneFromWechat(user: AuthContext, phoneCode: string) {
+    const code = String(phoneCode || '').trim();
+    if (!code) throw new BadRequestException('缺少手机号 code');
+    const tenant = await this.tenants.getById(user.tenantId);
+    if (!tenant) throw new BadRequestException('租户不存在');
+    const secret = await this.tenants.getAppSecret(tenant);
+    if (!secret) {
+      throw new ServiceUnavailableException(
+        `小程序 ${tenant.wxAppId} 未配置 AppSecret，无法换取微信手机号；请手填或配置 WECHAT_APP_SECRET`,
+      );
+    }
+    const info = await this.wechat.getUserPhoneNumber({
+      appId: tenant.wxAppId,
+      secret,
+      code,
+      openid: user.openid,
+    });
+    const phone = String(info.purePhoneNumber || info.phoneNumber || '').trim().slice(0, 32);
+    if (!phone) throw new BadRequestException('未获取到手机号');
+    return this.updateProfile(user, { phone });
   }
 
   private async resolveTenant(appId: string | undefined, tenantId: string | undefined, devFake: boolean): Promise<TenantInfo> {

@@ -7,6 +7,7 @@ Page({
     nickname: '',
     avatarUrl: '',
     phone: '',
+    phoneBinding: false,
     contactQrUrl: '',
     allowCustomerDownload: false,
     isOwner: false,
@@ -78,21 +79,60 @@ Page({
     const nickname = ((e.detail && e.detail.value) || '').trim();
     this.setData({ nickname });
   },
+  onPhone(e) {
+    this.setData({ phone: (e.detail && e.detail.value) || '' });
+  },
+  /** 微信手机号快速验证：code 交后端换号并写资料；失败保留手填 */
+  async onGetPhoneNumber(e) {
+    const detail = (e && e.detail) || {};
+    if (detail.errno === 1400001) {
+      wx.showToast({ title: '手机号额度不足，请手填', icon: 'none' });
+      return;
+    }
+    if (!detail.code) {
+      const msg = (detail.errMsg || '').indexOf('deny') >= 0 || (detail.errMsg || '').indexOf('auth deny') >= 0
+        ? '已取消授权，可手填手机号'
+        : '无法唤起微信手机号，可手填';
+      wx.showToast({ title: msg, icon: 'none' });
+      return;
+    }
+    this.setData({ phoneBinding: true });
+    try {
+      const me = await request({
+        url: '/api/auth/me/phone',
+        method: 'POST',
+        data: { code: detail.code },
+      });
+      const phone = (me && me.phone) || '';
+      if (phone) this.setData({ phone });
+      wx.showToast({ title: phone ? '手机号已绑定' : '已处理', icon: 'success' });
+    } catch (err) {
+      wx.showToast({
+        title: (err && err.message) || '微信手机号不可用，请手填',
+        icon: 'none',
+      });
+    } finally {
+      this.setData({ phoneBinding: false });
+    }
+  },
   async saveProfileTap() {
     const nickname = (this.data.nickname || '').trim();
     const avatarUrl = this.data.avatarUrl || '';
-    if (!nickname && !avatarUrl) {
-      wx.showToast({ title: '请先点选头像或昵称', icon: 'none' });
+    const phone = (this.data.phone || '').trim();
+    if (!nickname && !avatarUrl && !phone) {
+      wx.showToast({ title: '请先点选头像/昵称或手机', icon: 'none' });
       return;
     }
     try {
-      const { avatarUrl: persisted, nickname: nick } = await saveProfileWithAvatarUpload({
+      const { avatarUrl: persisted, nickname: nick, phone: ph } = await saveProfileWithAvatarUpload({
         nickname: nickname || undefined,
         avatarUrl: avatarUrl || undefined,
+        phone: phone || undefined,
       });
       const patch = {};
       if (persisted) patch.avatarUrl = persisted;
       if (nick != null) patch.nickname = nick;
+      if (ph != null) patch.phone = ph;
       if (Object.keys(patch).length) this.setData(patch);
       wx.showToast({ title: '已保存', icon: 'success' });
     } catch (e) {
