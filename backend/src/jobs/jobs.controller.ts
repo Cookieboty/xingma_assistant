@@ -57,6 +57,23 @@ export class JobsController {
     return { types: this.jobs.listHandlerTypes() };
   }
 
+  /** 手动回收孤儿/陈旧 running → 重新排队（业主） */
+  @Post('reclaim-orphans')
+  @Roles('owner')
+  reclaimOrphans(
+    @Query('onlyStale') onlyStale?: string,
+    @Query('staleMs') staleMs?: string,
+  ) {
+    // 默认只收陈旧；onlyStale=0 才强制回收全部 running（慎用，会打断本进程活任务）
+    const forceAll = onlyStale === '0' || onlyStale === 'false';
+    return this.jobs
+      .reclaimOrphanedRunning({
+        onlyStale: !forceAll,
+        staleMs: staleMs ? parseInt(staleMs, 10) : undefined,
+      })
+      .then((reclaimed) => ({ reclaimed }));
+  }
+
   @Get(':id')
   get(@AuthUser() user: AuthContext, @Param('id') id: string) {
     return this.jobs.get(user, id);

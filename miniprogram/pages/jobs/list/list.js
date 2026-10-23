@@ -112,6 +112,7 @@ Page({
       { id: 'running', name: '在做' },
       { id: 'succeeded', name: '完成' },
       { id: 'failed', name: '失败' },
+      { id: 'cancelled', name: '已取消' },
     ],
     typeChips: [
       { id: '', name: '全部类型' },

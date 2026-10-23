@@ -144,6 +144,7 @@ NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
 | GET | `/jobs/meta/handlers` | 已注册 handler |
 | GET | `/jobs/:id` `/jobs/:id/events` | 详情 / 事件 |
 | POST | `/jobs/:id/retry` `/cancel` | 重试 / 取消 |
+| POST | `/jobs/reclaim-orphans` | 业主：回收孤儿/陈旧 running → 重排队 |
 
 ### 其他
 
@@ -232,7 +233,7 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 | OSS | `OSS_PROVIDER` `OSS_REGION` `OSS_ENDPOINT` `OSS_BUCKET` `OSS_PREFIX` `OSS_ACCESS_KEY_ID` `OSS_ACCESS_KEY_SECRET`；签名过期 `OSS_SIGNED_URL_EXPIRES`（默认 3600，兼容 `OSS_SIGNED_TTL`）；对象 ACL `OSS_OBJECT_ACL=private`；可选 `MEDIA_PUBLIC_BASE` `MEDIA_SERVE_LOCAL` `OSS_PUBLIC_READ`；兼容别名 `ALIYUN_*` |
 | 生图 | `IMAGE_GEN_BASE_URL` `IMAGE_GEN_API_KEY` `IMAGE_GEN_MODEL` `IMAGE_GEN_REF_MODE` `IMAGE_GEN_CONCURRENCY` `IMAGE_GEN_TIMEOUT_MS` |
 | 视觉 | `VISION_BASE_URL` `VISION_API_KEY` `VISION_MODEL` `VISION_TIMEOUT_MS` `VISION_MAX_CANDIDATES` `VISION_OCR_CONCURRENCY` `ENABLE_MAC_VISION_OCR` |
-| 任务 | `JOB_SCHEDULER` `JOB_CONCURRENCY` `JOB_POLL_MS` `JOB_AUTO_RETRY` `DEFAULT_PRODUCT_LEVEL_ID` |
+| 任务 | `JOB_SCHEDULER` `JOB_CONCURRENCY` `JOB_POLL_MS` `JOB_AUTO_RETRY` `JOB_STALE_MS`（默认 2700000=45min） `DEFAULT_PRODUCT_LEVEL_ID` |
 
 生产检查：`DEV_FAKE_LOGIN=false`；`WECHAT_APP_SECRET` 或 `tenants.wx_app_secret` 已配置；`JWT_SECRET` 非默认串。
 
@@ -317,6 +318,17 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 | 访问控制 | `src/products/product-access.service.ts` |
 | 邀请 | `src/invites/` `pages/invite/accept` `pages/settings` |
 
+
+
+### 任务孤儿回收（running 卡死）
+
+单进程 worker：调度器只 claim `queued`；进程死亡后 `running` 会永久卡住。
+
+- **启动**：`JobSchedulerService.onModuleInit` 调用 `JobsService.reclaimOrphanedRunning({ onlyStale: false })`，把**全部** `running` 改回 `queued`（清 `lockedBy`，进度消息「进程中断，已重新排队继续」；`attempts` 减 1 抵消 claim，不轻易烧尽 `maxAttempts`）。
+- **运行中**：约每 20 tick / 60s 对 `updated_at` 早于 `JOB_STALE_MS`（默认 45 分钟）的 `running` 同样重排队。活任务靠 `updateProgress`→`save` 刷新 `updated_at`。
+- **不**因孤儿/陈旧标记 `failed`；仅 handler 抛错且 attempts 用尽、或用户取消才结束。
+- `promo_image`：关联 `promo_sets` 若误为 `failed`，重排队时改回 `generating`；本来就是 `generating` 则保持。
+- 手动：`POST /api/jobs/reclaim-orphans`（owner）。
 
 ## 附录：宣传多色与去重
 

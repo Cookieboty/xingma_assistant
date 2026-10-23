@@ -21,6 +21,7 @@ import {
 import { buildJobDisplayTitle } from './job-display-title';
 import { Product } from '../common/entities/product.entity';
 import { MediaAsset } from '../common/entities/media-asset.entity';
+import { PromoSetEntity } from '../common/entities/promo-set.entity';
 import { OssClient } from '../media/oss.client';
 
 @Injectable()
@@ -182,6 +183,100 @@ export class JobsService {
     await repo.save(row);
     await this.appendEvent(row, 'cancel', '用户取消');
     return this.toDto(row);
+  }
+
+
+  /**
+   * 回收孤儿/陈旧 running：一律重新排队继续（不标记 failed，不消耗 maxAttempts）。
+   * - onlyStale=false：全部 running（进程启动时，本进程尚未领取任何任务）
+   * - onlyStale=true：updated_at 早于 now-staleMs（默认 JOB_STALE_MS=45min）
+   * promo_image：若关联 promo_sets 被误标 failed，改回 generating。
+   */
+  async reclaimOrphanedRunning(opts?: {
+    staleMs?: number;
+    onlyStale?: boolean;
+  }): Promise<number> {
+    if (!(this.dataSource && process.env.DB_ENABLED === 'true')) return 0;
+    const onlyStale = opts?.onlyStale === true;
+    const envStale = parseInt(process.env.JOB_STALE_MS || '2700000', 10);
+    const staleMs = Math.max(
+      60_000,
+      opts?.staleMs ?? (Number.isFinite(envStale) && envStale > 0 ? envStale : 2_700_000),
+    );
+    const repo = this.jobs();
+    const qb = repo.createQueryBuilder('j').where('j.status = :st', { st: 'running' });
+    if (onlyStale) {
+      const cutoff = new Date(Date.now() - staleMs);
+      qb.andWhere('j.updatedAt < :cutoff', { cutoff });
+    }
+    const rows = await qb.getMany();
+    if (!rows.length) return 0;
+
+    let n = 0;
+    const msg = '进程中断，已重新排队继续';
+    for (const row of rows) {
+      const prevAttempts = row.attempts || 0;
+      // 抵消 claim 时 +1，避免进程反复中断烧掉 maxAttempts
+      row.attempts = Math.max(0, prevAttempts - 1);
+      row.status = 'queued';
+      row.lockedBy = null;
+      row.nextRunAt = null;
+      row.finishedAt = null;
+      row.error = null;
+      row.progress = {
+        percent: 0,
+        step: 'queued',
+        message: msg,
+      };
+      await repo.save(row);
+      await this.appendEvent(
+        row,
+        'reclaim',
+        msg,
+        { onlyStale, staleMs, previousAttempts: prevAttempts },
+        'warn',
+      );
+      await this.revivePromoSetForRequeuedJob(row);
+      n += 1;
+    }
+    if (n) {
+      this.logger.warn(
+        `reclaimOrphanedRunning count=${n} onlyStale=${onlyStale} staleMs=${staleMs}`,
+      );
+    }
+    return n;
+  }
+
+  /** promo_image 重排队：若 set 误为 failed，改回 generating（generating 保持不动） */
+  private async revivePromoSetForRequeuedJob(job: JobEntity) {
+    if (job.type !== 'promo_image' || !this.dataSource) return;
+    const setId = String((job.payload as any)?.setId || '').trim();
+    if (!setId) return;
+    try {
+      const sets = this.dataSource.getRepository(PromoSetEntity);
+      const row = await sets.findOne({
+        where: { id: setId, tenantId: job.tenantId },
+      });
+      if (!row) return;
+      if (row.status === 'failed') {
+        row.status = 'generating';
+        row.jobId = job.id;
+        await sets.save(row);
+        this.logger.log(
+          `promo_set ${setId} failed→generating (job reclaim ${job.id})`,
+        );
+      } else if (row.status === 'generating' && row.jobId !== job.id) {
+        // 仍挂着本 job 或空 jobId 时对齐
+        if (!row.jobId) {
+          row.jobId = job.id;
+          await sets.save(row);
+        }
+      }
+    } catch (e) {
+      this.logger.warn(
+        `revivePromoSetForRequeuedJob failed: ${(e as Error).message}`,
+      );
+    }
   }
 
   /** 调度器：原子领取一条到期 queued 任务（FOR UPDATE SKIP LOCKED） */

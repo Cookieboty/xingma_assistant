@@ -97,7 +97,7 @@ npm install && npm run build && npm run start:dev
 |------|------|
 | **tenant** | 一个档口/一个小程序 AppID；业务表均带 `tenant_id`，请求头 `X-Wx-Appid` 解析 |
 | **batch** | 发品上传批次（内存，TTL≈2h）：`batchId` 聚合未确认前的一组图；主路径上传后立刻建草稿商品并入队 |
-| **job** | 通用异步任务（表 `jobs`）：类型如 `publish_product` / `promo_image` / `cover_reselect`；状态 queued→running→succeeded/failed/cancelled |
+| **job** | 通用异步任务（表 `jobs`）：类型如 `publish_product` / `promo_image` / `cover_reselect`；状态 queued→running→succeeded/failed/cancelled；进程中断/陈旧 running 由调度器 **reclaim 重排队继续**（不轻易 failed） |
 | **promo_set** | 宣传素材组（表 `promo_sets`）：一商品多组；含模板、参数、caption、图片 JSON、关联 `job_id` |
 | **coverMediaIds** | 商品封面/图序：`products.cover_media_ids` JSON 数组，顺序即展示序；编辑页可调序写回 |
 
