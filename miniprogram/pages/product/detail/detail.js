@@ -203,8 +203,7 @@ Page({
         if (res.tapIndex === 0) {
           wx.navigateTo({ url: `/pages/product/promo/promo?id=${id}&type=image` });
         } else if (res.tapIndex === 1) {
-          // 视频生成页尚未就绪；有入口参数时预留 type=video
-          wx.showToast({ title: '宣传视频即将支持', icon: 'none' });
+          wx.navigateTo({ url: `/pages/product/promo/promo?id=${id}&type=video` });
         }
       },
     });

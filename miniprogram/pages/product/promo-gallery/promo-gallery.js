@@ -1,5 +1,5 @@
 const { request } = require('../../../utils/request');
-const { saveUrlsToAlbum } = require('../../../utils/saveAlbum');
+const { saveUrlsToAlbum, saveVideoUrlsToAlbum } = require('../../../utils/saveAlbum');
 
 const STATUS_LABEL = {
   generating: '生成中',
@@ -56,14 +56,19 @@ function enrichSet(s, prev) {
   const albumAllSelected = withUrl.length > 0 && albumSelectedCount === withUrl.length;
   const kind = s.kind || s.type || 'image';
   const isVideo = kind === 'video' || kind === 'promo_video';
+  const videoUrl = isVideo ? ((items.find((i) => i && i.url) || {}).url || '') : '';
   return Object.assign({}, s, {
     items,
     done,
     total,
     busy,
+    isVideo,
+    videoUrl,
     albumSelectedCount,
     albumAllSelected,
-    albumSaveLabel: albumSelectedCount ? `下载到相册(${albumSelectedCount})` : '下载到相册',
+    albumSaveLabel: albumSelectedCount
+      ? (isVideo ? `保存视频(${albumSelectedCount})` : `下载到相册(${albumSelectedCount})`)
+      : (isVideo ? '保存视频到相册' : '下载到相册'),
     regenLabel: (!albumSelectedCount
       ? '重新生成'
       : (albumAllSelected
@@ -159,7 +164,7 @@ Page({
         if (res.tapIndex === 0) {
           wx.navigateTo({ url: `/pages/product/promo/promo?id=${this.data.id}&type=image` });
         } else if (res.tapIndex === 1) {
-          wx.showToast({ title: '宣传视频即将支持', icon: 'none' });
+          wx.navigateTo({ url: `/pages/product/promo/promo?id=${this.data.id}&type=video` });
         }
       },
     });
@@ -174,6 +179,12 @@ Page({
       s.id === id ? Object.assign({}, s, { expanded: !s.expanded }) : s
     ));
     this.setData({ sets });
+  },
+
+  playVideo(e) {
+    const url = e.currentTarget.dataset.url;
+    if (!url) return;
+    // 全屏用 video 组件即可；此处保证展开
   },
 
   preview(e) {
@@ -219,20 +230,23 @@ Page({
       .filter((i) => i && i.url && i.albumSelected)
       .map((i) => i.url);
     if (!urls.length) {
-      wx.showToast({ title: '请先勾选要下载的图片', icon: 'none' });
+      wx.showToast({ title: set && set.isVideo ? '请先勾选要保存的视频' : '请先勾选要下载的图片', icon: 'none' });
       return;
     }
     this.setData({ savingAlbumId: setId });
     wx.showLoading({ title: `保存中 0/${urls.length}`, mask: true });
     try {
-      const r = await saveUrlsToAlbum(urls, {
+      const saver = (set && set.isVideo) ? saveVideoUrlsToAlbum : saveUrlsToAlbum;
+      const r = await saver(urls, {
         onProgress(cur, total) {
           wx.showLoading({ title: `保存中 ${cur}/${total}`, mask: true });
         },
       });
       wx.hideLoading();
       wx.showToast({
-        title: r.fail ? `成功 ${r.ok} / 失败 ${r.fail}` : `已保存 ${r.ok} 张到相册`,
+        title: r.fail
+          ? `成功 ${r.ok} / 失败 ${r.fail}`
+          : (set && set.isVideo ? `已保存 ${r.ok} 条视频` : `已保存 ${r.ok} 张到相册`),
         icon: 'none',
         duration: 2500,
       });

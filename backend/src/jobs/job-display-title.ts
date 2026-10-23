@@ -13,6 +13,12 @@ export function buildJobDisplayTitle(
   if (cached && templateId !== 'multi_color') return cached;
 
   if (type === 'promo_image') return buildPromoTitle(p);
+  if (type === 'promo_video') {
+    const styleNo = String(p.styleNo || '').trim();
+    const tpl = findTemplate(String(p.templateId || ''));
+    const name = tpl?.name || '宣传视频';
+    return styleNo ? `${name} · 款号${styleNo}` : name;
+  }
   if (type === 'publish_product') return buildPublishTitle(p);
   if (type === 'cover_reselect') {
     const styleNo = String(p.styleNo || '').trim();

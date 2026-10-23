@@ -8,18 +8,22 @@ import { PromoSetEntity, PromoSetImage } from '../common/entities/promo-set.enti
 import { newId } from '../common/utils/id';
 import { ProductsService } from '../products/products.service';
 import { ImageGenClient } from './image-gen.client';
-import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength } from './promo.templates';
+import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind } from './promo.templates';
 import { enrichPoseSceneText } from './pose-scene-enrich';
 import { VisionClient } from '../vision/vision.client';
 import { JobsService } from '../jobs/jobs.service';
 import { registerPromoImageHandler } from '../jobs/handlers/promo-image.handler';
+import { registerPromoVideoHandler } from '../jobs/handlers/promo-video.handler';
 import { JobProgress } from '../jobs/job.types';
 import { OssClient } from '../media/oss.client';
 import { buildPromoCaption } from './promo.captions';
 import { buildJobDisplayTitle } from '../jobs/job-display-title';
+import { VideoGenClient } from './video-gen.client';
 
 export interface GenerateInput {
   templateId: string;
+  /** image（默认）| video：走 promo_image / promo_video */
+  mediaKind?: 'image' | 'video';
   feature?: string;
   referenceAssetIds: string[];
   modelId?: string | null;
@@ -43,6 +47,8 @@ export interface GenerateInput {
   styleRefObjectKeys?: string[];
   /** 风格强弱：weak / medium / strong；默认 medium；无风格图时忽略 */
   styleStrength?: StyleStrength;
+  /** 视频时长秒数（约 15）；仅 mediaKind=video */
+  seconds?: number;
 }
 
 interface JobItem {
@@ -83,6 +89,7 @@ export class PromoService implements OnModuleInit {
   constructor(
     private readonly products: ProductsService,
     private readonly gen: ImageGenClient,
+    private readonly videoGen: VideoGenClient,
     private readonly jobs: JobsService,
     private readonly oss: OssClient,
     @Optional() private readonly vision?: VisionClient,
@@ -91,6 +98,7 @@ export class PromoService implements OnModuleInit {
 
   onModuleInit() {
     registerPromoImageHandler(this.jobs, this);
+    registerPromoVideoHandler(this.jobs, this);
   }
 
   // ---------- 路径 ----------
@@ -166,14 +174,19 @@ export class PromoService implements OnModuleInit {
   }
 
   // ---------- 预设 ----------
-  listTemplates() {
-    return TEMPLATES.map(templateDto);
+  listTemplates(kind: 'image' | 'video' | 'all' = 'image') {
+    return listTemplatesByKind(kind).map(templateDto);
   }
   listModels() {
     return MODELS.map(({ id, name, desc }) => ({ id, name, desc }));
   }
   presets() {
-    return { templates: this.listTemplates(), models: this.listModels(), sizes: Object.values(SIZES) };
+    return {
+      templates: this.listTemplates('image'),
+      videoTemplates: this.listTemplates('video'),
+      models: this.listModels(),
+      sizes: Object.values(SIZES),
+    };
   }
 
   // ---------- 素材 ----------
@@ -225,6 +238,7 @@ export class PromoService implements OnModuleInit {
       featureSource: draft ? 'saved' : 'auto',
       template: tpl ? templateDto(tpl) : null,
       configured: this.gen.configured(),
+      videoConfigured: this.videoGen.configured(),
     };
   }
 
@@ -274,6 +288,11 @@ export class PromoService implements OnModuleInit {
   async generate(user: AuthContext, productId: string, input: GenerateInput) {
     const tpl = findTemplate(input?.templateId);
     if (!tpl) throw new BadRequestException('未知模板');
+    const wantVideo =
+      input?.mediaKind === 'video' || isVideoTemplate(tpl) || String(input?.mediaKind || '') === 'promo_video';
+    if (wantVideo) {
+      return this.generateVideo(user, productId, { ...input, mediaKind: 'video', templateId: tpl.id });
+    }
     if (!this.gen.configured()) throw new BadRequestException('服务端未配置生图密钥');
     const product: any = await this.products.getDetail(user, productId);
     const colorsIn = Array.isArray(input.colors) ? input.colors.map((c) => String(c || '').trim()).filter(Boolean) : [];
@@ -387,12 +406,389 @@ export class PromoService implements OnModuleInit {
     };
   }
 
+
+  /**
+   * 宣传视频：创建 promo_sets(kind=video) + jobs(type=promo_video)。
+   * 一期固定 1 条竖屏约 15s；模板默认 product_showcase_video。
+   */
+  async generateVideo(user: AuthContext, productId: string, input: GenerateInput) {
+    let tpl = findTemplate(input?.templateId);
+    if (!tpl || !isVideoTemplate(tpl)) {
+      tpl = findTemplate('product_showcase_video') || undefined;
+    }
+    if (!tpl) throw new BadRequestException('未知视频模板');
+    if (!this.videoGen.configured()) throw new BadRequestException('服务端未配置视频生成密钥');
+    const product: any = await this.products.getDetail(user, productId);
+    const refs = (input.referenceAssetIds || []).filter(Boolean);
+    if (refs.length < tpl.reference.min || refs.length > tpl.reference.max) {
+      throw new BadRequestException(`视频需选择 ${tpl.reference.min}-${tpl.reference.max} 张参考图`);
+    }
+    const count = 1;
+    const sizeId = tpl.sizes.includes(String(input.sizeId || '')) ? String(input.sizeId) : tpl.defaultSize;
+    const feature = String(input.feature || '').slice(0, 2000);
+    const caption = this.captionFor(product, { ...input, feature, count, sizeId }, tpl.id);
+    const params = {
+      kind: 'video' as const,
+      mediaKind: 'video' as const,
+      templateId: tpl.id,
+      feature,
+      referenceAssetIds: refs,
+      modelId: null,
+      poses: [],
+      scenes: [],
+      colors: [],
+      count,
+      sizeId,
+      seconds: parseInt(process.env.VIDEO_GEN_SECONDS || '15', 10) || 15,
+    };
+
+    const repo = this.setsRepo();
+    const reused = await this.findActivePromo(user, productId, tpl.id, input.setId, 'promo_video');
+    if (reused) {
+      this.logger.log(
+        `generateVideo reuse productId=${productId} templateId=${tpl.id} setId=${reused.setId} jobId=${reused.jobId}`,
+      );
+      return reused;
+    }
+
+    let setId = input.setId;
+    if (setId) {
+      const existing = await repo.findOne({ where: { id: setId, tenantId: user.tenantId, productId } });
+      if (!existing) throw new NotFoundException('宣传素材组不存在');
+      existing.status = 'generating';
+      existing.params = params;
+      existing.caption = caption;
+      existing.templateId = tpl.id;
+      await repo.save(existing);
+    } else {
+      setId = newId('ps');
+      await repo.save(
+        repo.create({
+          id: setId,
+          tenantId: user.tenantId,
+          productId,
+          templateId: tpl.id,
+          params,
+          caption,
+          jobId: null,
+          legacyJobId: null,
+          status: 'generating',
+          images: [{ index: 0, status: 'pending' as const }],
+        }),
+      );
+    }
+
+    const jobPayload = {
+      productId,
+      setId,
+      ...params,
+      styleNo: product.styleNo,
+    };
+    const displayTitle = buildJobDisplayTitle('promo_video', { ...jobPayload, displayTitle: undefined });
+    const job = await this.jobs.create(user, 'promo_video', {
+      ...jobPayload,
+      displayTitle,
+    });
+    await repo.update({ id: setId, tenantId: user.tenantId }, { jobId: job.id });
+
+    return {
+      id: job.id,
+      jobId: job.id,
+      setId,
+      status: job.status,
+      templateId: tpl.id,
+      kind: 'video',
+      mediaKind: 'video',
+      caption,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      progress: job.progress,
+      done: 0,
+      total: count,
+      items: [],
+      reused: false,
+    };
+  }
+
+  /**
+   * promo_video worker：生成单条视频 → OSS → promo_sets / media_assets(type=video)。
+   */
+  async executeGenerateVideoJob(
+    user: AuthContext,
+    productId: string,
+    input: GenerateInput & Record<string, unknown>,
+    opts?: { onProgress?: (p: Partial<JobProgress>) => Promise<void> },
+  ) {
+    let tpl = findTemplate(String(input?.templateId || ''));
+    if (!tpl || !isVideoTemplate(tpl)) tpl = findTemplate('product_showcase_video') || undefined;
+    if (!tpl) throw new Error('未知视频模板');
+    if (!this.videoGen.configured()) throw new Error('服务端未配置视频生成密钥');
+
+    const { product, assets } = await this.productAssets(user, productId);
+    const refIds = ((input.referenceAssetIds as string[]) || []).filter(Boolean);
+    if (refIds.length < tpl.reference.min || refIds.length > tpl.reference.max) {
+      throw new Error(`视频需选择 ${tpl.reference.min}-${tpl.reference.max} 张参考图`);
+    }
+    const byId = new Map(assets.map((a) => [a.id, a]));
+    const refs = refIds.map((id) => byId.get(id));
+    if (refs.some((r) => !r)) throw new Error('参考图不属于该商品');
+
+    const feature = String(
+      input.feature ?? this.readFeature(user.tenantId, productId)?.feature ?? this.defaultFeature(product),
+    ).slice(0, 2000);
+    const sizeId = tpl.sizes.includes(String(input.sizeId || '')) ? String(input.sizeId) : tpl.defaultSize;
+    const upstreamSize = SIZES[sizeId]?.upstream || this.videoGen.defaultSize;
+    const seconds = Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? 15) || 15;
+    const prompt = tpl.buildPrompt({
+      feature,
+      model: null,
+      pose: null,
+      scene: null,
+      colors: [],
+      index: 0,
+      total: 1,
+    });
+
+    await opts?.onProgress?.({ percent: 10, step: 'refs', message: '准备参考图', done: 0, total: 1 });
+
+    const refPaths: string[] = [];
+    for (const r of refs) {
+      const local = await this.ensureLocal(r!.objectKey);
+      if (!local) throw new Error(`参考图本地不可用：${r!.objectKey}`);
+      refPaths.push(local);
+    }
+
+    const legacyId = newId('pj');
+    const keyDir = `tenants/${user.tenantId}/products/${product.styleNo}/promo/${legacyId}`;
+    fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
+
+    const setId = String(input.setId || '');
+    const item: JobItem = { index: 0, status: 'running', prompt };
+    const legacy: PromoJob = {
+      id: legacyId,
+      tenantId: user.tenantId,
+      productId,
+      templateId: tpl.id,
+      status: 'running',
+      input: {
+        ...(input as GenerateInput),
+        mediaKind: 'video',
+        feature,
+        count: 1,
+        sizeId,
+        _frameworkJobId: String(input._frameworkJobId || ''),
+      } as any,
+      size: upstreamSize,
+      items: [item],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    this.saveJob(legacy);
+
+    await opts?.onProgress?.({ percent: 20, step: 'generating', message: '视频生成中', done: 0, total: 1 });
+    const t0 = Date.now();
+    try {
+      const r = await this.videoGen.generate({
+        prompt,
+        size: upstreamSize,
+        seconds,
+        refs: refPaths,
+      });
+      const ext = r.mime.includes('webm') ? '.webm' : r.mime.includes('quicktime') ? '.mov' : '.mp4';
+      const objectKey = `${keyDir}/01${ext}`;
+      fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
+      await this.oss.putObjectSafe(r.buffer, objectKey, r.mime || 'video/mp4');
+      Object.assign(item, { status: 'done', objectKey, via: r.via, ms: Date.now() - t0 });
+      this.saveJob(legacy);
+      await opts?.onProgress?.({ percent: 85, step: 'upload', message: '上传完成', done: 1, total: 1 });
+    } catch (e: any) {
+      item.status = 'failed';
+      item.error = String(e.message || e).slice(0, 500);
+      item.ms = Date.now() - t0;
+      legacy.status = 'failed';
+      this.saveJob(legacy);
+      // 标记 set failed
+      if (setId && this.dataSource && process.env.DB_ENABLED === 'true') {
+        try {
+          await this.setsRepo().update(
+            { id: setId, tenantId: user.tenantId },
+            { status: 'failed', images: [{ index: 0, status: 'failed', error: item.error }] as any },
+          );
+        } catch {
+          /* ignore */
+        }
+      }
+      throw e;
+    }
+
+    legacy.status = 'done';
+    this.saveJob(legacy);
+
+    const setResult = await this.persistVideoSetAfterGenerate(user, productId, product, {
+      setId,
+      frameworkJobId: String(input._frameworkJobId || ''),
+      legacyJobId: legacy.id,
+      templateId: tpl.id,
+      input: {
+        ...(input as GenerateInput),
+        mediaKind: 'video',
+        feature,
+        count: 1,
+        sizeId,
+      },
+      item,
+      seconds,
+      size: upstreamSize,
+    });
+
+    await opts?.onProgress?.({ percent: 100, step: 'done', message: '视频已完成', done: 1, total: 1 });
+
+    return {
+      promoJobId: legacy.id,
+      setId: setResult.setId,
+      templateId: tpl.id,
+      kind: 'video',
+      status: 'done',
+      caption: setResult.caption,
+      done: 1,
+      total: 1,
+      items: [
+        {
+          index: 0,
+          status: 'done',
+          url: item.objectKey ? this.publicUrl(item.objectKey) : null,
+          mediaId: item.savedMediaId || null,
+          mimeType: 'video/mp4',
+          ms: item.ms,
+        },
+      ],
+    };
+  }
+
+  /** 视频生成成功：promo_sets(kind=video) + media_assets(type=video)；不写入封面图列表 */
+  private async persistVideoSetAfterGenerate(
+    user: AuthContext,
+    productId: string,
+    product: any,
+    opts: {
+      setId: string;
+      frameworkJobId: string;
+      legacyJobId: string;
+      templateId: string;
+      input: GenerateInput;
+      item: JobItem;
+      seconds: number;
+      size: string;
+    },
+  ) {
+    if (!(this.dataSource && process.env.DB_ENABLED === 'true')) {
+      return { setId: opts.setId || opts.legacyJobId, caption: '' };
+    }
+    const repo = this.setsRepo();
+    const mediaRepo = this.dataSource.getRepository(MediaAsset);
+    let setId = opts.setId;
+    let row = setId
+      ? await repo.findOne({ where: { id: setId, tenantId: user.tenantId, productId } })
+      : null;
+    if (!row) {
+      setId = setId || newId('ps');
+      row = repo.create({
+        id: setId,
+        tenantId: user.tenantId,
+        productId,
+        templateId: opts.templateId,
+        params: null,
+        caption: null,
+        jobId: null,
+        legacyJobId: opts.legacyJobId,
+        status: 'generating',
+        images: [],
+      });
+    }
+
+    // 重生：软删本组旧视频 media
+    if (row.images?.length) {
+      const oldIds = row.images.map((i) => i.mediaId).filter(Boolean) as string[];
+      for (const mid of oldIds) {
+        await mediaRepo.update({ id: mid, tenantId: user.tenantId }, { status: 'deleted' });
+      }
+    }
+
+    const caption = this.captionFor(product, opts.input, opts.templateId);
+    let mediaId: string | undefined;
+    if (opts.item.status === 'done' && opts.item.objectKey) {
+      const abs = path.join(this.storageRoot(), opts.item.objectKey);
+      const sizeBytes = fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+      const mime = opts.item.objectKey.endsWith('.webm')
+        ? 'video/webm'
+        : opts.item.objectKey.endsWith('.mov')
+          ? 'video/quicktime'
+          : 'video/mp4';
+      const saved = await mediaRepo.save(
+        mediaRepo.create({
+          tenantId: user.tenantId,
+          productId,
+          promoSetId: setId,
+          type: 'video',
+          provider: this.oss.mediaProvider(),
+          objectKey: opts.item.objectKey,
+          mimeType: mime,
+          sizeBytes: String(sizeBytes),
+          status: 'active',
+        }),
+      );
+      mediaId = saved.id;
+      opts.item.savedMediaId = mediaId;
+    }
+
+    const images: PromoSetImage[] = [
+      {
+        index: 0,
+        status: opts.item.status === 'done' ? 'done' : 'failed',
+        objectKey: opts.item.objectKey,
+        mediaId,
+        error: opts.item.error,
+        ms: opts.item.ms,
+      },
+    ];
+
+    row.templateId = opts.templateId;
+    row.params = {
+      kind: 'video',
+      mediaKind: 'video',
+      templateId: opts.templateId,
+      feature: opts.input.feature || '',
+      referenceAssetIds: opts.input.referenceAssetIds || [],
+      count: 1,
+      sizeId: opts.input.sizeId,
+      seconds: opts.seconds,
+      size: opts.size,
+      styleNo: product.styleNo,
+    };
+    row.caption = caption;
+    row.jobId = opts.frameworkJobId || row.jobId;
+    row.legacyJobId = opts.legacyJobId;
+    row.status = opts.item.status === 'done' ? 'done' : 'failed';
+    row.images = images;
+    await repo.save(row);
+
+    try {
+      const legacy = this.loadJob(user, productId, opts.legacyJobId);
+      legacy.items = [opts.item];
+      this.saveJob(legacy);
+    } catch {
+      /* ignore */
+    }
+    return { setId, caption };
+  }
+
   /** 查找同商品+模板（或指定 set）进行中的生图，用于防双开 */
   private async findActivePromo(
     user: AuthContext,
     productId: string,
     templateId: string,
     setId?: string,
+    jobType: 'promo_image' | 'promo_video' = 'promo_image',
   ) {
     const repo = this.setsRepo();
     if (setId) {
@@ -454,7 +850,7 @@ export class PromoService implements OnModuleInit {
       }
       // 组尚未落库但 job 已排队
       try {
-        const { items } = await this.jobs.list(user, { type: 'promo_image', limit: 30 });
+        const { items } = await this.jobs.list(user, { type: jobType, limit: 30 });
         const hit = items.find(
           (j) =>
             (j.status === 'queued' || j.status === 'running') &&
@@ -1107,8 +1503,9 @@ export class PromoService implements OnModuleInit {
     // 附带仍在排队/执行中的框架任务（尚未写出 pj_* 时也能在宣传图页看到）
     let pendingJobs: any[] = [];
     try {
-      const { items } = await this.jobs.list(user, { type: 'promo_image', limit: 50 });
-      pendingJobs = items
+      const imageJobs = await this.jobs.list(user, { type: 'promo_image', limit: 50 });
+      const videoJobs = await this.jobs.list(user, { type: 'promo_video', limit: 30 });
+      pendingJobs = [...(imageJobs.items || []), ...(videoJobs.items || [])]
         .filter((j) => (j.payload as any)?.productId === productId)
         .filter((j) => j.status === 'queued' || j.status === 'running');
     } catch {
@@ -1147,8 +1544,9 @@ export class PromoService implements OnModuleInit {
         total: (j.progress as any)?.total || 0,
         items: [],
         error: j.error,
-        title: buildJobDisplayTitle('promo_image', j.payload as any),
-        displayTitle: buildJobDisplayTitle('promo_image', j.payload as any),
+        title: buildJobDisplayTitle(j.type || 'promo_image', j.payload as any),
+        displayTitle: buildJobDisplayTitle(j.type || 'promo_image', j.payload as any),
+        kind: j.type === 'promo_video' ? 'video' : 'image',
       }));
 
     return [...pending, ...legacy]
@@ -1171,13 +1569,14 @@ export class PromoService implements OnModuleInit {
     }));
     const done = images.filter((i) => i.status === 'done' && i.url).length;
     const tpl = findTemplate(row.templateId);
-    const displayTitle = buildJobDisplayTitle('promo_image', {
+    const kind = (row as any).kind || (row.params as any)?.kind || (row.params as any)?.mediaKind || 'image';
+    const jobType = kind === 'video' || kind === 'promo_video' ? 'promo_video' : 'promo_image';
+    const displayTitle = buildJobDisplayTitle(jobType, {
       ...(row.params as any),
       templateId: row.templateId,
       displayTitle: row.templateId === 'multi_color' ? undefined : (row.params as any)?.displayTitle,
       styleNo: (row.params as any)?.styleNo,
     });
-    const kind = (row as any).kind || (row.params as any)?.kind || 'image';
     const posterUrl =
       (row.params as any)?.posterUrl ||
       (images.find((i) => i.url)?.url) ||
@@ -1217,7 +1616,9 @@ export class PromoService implements OnModuleInit {
     // 附带尚未落库完成的排队中任务（仅 payload.setId 已有）
     const dtos = rows.map((r) => this.setDto(r));
     try {
-      const { items } = await this.jobs.list(user, { type: 'promo_image', limit: 30 });
+      const imageJobs = await this.jobs.list(user, { type: 'promo_image', limit: 30 });
+      const videoJobs = await this.jobs.list(user, { type: 'promo_video', limit: 30 });
+      const items = [...(imageJobs.items || []), ...(videoJobs.items || [])];
       for (const j of items) {
         if ((j.payload as any)?.productId !== productId) continue;
         if (j.status !== 'queued' && j.status !== 'running') continue;
@@ -1228,6 +1629,10 @@ export class PromoService implements OnModuleInit {
           hit.jobId = j.id;
           (hit as any).progress = j.progress;
           (hit as any).busy = true;
+          if (j.type === 'promo_video') {
+            hit.kind = 'video';
+            hit.type = 'video';
+          }
         }
       }
     } catch {

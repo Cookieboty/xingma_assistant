@@ -281,7 +281,7 @@ export class JobsService {
 
   /** promo_image 重排队：若 set 误为 failed，改回 generating（generating 保持不动） */
   private async revivePromoSetForRequeuedJob(job: JobEntity) {
-    if (job.type !== 'promo_image' || !this.dataSource) return;
+    if ((job.type !== 'promo_image' && job.type !== 'promo_video') || !this.dataSource) return;
     const setId = String((job.payload as any)?.setId || '').trim();
     if (!setId) return;
     try {

@@ -210,3 +210,6 @@
   text-align: center;
   padding: 0 8rpx;
 }
+
+.video-result { margin-top: 16rpx; }
+.promo-video { width: 100%; height: 720rpx; background: #111; border-radius: 12rpx; }

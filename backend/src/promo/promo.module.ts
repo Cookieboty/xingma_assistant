@@ -5,11 +5,12 @@ import { JobsModule } from '../jobs/jobs.module';
 import { PromoController } from './promo.controller';
 import { PromoService } from './promo.service';
 import { ImageGenClient } from './image-gen.client';
+import { VideoGenClient } from './video-gen.client';
 
 @Module({
   imports: [AuthModule, forwardRef(() => ProductsModule), forwardRef(() => JobsModule)],
   controllers: [PromoController],
-  providers: [PromoService, ImageGenClient],
+  providers: [PromoService, ImageGenClient, VideoGenClient],
   exports: [PromoService],
 })
 export class PromoModule {}

@@ -10,7 +10,7 @@
   <view class="card muted" wx:if="{{loading && !sets.length}}">加载中…</view>
   <view class="card muted empty" wx:elif="{{!sets.length}}">
     <view>暂无宣传素材</view>
-    <view class="muted small" style="margin-top:8rpx;">可新建宣传图；宣传视频即将支持</view>
+    <view class="muted small" style="margin-top:8rpx;">可新建宣传图或竖版短视频</view>
     <view class="btn-primary" style="margin-top:24rpx;" bindtap="goGenerate">新建素材</view>
   </view>
 
@@ -22,7 +22,7 @@
           <text class="job-name">{{item.templateName}}</text>
           <text class="st {{item.busy ? 'run' : (item.status==='failed' ? 'err' : 'ok')}}">{{item.statusLabel}}</text>
         </view>
-        <view class="muted small">{{item.done}} / {{item.total}} 张 · {{item.expanded ? '收起' : '展开查看'}}</view>
+        <view class="muted small">{{item.isVideo ? (item.done + '/' + item.total + ' 条') : (item.done + ' / ' + item.total + ' 张')}} · {{item.expanded ? '收起' : '展开查看'}}</view>
         <view class="muted small" wx:if="{{item.progressText}}">{{item.progressText}}</view>
       </view>
       <text
@@ -43,7 +43,25 @@
         <text class="muted small">勾选图片后，用下方按钮下载或重新生成 · 点图可预览</text>
       </view>
 
-      <view class="grid" wx:if="{{item.items.length}}">
+      <view class="video-wrap" wx:if="{{item.isVideo && item.videoUrl}}">
+        <video
+          class="promo-video"
+          src="{{item.videoUrl}}"
+          controls
+          show-center-play-btn
+          object-fit="contain"
+          poster=""
+        ></video>
+        <view class="album-bar" style="margin-top:12rpx;">
+          <text
+            class="check {{item.items[0].albumSelected ? 'on' : ''}}"
+            data-setid="{{item.id}}"
+            data-index="0"
+            catchtap="toggleAlbumItem"
+          >{{item.items[0].albumSelected ? '✓ 已选' : '勾选以下载'}}</text>
+        </view>
+      </view>
+      <view class="grid" wx:elif="{{item.items.length}}">
         <view class="cell {{im.albumSelected ? 'checked' : ''}}" wx:for="{{item.items}}" wx:for-item="im" wx:for-index="idx" wx:key="index">
           <image
             wx:if="{{im.url}}"

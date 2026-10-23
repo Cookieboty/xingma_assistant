@@ -1,5 +1,5 @@
 const { request } = require('../../../utils/request');
-const { saveUrlsToAlbum } = require('../../../utils/saveAlbum');
+const { saveUrlsToAlbum, saveVideoUrlsToAlbum } = require('../../../utils/saveAlbum');
 const { requestJobSubscribe } = require('../../../utils/profile');
 const { uploadOneMedia } = require('../../../utils/oss-direct');
 
@@ -51,13 +51,31 @@ Page({
         request({ url: '/api/promo/presets' }),
         request({ url: `/api/products/${q.id}/promo/start`, method: 'POST', data: {} }),
       ]);
+      const templates = mediaKind === 'video'
+        ? (p.videoTemplates || []).concat((p.templates || []).filter((t) => t.mediaKind === 'video' || t.id === 'product_showcase_video'))
+        : (p.templates || []).filter((t) => t.mediaKind !== 'video' && t.id !== 'product_showcase_video');
+      // 去重
+      const seen = {};
+      const uniq = [];
+      templates.forEach((t) => { if (t && t.id && !seen[t.id]) { seen[t.id] = 1; uniq.push(t); } });
       this.setData({
-        templates: p.templates, models: p.models,
+        templates: uniq, models: p.models,
         assets: s.assets.map((a) => Object.assign(a, { checked: false })),
         colors: s.colors.map((c) => ({ name: c, checked: false })),
         feature: s.feature, product: s.product, loading: false,
       });
-      if (!s.configured) wx.showToast({ title: '服务端未配置生图密钥', icon: 'none' });
+      if (mediaKind === 'video') {
+        if (!s.videoConfigured && !s.configured) {
+          wx.showToast({ title: '服务端未配置视频密钥', icon: 'none' });
+        }
+        // MVP：自动选中唯一视频模板，跳过选模板页
+        const vt = uniq[0];
+        if (vt) {
+          this.pickTemplate({ currentTarget: { dataset: { id: vt.id } } });
+        }
+      } else if (!s.configured) {
+        wx.showToast({ title: '服务端未配置生图密钥', icon: 'none' });
+      }
     } catch (e) {
       this.setData({ loading: false });
       wx.showToast({ title: e.message || '加载失败', icon: 'none' });
@@ -450,13 +468,15 @@ Page({
         .filter(Boolean)
         .slice(0, STYLE_REF_MAX);
       const payload = {
-        templateId: tpl.id, feature, referenceAssetIds: sel.refs,
+        templateId: tpl.id,
+        mediaKind: this.data.mediaKind === 'video' ? 'video' : 'image',
+        feature, referenceAssetIds: sel.refs,
         modelId: sel.modelId || null, poses, scenes,
         poseText: poseText || undefined,
         sceneText: sceneText || undefined,
         colors: sel.colors, count, sizeId: sel.sizeId,
       };
-      if (styleRefObjectKeys.length) {
+      if (this.data.mediaKind !== 'video' && styleRefObjectKeys.length) {
         payload.styleRefObjectKeys = styleRefObjectKeys;
         payload.styleStrength = this.data.styleStrength || 'medium';
       }
@@ -527,7 +547,7 @@ Page({
     this.setData({ savingAlbum: true });
     wx.showLoading({ title: `保存中 0/${urls.length}`, mask: true });
     try {
-      const r = await saveUrlsToAlbum(urls, {
+      const r = await (this.data.mediaKind === 'video' ? saveVideoUrlsToAlbum : saveUrlsToAlbum)(urls, {
         onProgress(cur, total) {
           wx.showLoading({ title: `保存中 ${cur}/${total}`, mask: true });
         },

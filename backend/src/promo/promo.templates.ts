@@ -69,11 +69,15 @@ export interface PromoTemplate {
   count: { min: number; max: number; default: number };
   steps: PromoStep[];
   buildPrompt: (c: PromptContext) => string;
+  /** image（默认）| video：前端与 generate 分流 */
+  mediaKind?: 'image' | 'video';
 }
 
 export const SIZES: Record<string, SizeOption> = {
   square: { id: 'square', name: '朋友圈方图 1080×1080', upstream: '1:1', target: '1080x1080' },
   portrait: { id: 'portrait', name: '小红书竖图 1080×1440 (3:4)', upstream: '3:4', target: '1080x1440' },
+  /** 竖短视频 9:16；upstream 直接给视频 API 的 WxH */
+  vertical_video: { id: 'vertical_video', name: '竖短视频 720×1280 (9:16)', upstream: '720x1280', target: '720x1280' },
 };
 
 export const MODELS: PromoModel[] = [
@@ -339,6 +343,32 @@ export const TEMPLATES: PromoTemplate[] = [
       ].filter(Boolean).join(' ');
     },
   },
+
+  {
+    id: 'product_showcase_video',
+    name: '商品竖版短视频',
+    desc: '约 15 秒竖屏短视频：商品参考图驱动镜头运动与展示（一期纯跑通，暂不上模特出镜）',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'none',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张商品主图/细节图作为视频参考' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'feature'],
+    mediaKind: 'video',
+    buildPrompt: (c) =>
+      [
+        'Vertical 9:16 short product showcase video of a knitwear garment for social commerce.',
+        'Smooth cinematic camera: slow push-in, gentle orbit or tilt, soft natural light, premium e-commerce look.',
+        'Keep the garment appearance faithful to the reference image(s): same color, knit texture, neckline, sleeves and cut. Do not redesign.',
+        'No on-screen text, logos, watermarks or captions. No people / models on camera in this phase.',
+        'Photoreal fabric motion and subtle depth of field; clean background suitable for Moments / Xiaohongshu.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' '),
+  },
 ];
 
 
@@ -382,12 +412,23 @@ export function findTemplate(id: string) {
   return TEMPLATES.find((t) => t.id === id);
 }
 
+export function isVideoTemplate(t: PromoTemplate | undefined | null) {
+  return !!t && (t.mediaKind === 'video' || t.id === 'product_showcase_video');
+}
+
+export function listTemplatesByKind(kind: 'image' | 'video' | 'all' = 'image') {
+  if (kind === 'all') return TEMPLATES;
+  if (kind === 'video') return TEMPLATES.filter((t) => isVideoTemplate(t));
+  return TEMPLATES.filter((t) => !isVideoTemplate(t));
+}
+
 /** 给前端的纯数据（去掉函数） */
 export function templateDto(t: PromoTemplate) {
   const { buildPrompt, ...rest } = t;
   return {
     ...rest,
-    sizeOptions: t.sizes.map((s) => SIZES[s]),
+    mediaKind: t.mediaKind || (isVideoTemplate(t) ? 'video' : 'image'),
+    sizeOptions: t.sizes.map((s) => SIZES[s]).filter(Boolean),
     styleRef: STYLE_REF_RULE,
   };
 }

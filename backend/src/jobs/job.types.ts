@@ -1,4 +1,4 @@
-export type JobType = 'publish_product' | 'promo_image' | 'cover_reselect' | string;
+export type JobType = 'publish_product' | 'promo_image' | 'promo_video' | 'cover_reselect' | string;
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 

@@ -4,8 +4,8 @@
   <!-- 0. 选模板 -->
   <block wx:if="{{!loading && !tpl}}">
     <view class="card">
-      <view class="section-title">选择出图模板</view>
-      <view class="muted">不同用途的出图方式、步骤和提示词都不同</view>
+      <view class="section-title">{{mediaKind === 'video' ? '选择视频模板' : '选择出图模板'}}</view>
+      <view class="muted">{{mediaKind === 'video' ? '一期：竖版约 15 秒商品展示短视频' : '不同用途的出图方式、步骤和提示词都不同'}}</view>
     </view>
     <view class="card tpl" wx:for="{{templates}}" wx:key="id" data-id="{{item.id}}" bindtap="pickTemplate">
       <view class="tpl-head">
@@ -38,8 +38,8 @@
       </view>
       <view class="muted small">点选切换勾选（可多张）· 长按预览</view>
 
-      <!-- 风格样例（可选）：卡片内次级区，非独立步骤 -->
-      <view class="style-ref-block">
+      <!-- 风格样例（可选）：卡片内次级区，非独立步骤；视频一期不做 -->
+      <view class="style-ref-block" wx:if="{{mediaKind !== 'video'}}">
         <view class="sub-label">风格样例（可选）</view>
         <view class="section-hint">{{tpl.styleRef.hint || '上传你喜欢的成片风格，系统尽量学构图和氛围；衣服仍以商品图为准'}} · {{styleRefs.length}}/{{styleRefMax}}</view>
         <view class="grid">
@@ -182,12 +182,26 @@
   <block wx:if="{{stepKey === 'result' && job}}">
     <view class="card">
       <view class="section-title">{{tpl.name}} · {{job.status === 'done' || job.status === 'succeeded' ? '已完成' : (job.status === 'failed' ? '生成失败' : (job.status === 'partial' ? '部分完成' : (job.status === 'queued' ? '排队中…' : '生成中…')))}}</view>
-      <view class="muted">{{job.done}} / {{job.total}} 张</view>
-      <view class="album-bar" wx:if="{{job.done}}">
+      <view class="muted">{{mediaKind === 'video' ? (job.done + ' / ' + job.total + ' 条视频') : (job.done + ' / ' + job.total + ' 张')}}</view>
+      <view class="album-bar" wx:if="{{job.done && mediaKind !== 'video'}}">
         <text class="link" bindtap="toggleSelectAllAlbum">{{albumAllSelected ? '取消全选' : '全选'}}</text>
         <text class="muted">已选 {{albumSelectedCount}} 张 · 点勾选，点图预览</text>
       </view>
-      <view class="grid">
+      <block wx:if="{{mediaKind === 'video'}}">
+        <view wx:for="{{job.items}}" wx:key="index" class="video-result">
+          <video wx:if="{{item.url}}" class="promo-video" src="{{item.url}}" controls show-center-play-btn object-fit="contain"></video>
+          <view class="placeholder" wx:elif="{{item.status === 'failed'}}">失败：{{item.error || ''}}</view>
+          <view class="placeholder" wx:else>视频生成中，通常 1～3 分钟…</view>
+          <view
+            class="check {{item.albumSelected ? 'on' : ''}}"
+            wx:if="{{item.url}}"
+            data-index="{{index}}"
+            catchtap="toggleAlbumItem"
+            style="margin-top:12rpx;"
+          >{{item.albumSelected ? '✓ 已选以下载' : '勾选以下载到相册'}}</view>
+        </view>
+      </block>
+      <view class="grid" wx:else>
         <view class="cell big {{item.albumSelected ? 'checked' : ''}}" wx:for="{{job.items}}" wx:key="index">
           <image wx:if="{{item.url}}" src="{{item.url}}" mode="aspectFill" data-url="{{item.url}}" bindtap="previewResult" />
           <view class="placeholder" wx:elif="{{item.status === 'failed'}}">失败</view>
@@ -216,7 +230,7 @@
         wx:if="{{job.done || job.status==='partial' || job.status==='succeeded'}}"
         bindtap="saveToAlbum"
       >{{savingAlbum ? '保存中…' : albumSaveLabel}}</view>
-      <view class="btn-primary" wx:if="{{job.done || job.status==='partial' || job.status==='succeeded'}}" bindtap="goGallery">查看图组</view>
+      <view class="btn-primary" wx:if="{{job.done || job.status==='partial' || job.status==='succeeded'}}" bindtap="goGallery">{{mediaKind === 'video' ? '查看素材' : '查看图组'}}</view>
     </view>
   </block>
 </view>

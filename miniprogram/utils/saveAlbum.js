@@ -167,10 +167,57 @@ async function saveUrlsToAlbum(urls, opts) {
   return { ok, fail, errors };
 }
 
+function saveTempVideoToAlbum(filePath) {
+  return new Promise((resolve, reject) => {
+    wx.saveVideoToPhotosAlbum({
+      filePath,
+      success() { resolve(); },
+      fail(err) {
+        const msg = (err && err.errMsg) || '保存失败';
+        if (/auth deny|authorize|permission|deny/i.test(msg)) {
+          reject(new Error('相册权限被拒绝'));
+        } else {
+          reject(new Error(msg.length > 80 ? msg.slice(0, 80) : msg));
+        }
+      },
+    });
+  });
+}
+
+/** 依次将视频 urls 保存到相册 */
+async function saveVideoUrlsToAlbum(urls, opts) {
+  const list = (urls || []).filter(Boolean);
+  if (!list.length) {
+    return { ok: 0, fail: 0, errors: ['未选择视频'] };
+  }
+  await ensureAlbumAuth();
+  let ok = 0;
+  let fail = 0;
+  const errors = [];
+  for (let i = 0; i < list.length; i++) {
+    if (opts && typeof opts.onProgress === 'function') {
+      try { opts.onProgress(i + 1, list.length); } catch (e) { /* ignore */ }
+    }
+    try {
+      const path = await downloadToTemp(list[i]);
+      await saveTempVideoToAlbum(path);
+      ok += 1;
+    } catch (e) {
+      fail += 1;
+      const m = (e && e.message) || String(e);
+      errors.push(m);
+      if (/相册权限/.test(m)) break;
+    }
+  }
+  return { ok, fail, errors };
+}
+
 module.exports = {
   OSS_HINT_DOMAIN,
   ensureAlbumAuth,
   downloadToTemp,
   saveTempToAlbum,
+  saveTempVideoToAlbum,
   saveUrlsToAlbum,
+  saveVideoUrlsToAlbum,
 };
