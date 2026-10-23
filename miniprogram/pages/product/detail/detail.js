@@ -193,10 +193,20 @@ Page({
       url: `/pages/product/promo-gallery/promo-gallery?id=${this.data.id}&setId=${setId}`,
     });
   },
-  /** 合并入口：图+视频统一列表，可在列表新建 */
+  /** 新建素材：先选图片/视频，再直达对应新建页（绕过素材列表中间页） */
   goPromoMaterials() {
-    wx.navigateTo({
-      url: `/pages/product/promo-gallery/promo-gallery?id=${this.data.id}`,
+    const id = this.data.id;
+    if (!id) return;
+    wx.showActionSheet({
+      itemList: ['新建图片', '新建视频'],
+      success: (res) => {
+        if (res.tapIndex === 0) {
+          wx.navigateTo({ url: `/pages/product/promo/promo?id=${id}&type=image` });
+        } else if (res.tapIndex === 1) {
+          // 视频生成页尚未就绪；有入口参数时预留 type=video
+          wx.showToast({ title: '宣传视频即将支持', icon: 'none' });
+        }
+      },
     });
   },
   goEdit() {

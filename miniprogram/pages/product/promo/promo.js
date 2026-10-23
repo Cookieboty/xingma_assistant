@@ -27,7 +27,7 @@ function matchPreset(options, text) {
 
 Page({
   data: {
-    id: '', loading: true,
+    id: '', mediaKind: 'image', loading: true,
     templates: [], models: [], tpl: null,
     steps: [], stepIdx: -1, stepKey: '', stepNames: STEP_NAMES,
     assets: [], colors: [], feature: '', featureDirty: false,
@@ -44,7 +44,8 @@ Page({
   },
 
   async onLoad(q) {
-    this.setData({ id: q.id });
+    const mediaKind = (q.type === 'video' || q.kind === 'video') ? 'video' : 'image';
+    this.setData({ id: q.id, mediaKind });
     try {
       const [p, s] = await Promise.all([
         request({ url: '/api/promo/presets' }),

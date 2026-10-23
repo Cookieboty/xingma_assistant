@@ -154,10 +154,10 @@ Page({
 
   goGenerate() {
     wx.showActionSheet({
-      itemList: ['新建宣传图', '新建宣传视频（即将支持）'],
+      itemList: ['新建图片', '新建视频'],
       success: (res) => {
         if (res.tapIndex === 0) {
-          wx.navigateTo({ url: `/pages/product/promo/promo?id=${this.data.id}` });
+          wx.navigateTo({ url: `/pages/product/promo/promo?id=${this.data.id}&type=image` });
         } else if (res.tapIndex === 1) {
           wx.showToast({ title: '宣传视频即将支持', icon: 'none' });
         }
