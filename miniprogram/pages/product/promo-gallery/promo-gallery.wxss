@@ -189,3 +189,17 @@
   font-size: 24rpx;
   color: #9a8f86;
 }
+
+.job-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+.job-head-main { flex: 1; min-width: 0; }
+.job-del {
+  flex-shrink: 0;
+  font-size: 24rpx;
+  color: #9a8f86;
+  padding: 8rpx 4rpx;
+}

@@ -12,23 +12,42 @@ const STATUS_LABEL = {
   succeeded: '已完成',
 };
 
+function urlPath(u) {
+  if (!u) return '';
+  const s = String(u);
+  const q = s.indexOf('?');
+  return q >= 0 ? s.slice(0, q) : s;
+}
+
 function enrichSet(s, prev) {
   const prevItems = (prev && prev.items) || [];
-  const prevByUrl = {};
   const prevByIdx = {};
+  const prevByMedia = {};
+  const prevSelectedByPath = {};
   prevItems.forEach((it, i) => {
-    if (it && it.albumSelected) {
-      if (it.url) prevByUrl[it.url] = true;
-      prevByIdx[i] = true;
-    }
+    if (!it) return;
+    prevByIdx[i] = it;
+    if (it.mediaId) prevByMedia[it.mediaId] = it;
+    if (it.albumSelected && it.url) prevSelectedByPath[urlPath(it.url)] = true;
+    if (it.albumSelected) prevByIdx[i]._sel = true;
   });
-  const items = (s.items || []).map((it, i) => Object.assign({}, it, {
-    failed: it.status === 'failed',
-    pending: !it.url && it.status !== 'failed',
-    albumSelected: !!(it.url && (prev
-      ? (prevByUrl[it.url] || prevByIdx[i])
-      : it.albumSelected)),
-  }));
+  const items = (s.items || []).map((it, i) => {
+    const prevIt = (it && it.mediaId && prevByMedia[it.mediaId]) || prevByIdx[i] || null;
+    // 私有桶每次签名 URL 不同；同一资源沿用旧 src，避免 <image> 闪烁重载
+    let url = it && it.url;
+    if (url && prevIt && prevIt.url && urlPath(prevIt.url) === urlPath(url)) {
+      url = prevIt.url;
+    }
+    const selected = !!(url && (prev
+      ? (prevSelectedByPath[urlPath(url)] || (prevIt && prevIt._sel) || (prevIt && prevIt.albumSelected))
+      : it.albumSelected));
+    return Object.assign({}, it, {
+      url,
+      failed: it.status === 'failed',
+      pending: !url && it.status !== 'failed',
+      albumSelected: selected,
+    });
+  });
   const done = s.done != null ? s.done : items.filter((i) => i.url).length;
   const total = s.total != null ? s.total : items.length;
   const busy = !!(s.busy || s.status === 'generating' || s.status === 'queued' || s.status === 'running');
@@ -84,18 +103,27 @@ Page({
     this.load().finally(() => wx.stopPullDownRefresh());
   },
 
-  async load() {
+  async load(opts) {
     clearTimeout(this.timer);
+    const silent = !!(opts && opts.silent);
     const id = this.data.id;
     if (!id) return;
     const prevMap = {};
     (this.data.sets || []).forEach((s) => { prevMap[s.id] = s; });
-    this.setData({ loading: true });
+    if (!silent) this.setData({ loading: true });
     try {
-      const [product, setsRaw] = await Promise.all([
-        request({ url: `/api/products/${id}` }),
-        request({ url: `/api/products/${id}/promo/sets` }),
-      ]);
+      let product = this.data.product;
+      let setsRaw;
+      if (silent && product) {
+        setsRaw = await request({ url: `/api/products/${id}/promo/sets` });
+      } else {
+        const both = await Promise.all([
+          request({ url: `/api/products/${id}` }),
+          request({ url: `/api/products/${id}/promo/sets` }),
+        ]);
+        product = both[0];
+        setsRaw = both[1];
+      }
       const list = Array.isArray(setsRaw) ? setsRaw : setsRaw.items || [];
       const focusSetId = this.data.focusSetId;
       const sets = list.map((s) => {
@@ -115,11 +143,12 @@ Page({
         }, 200);
       }
       if (showJobsEntry) {
-        this.timer = setTimeout(() => this.load(), 4000);
+        // 安静轮询：只刷进度，沿用已展示图的签名 URL，避免闪烁
+        this.timer = setTimeout(() => this.load({ silent: true }), 4000);
       }
     } catch (e) {
       this.setData({ loading: false });
-      wx.showToast({ title: e.message || '加载失败', icon: 'none' });
+      if (!silent) wx.showToast({ title: e.message || '加载失败', icon: 'none' });
     }
   },
 
@@ -234,8 +263,8 @@ Page({
     if (!setId || this.data.actingId) return;
     const ok = await new Promise((resolve) => {
       wx.showModal({
-        title: '删除整组',
-        content: '将删除该组宣传图及其商品关联，确定？',
+        title: '删除这组素材',
+        content: '删除后不可恢复，确定删除？',
         success: (r) => resolve(!!r.confirm),
       });
     });

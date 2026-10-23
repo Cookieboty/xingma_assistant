@@ -181,10 +181,28 @@ export class OssClient implements OnModuleInit {
     return `${base}/media/${String(objectKey).replace(/^\/+/, '')}`;
   }
 
+  /** 短时复用签名，避免列表轮询每次换 URL 导致小程序图片闪烁 */
+  private signedUrlCache = new Map<string, { url: string; expireAt: number }>();
+
   getSignedUrlSync(objectKey: string, ttlSec?: number): string {
     if (!this.client) throw new Error('OSS client not ready');
     const ttl = ttlSec ?? this.signedTtl;
-    return this.client.signatureUrl(this.fullKey(objectKey), { expires: ttl });
+    const full = this.fullKey(objectKey);
+    const cacheKey = `${full}|${ttl}`;
+    const now = Date.now();
+    // 在过期前保留约 80% TTL，期间返回同一签名串
+    const hit = this.signedUrlCache.get(cacheKey);
+    if (hit && hit.expireAt > now) return hit.url;
+    const url = this.client.signatureUrl(full, { expires: ttl });
+    const keepMs = Math.max(60_000, Math.floor(ttl * 1000 * 0.8));
+    this.signedUrlCache.set(cacheKey, { url, expireAt: now + keepMs });
+    if (this.signedUrlCache.size > 2000) {
+      for (const [k, v] of this.signedUrlCache) {
+        if (v.expireAt <= now) this.signedUrlCache.delete(k);
+        if (this.signedUrlCache.size <= 1500) break;
+      }
+    }
+    return url;
   }
 
   async getSignedUrl(objectKey: string, ttlSec?: number): Promise<string> {

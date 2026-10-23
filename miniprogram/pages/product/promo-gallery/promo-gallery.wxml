@@ -16,14 +16,22 @@
   </view>
 
   <view class="card job" id="set-{{item.id}}" wx:for="{{sets}}" wx:key="id">
-    <view class="job-head" data-id="{{item.id}}" bindtap="toggleExpand">
-      <view>
-        <text class="type-badge">{{item.typeLabel}}</text>
-        <text class="job-name">{{item.templateName}}</text>
-        <text class="st {{item.busy ? 'run' : (item.status==='failed' ? 'err' : 'ok')}}">{{item.statusLabel}}</text>
+    <view class="job-head">
+      <view class="job-head-main" data-id="{{item.id}}" bindtap="toggleExpand">
+        <view>
+          <text class="type-badge">{{item.typeLabel}}</text>
+          <text class="job-name">{{item.templateName}}</text>
+          <text class="st {{item.busy ? 'run' : (item.status==='failed' ? 'err' : 'ok')}}">{{item.statusLabel}}</text>
+        </view>
+        <view class="muted small">{{item.done}} / {{item.total}} 张 · {{item.expanded ? '收起' : '展开查看'}}</view>
+        <view class="muted small" wx:if="{{item.progressText}}">{{item.progressText}}</view>
       </view>
-      <view class="muted small">{{item.done}} / {{item.total}} 张 · {{item.expanded ? '收起' : '展开查看'}}</view>
-      <view class="muted small" wx:if="{{item.progressText}}">{{item.progressText}}</view>
+      <text
+        class="job-del"
+        wx:if="{{!item.busy}}"
+        data-id="{{item.id}}"
+        catchtap="deleteSet"
+      >{{actingId === item.id ? '…' : '删除'}}</text>
     </view>
 
     <view class="bar-wrap" wx:if="{{item.busy}}">
@@ -82,11 +90,6 @@
         <text class="caption-body" user-select>{{item.caption}}</text>
       </view>
 
-      <view class="ops secondary" wx:if="{{!item.busy}}">
-        <view class="btn-weak" data-id="{{item.id}}" bindtap="deleteSet">
-          {{actingId === item.id ? '…' : '删除整组'}}
-        </view>
-      </view>
     </block>
   </view>
 </view>
