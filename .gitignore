@@ -4,7 +4,10 @@ dist/
 .env.local
 *.log
 .DS_Store
+._*
 miniprogram.bak*/
+.bak/
+.deploy-bak/
 .deploy-staging/
 backend/data/
 coverage/
