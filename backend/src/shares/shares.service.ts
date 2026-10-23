@@ -270,7 +270,7 @@ export class SharesService {
       productId: rec.productId,
       sharePolicy: rec.sharePolicy,
       slotLimit: policy === 'designated_only' ? rec.slotLimit : null,
-      path: `/pages/share/landing?shareId=${rec.id}`,
+      path: `/pages/share/landing/landing?shareId=${rec.id}`,
     };
   }
 
@@ -288,35 +288,44 @@ export class SharesService {
       throw new ForbiddenException('分享已失效');
     }
 
-    if (user.role === 'owner' || user.role === 'staff') {
-      const product = await this.products.getDetail(user, share.productId);
-      const ids = share.boundCustomerIds || (await this.loadBindings(share.tenantId, share.id));
-      return {
-        share: this.shareDto(share, ids),
-        product,
-        bound: ids.length > 0,
-        access: 'staff',
-      };
-    }
-
-    const customer = await this.customers.ensureProfile(user);
+    // 分享打开即按 openid 建档（含业主/员工自测）：保证客户列表租户内可见
+    const customer = await this.customers.ensureProfile({
+      tenantId: user.tenantId,
+      openid: user.openid,
+      role: 'customer',
+      customerId: user.customerId,
+    });
     let boundIds = share.boundCustomerIds || (await this.loadBindings(share.tenantId, share.id));
+    const isStaff = user.role === 'owner' || user.role === 'staff';
 
     if (share.sharePolicy === 'designated_only') {
       const claim = await this.claimSlot(share, customer.id);
       boundIds = claim.ids;
       if (!claim.ok) {
-        throw new ForbiddenException(
-          `该限制分享名额已满（仅前 ${share.slotLimit || defaultSlotLimit()} 位打开链接的客户可查看）`,
-        );
-      }
-      if (claim.boundNow) {
+        // 员工可预览已满员分享；纯客户则拒绝
+        if (!isStaff) {
+          throw new ForbiddenException(
+            `该限制分享名额已满（仅前 ${share.slotLimit || defaultSlotLimit()} 位打开链接的客户可查看）`,
+          );
+        }
+      } else if (claim.boundNow) {
         await this.customers.markFirstShare(customer.id, shareId, share.tenantId);
       }
       share = (await this.load(user.tenantId, shareId)) || share;
     } else {
       // 公开分享：不占名额；ensureProfile 已建档，仅记首次分享（幂等）
       await this.customers.markFirstShare(customer.id, shareId, share.tenantId);
+    }
+
+    if (isStaff) {
+      const product = await this.products.getDetail(user, share.productId);
+      return {
+        share: this.shareDto(share, boundIds),
+        product,
+        customerId: customer.id,
+        bound: boundIds.includes(customer.id),
+        access: 'staff',
+      };
     }
 
     const verdict = this.access.canView(user, {

@@ -20,7 +20,7 @@ export interface CoverSelectResult {
 
 const BAD_NAME =
   /尺码|尺寸表|size.?chart|质检|检验报告|lab.?report|test.?report|吊牌|标签|hangtag|coupon|优惠券|细则/i;
-const GOOD_NAME = /主图|封面|main|cover|模特|平铺|挂拍|全身|半身/i;
+const GOOD_NAME = /主图|封面|main|cover|平铺|挂拍|全身|半身/i;
 
 const logger = new Logger('CoverSelect');
 
@@ -57,11 +57,13 @@ export function heuristicPickCover(cands: CoverCandidate[]): CoverSelectResult {
     const role = (c.roleHint || '').toLowerCase();
     if (role === 'main') score += 40;
     else if (role === 'multi_color') score += 25;
-    else if (role === 'detail') score -= 10;
+    else if (role === 'detail') score -= 25;
     else if (role === 'hangtag') score -= 60;
+    else if (role === 'scene' || role === 'model') score -= 35;
     if (BAD_NAME.test(name)) score -= 80;
-    if (GOOD_NAME.test(name)) score += 30;
-    if (/promo\//i.test(c.localPath || '')) score -= 25;
+    if (/场景|模特|上身|街拍|lookbook|scene|\bmodel\b/i.test(name)) score -= 40;
+    if (GOOD_NAME.test(name) && !/场景|模特|上身|街拍|lookbook|scene|\bmodel\b/i.test(name)) score += 30;
+    if (/promo\//i.test(c.localPath || '') || /\/promo\//i.test(name)) score -= 200;
     if (c.localPath && fs.existsSync(c.localPath) && looksLikeDocument(c.localPath)) score -= 100;
     return { c, score };
   });
@@ -147,8 +149,10 @@ export async function selectCoverImage(
   const pre = cands.filter((c) => {
     const name = c.filename || path.basename(c.localPath || '');
     const role = (c.roleHint || '').toLowerCase();
-    if (role === 'hangtag') return false;
+    if (/\/promo\//i.test(c.localPath || '') || /\/promo\//i.test(name)) return false;
+    if (role === 'hangtag' || role === 'scene' || role === 'model') return false;
     if (BAD_NAME.test(name) && !GOOD_NAME.test(name)) return false;
+    if (/场景|模特|上身|街拍|lookbook|\bmodel\b/i.test(name) && !/挂拍|平铺|主图/i.test(name)) return false;
     if (c.localPath && fs.existsSync(c.localPath) && looksLikeDocument(c.localPath)) return false;
     return true;
   });
@@ -267,7 +271,12 @@ export function sortMediaIdsByDisplayOrder(items: DisplayOrderItem[]): string[] 
   return scored.map((s) => s.id);
 }
 
-/** 先按展示规则排序，再把选中封面置顶 */
+/** 先按展示规则排序；仅当封面属于挂拍/主图桶时才置顶，避免细节/模特被误选后霸占首图 */
 export function orderCoverMediaIds(items: DisplayOrderItem[], coverId: string): string[] {
-  return reorderCoverIds(sortMediaIdsByDisplayOrder(items), coverId);
+  const sorted = sortMediaIdsByDisplayOrder(items);
+  const cover = items.find((it) => it.id === coverId);
+  if (!cover) return sorted;
+  if (displayOrderBucket(cover) === 0) return reorderCoverIds(sorted, coverId);
+  // 封面是细节/场景/文档时：保持展示序（主图在前），不强制置顶误选封面
+  return sorted;
 }

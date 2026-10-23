@@ -1,12 +1,14 @@
 const { request } = require('../../../utils/request');
-const { saveProfile } = require('../../../utils/profile');
+const { saveProfileWithAvatarUpload } = require('../../../utils/profile');
 
 Page({
   data: {
     showProfile: true,
     nickname: '',
     avatarUrl: '',
+    phone: '',
     contactQrUrl: '',
+    allowCustomerDownload: false,
     isOwner: false,
     inviteRole: 'staff',
     invites: [],
@@ -58,7 +60,9 @@ Page({
         productLevels: productLevels || [],
         nickname: (me && me.nickname) || '',
         avatarUrl: (me && me.avatarUrl) || '',
+        phone: (me && me.phone) || '',
         contactQrUrl: (tenant && tenant.contactQrUrl) || '',
+        allowCustomerDownload: !!(tenant && tenant.allowCustomerDownload),
         members,
         invites,
       });
@@ -71,11 +75,25 @@ Page({
     if (url) this.setData({ avatarUrl: url });
   },
   onNickname(e) {
-    this.setData({ nickname: e.detail.value });
+    const nickname = ((e.detail && e.detail.value) || '').trim();
+    this.setData({ nickname });
   },
-  async saveProfile() {
+  async saveProfileTap() {
+    const nickname = (this.data.nickname || '').trim();
+    const avatarUrl = this.data.avatarUrl || '';
+    if (!nickname && !avatarUrl) {
+      wx.showToast({ title: '请先点选头像或昵称', icon: 'none' });
+      return;
+    }
     try {
-      await saveProfile({ nickname: this.data.nickname, avatarUrl: this.data.avatarUrl });
+      const { avatarUrl: persisted, nickname: nick } = await saveProfileWithAvatarUpload({
+        nickname: nickname || undefined,
+        avatarUrl: avatarUrl || undefined,
+      });
+      const patch = {};
+      if (persisted) patch.avatarUrl = persisted;
+      if (nick != null) patch.nickname = nick;
+      if (Object.keys(patch).length) this.setData(patch);
       wx.showToast({ title: '已保存', icon: 'success' });
     } catch (e) {
       wx.showToast({ title: e.message || '保存失败', icon: 'none' });
@@ -133,6 +151,21 @@ Page({
       wx.showToast({ title: '已清除', icon: 'none' });
     } catch (e) {
       wx.showToast({ title: e.message || '失败', icon: 'none' });
+    }
+  },
+  async onAllowDownloadTap(e) {
+    const v = e.currentTarget.dataset.v;
+    const allow = v === '1' || v === 1;
+    try {
+      await request({
+        url: '/api/tenants/current/allow-customer-download',
+        method: 'PATCH',
+        data: { allowCustomerDownload: allow },
+      });
+      this.setData({ allowCustomerDownload: allow });
+      wx.showToast({ title: allow ? '已允许客户存图' : '已禁止客户存图', icon: 'none' });
+    } catch (err) {
+      wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' });
     }
   },
   onClCode(e) { this.setData({ clCode: e.detail.value }); },

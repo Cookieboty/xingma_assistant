@@ -90,19 +90,34 @@ function loginAs(preferRole) {
 
 /**
  * 客户分享链路静默鉴权：有本地 token 则复用；否则后台取 code 换 JWT。
+ * forceCustomer：分享落地强制走客户意图（员工 token 不复用，避免 open 跳过建档）。
  * 不展示任何登录 UI。开发者工具里若 wx.login 不可用且后端开了 DEV_FAKE_LOGIN，可回退假客户登录。
  */
 function ensureSilentSession(opts) {
   const app = getApp();
   const preferRole = (opts && opts.preferRole) || 'customer';
-  if (app.globalData.token) {
+  const forceCustomer = !!(opts && opts.forceCustomer);
+  const role = app.globalData.role || '';
+  const canReuse =
+    !!app.globalData.token &&
+    !(forceCustomer && (role === 'owner' || role === 'staff'));
+  if (canReuse) {
     return Promise.resolve({
       token: app.globalData.token,
       role: app.globalData.role,
       tenantId: app.globalData.tenantId,
     });
   }
-  return wxLogin().catch((err) => {
+  // 分享强制客户会话：清掉员工 token，重新 wx.login（成员 openid 后端仍判员工，但 open 会 ensureProfile）
+  if (forceCustomer && app.globalData.token) {
+    try {
+      app.globalData.token = '';
+      app.globalData.role = '';
+      wx.removeStorageSync('token');
+      wx.removeStorageSync('role');
+    } catch (e) { /* ignore */ }
+  }
+  return wxLogin(preferRole === 'customer' ? undefined : preferRole).catch((err) => {
     // 仅本机开发者工具回退假登录；真机（局域网/生产域名）必须走真实微信 code
     const base = (app.globalData && app.globalData.baseUrl) || '';
     const allowFake = /127\.0\.0\.1|localhost/.test(base);

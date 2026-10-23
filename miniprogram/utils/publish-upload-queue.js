@@ -29,6 +29,7 @@ let hydrated = false;
  *  id: string,
  *  createdAt: number,
  *  levelId: string,
+ *  groupId: string,
  *  status: string,
  *  priceDisplay: string,
  *  phase: 'queued'|'uploading'|'enqueueing'|'done'|'failed',
@@ -196,7 +197,7 @@ function copyToUserData(srcPath, jobId, index) {
  * 启动一个新的发品上传任务（可与已有任务并发）
  * @returns {Promise<{jobId:string}>} 本地 queue job id（非后端 job）
  */
-async function startPublishUpload({ localPaths, levelId, status, priceDisplay }) {
+async function startPublishUpload({ localPaths, levelId, groupId, status, priceDisplay }) {
   hydrate();
   const paths = (localPaths || []).filter(Boolean);
   if (!paths.length) throw new Error('请先选图');
@@ -220,6 +221,7 @@ async function startPublishUpload({ localPaths, levelId, status, priceDisplay })
     id,
     createdAt: Date.now(),
     levelId,
+    groupId: groupId || '',
     status: status || 'on_sale',
     priceDisplay: priceDisplay || 'show',
     phase: 'queued',
@@ -376,7 +378,8 @@ async function runJob(job) {
         data: {
           objectKeys: keys,
           levelId: job.levelId,
-          status: job.status,
+          groupId: job.groupId || undefined,
+          status: job.status || 'on_sale',
           priceDisplay: job.priceDisplay,
         },
       });
@@ -387,7 +390,8 @@ async function runJob(job) {
         method: 'POST',
         data: {
           levelId: job.levelId,
-          status: job.status,
+          groupId: job.groupId || undefined,
+          status: job.status || 'on_sale',
           priceDisplay: job.priceDisplay,
         },
       });
@@ -411,7 +415,8 @@ async function runJob(job) {
         startPublishUpload({
           localPaths: left,
           levelId: job.levelId,
-          status: job.status,
+          groupId: job.groupId,
+          status: job.status || 'on_sale',
           priceDisplay: job.priceDisplay,
         }).catch(() => {});
       }, 600);
@@ -506,7 +511,8 @@ function retryJob(queueJobId) {
       startPublishUpload({
         localPaths: failedPaths,
         levelId: job.levelId,
-        status: job.status,
+        groupId: job.groupId,
+        status: job.status || 'on_sale',
         priceDisplay: job.priceDisplay,
       });
     }

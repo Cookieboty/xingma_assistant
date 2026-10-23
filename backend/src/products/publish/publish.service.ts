@@ -27,6 +27,8 @@ import { VisionClient } from '../../vision/vision.client';
 import { OssClient } from '../../media/oss.client';
 import { registerPublishProductHandler } from '../../jobs/handlers/publish-product.handler';
 import { provisionalStyleNo } from '../../vision/publish-vision';
+import { LevelsService } from '../../levels/levels.service';
+import { ProductGroupsService } from '../product-groups.service';
 
 const BATCH_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 
@@ -41,6 +43,8 @@ export class PublishService implements OnModuleInit {
     private readonly jobs: JobsService,
     private readonly vision: VisionClient,
     private readonly oss: OssClient,
+    private readonly levels: LevelsService,
+    private readonly groups: ProductGroupsService,
     @Optional() private readonly dataSource?: DataSource,
   ) {}
 
@@ -276,21 +280,56 @@ export class PublishService implements OnModuleInit {
     });
   }
 
-    /** 对已有 batch：先落草稿商品再入队；返回 jobId + productId */
+  
+  /** 解析可用商品等级：优先入参 → 环境默认 → open/OPEN → 列表首个 */
+  private async resolveLevelId(tenantId: string, hint?: string): Promise<string> {
+    const list = await this.levels.listProductLevels(tenantId);
+    const prefer = String(hint || process.env.DEFAULT_PRODUCT_LEVEL_ID || '').trim();
+    if (prefer && list.some((l) => l.id === prefer)) return prefer;
+    const open = list.find((l) => {
+      const code = String(l.code || '').toLowerCase();
+      return code === 'open' || l.id === 'pl_open';
+    });
+    if (open) return open.id;
+    if (list[0]) return list[0].id;
+    // 自动建公开款，避免发品卡死
+    const created = await this.levels.createProductLevel(tenantId, {
+      code: 'OPEN',
+      name: '公开款',
+      rank: 0,
+      defaultSharePolicy: 'open',
+      minCustomerRank: null,
+    });
+    return created.id;
+  }
+
+  private async resolveGroupId(tenantId: string, hint?: string): Promise<string | null> {
+    const prefer = String(hint || '').trim();
+    if (prefer) return prefer;
+    try {
+      return await this.groups.getLatestGroupId(tenantId);
+    } catch {
+      return null;
+    }
+  }
+
+  /** 对已有 batch：先落草稿商品再入队；返回 jobId + productId */
   async enqueueExistingBatch(
     user: AuthContext,
     batchId: string,
-    body?: { levelId?: string; status?: string; priceDisplay?: string; styleNo?: string; name?: string },
+    body?: { levelId?: string; groupId?: string; status?: string; priceDisplay?: string; styleNo?: string; name?: string },
   ) {
     const batch = this.getBatch(user.tenantId, batchId);
     if (!batch.assets.length) throw new BadRequestException('批次内无图片');
 
     const statusIntent = (body?.status as 'on_sale' | 'off_sale' | 'draft') || 'on_sale';
-    const levelId = body?.levelId || process.env.DEFAULT_PRODUCT_LEVEL_ID || 'pl_open';
+    const levelId = await this.resolveLevelId(user.tenantId, body?.levelId);
+    const groupId = await this.resolveGroupId(user.tenantId, body?.groupId);
     const priceDisplay = (body?.priceDisplay as 'show' | 'hide') || 'show';
 
     const draft = await this.createDraftProduct(user, batchId, {
       levelId,
+      groupId,
       priceDisplay,
       styleNo: body?.styleNo,
       name: body?.name,
@@ -300,6 +339,7 @@ export class PublishService implements OnModuleInit {
       batchId,
       productId: draft.id,
       levelId,
+      groupId,
       status: statusIntent,
       statusIntent,
       priceDisplay,
@@ -333,6 +373,7 @@ export class PublishService implements OnModuleInit {
     batchId: string,
     opts: {
       levelId: string;
+      groupId?: string | null;
       priceDisplay?: 'show' | 'hide';
       styleNo?: string;
       name?: string;
@@ -359,6 +400,7 @@ export class PublishService implements OnModuleInit {
         material: null,
         description: null,
         levelId: opts.levelId,
+        groupId: opts.groupId ?? undefined,
         priceDisplay: opts.priceDisplay || 'show',
         status: 'draft',
         tags: ['识别中', ...(styleNoProvisional ? ['provisionalStyleNo'] : [])],
@@ -384,6 +426,7 @@ export class PublishService implements OnModuleInit {
           material: null,
           description: null,
           levelId: opts.levelId,
+          groupId: opts.groupId ?? undefined,
           priceDisplay: opts.priceDisplay || 'show',
           status: 'draft',
           tags: ['识别中', 'provisionalStyleNo'],
@@ -740,12 +783,15 @@ export class PublishService implements OnModuleInit {
 
     let product;
     try {
+      const levelId = await this.resolveLevelId(user.tenantId, input.levelId);
+      const groupId = await this.resolveGroupId(user.tenantId, (input as any).groupId);
       product = await this.products.create(user, {
         styleNo,
         name: input.name.trim(),
         material: input.material?.trim() || null,
         description: description || null,
-        levelId: input.levelId,
+        levelId,
+        groupId: groupId ?? undefined,
         priceDisplay: input.priceDisplay || 'show',
         status: input.status || 'on_sale',
         tags: input.tags || batch.suggestion?.tags || [],

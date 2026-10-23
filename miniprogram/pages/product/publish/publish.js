@@ -10,6 +10,23 @@ const ROLE_LABEL = {
   unknown: '未分',
 };
 
+function pickLevel(list) {
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length) return null;
+  const open = arr.find((l) => {
+    const code = String((l && l.code) || '').toLowerCase();
+    const id = String((l && l.id) || '');
+    return code === 'open' || id === 'pl_open';
+  });
+  return open || arr[0];
+}
+
+function pickLatestGroup(items) {
+  const arr = Array.isArray(items) ? items : [];
+  if (!arr.length) return null;
+  return arr.find((g) => g && g.isLatest) || arr[0];
+}
+
 Page({
   data: {
     step: 1,
@@ -24,6 +41,7 @@ Page({
     skus: [{ color: '', price: '' }],
     status: 'on_sale',
     levelId: '',
+    groupId: '',
     ocrNote: '',
     roleLabel: ROLE_LABEL,
     submitting: false,
@@ -31,12 +49,9 @@ Page({
   },
   async onLoad() {
     try {
-      const levels = await request({ url: '/api/levels/product' });
-      const list = levels || [];
-      const open = list.find((l) => l.code === 'open' || l.id === 'pl_open') || list[0];
-      this.setData({ levelId: open ? open.id : '' });
+      await this.ensurePublishMeta({ silent: true });
     } catch (e) {
-      /* ignore */
+      /* 发品时再拉一次 */
     }
   },
   onShow() {
@@ -50,6 +65,67 @@ Page({
   onHide() {
     syncLeaveGuard(getSnapshot());
   },
+
+  /**
+   * 确保有可用 levelId + 本季/最新 groupId。
+   * 等级为空时自动创建「公开款」；分组为空时提示去商品列表「管理」新建。
+   */
+  async ensurePublishMeta(opts) {
+    const silent = !!(opts && opts.silent);
+    let levels = [];
+    try {
+      const raw = await request({ url: '/api/levels/product' });
+      levels = Array.isArray(raw) ? raw : (raw && raw.items) || [];
+    } catch (e) {
+      if (!silent) throw e;
+      levels = [];
+    }
+
+    let level = pickLevel(levels);
+    if (!level) {
+      try {
+        level = await request({
+          url: '/api/levels/product',
+          method: 'POST',
+          data: {
+            code: 'OPEN',
+            name: '公开款',
+            rank: 0,
+            defaultSharePolicy: 'open',
+            minCustomerRank: null,
+          },
+        });
+      } catch (e) {
+        // 可能并发已创建：再拉一次
+        const raw2 = await request({ url: '/api/levels/product' }).catch(() => []);
+        const list2 = Array.isArray(raw2) ? raw2 : (raw2 && raw2.items) || [];
+        level = pickLevel(list2);
+        if (!level) {
+          throw new Error('无商品等级，请到「设置」添加商品等级后再发品');
+        }
+      }
+    }
+
+    let group = null;
+    try {
+      const gres = await request({ url: '/api/product-groups' });
+      const items = (gres && gres.items) || [];
+      group = pickLatestGroup(items);
+    } catch (e) {
+      group = null;
+    }
+    if (!group) {
+      throw new Error('暂无商品分组，请到商品列表点「管理」新建分组（如本季款式）');
+    }
+
+    this.setData({
+      levelId: level.id,
+      groupId: group.id,
+      status: 'on_sale',
+    });
+    return { levelId: level.id, groupId: group.id };
+  },
+
   chooseImages() {
     const MAX = 60;
     const have = (this.data.localPaths || []).length;
@@ -95,17 +171,15 @@ Page({
    */
   async uploadAndPublish() {
     if (this.data.submitting || !this.data.localPaths.length) return;
-    if (!this.data.levelId) {
-      wx.showToast({ title: '无商品等级，请先在设置里添加', icon: 'none' });
-      return;
-    }
     this.setData({ submitting: true });
-    const paths = this.data.localPaths.slice();
     try {
+      const meta = await this.ensurePublishMeta({ silent: false });
+      const paths = this.data.localPaths.slice();
       await startPublishUpload({
         localPaths: paths,
-        levelId: this.data.levelId,
-        status: this.data.status || 'on_sale',
+        levelId: meta.levelId,
+        groupId: meta.groupId,
+        status: 'on_sale',
         priceDisplay: 'show',
       });
       this.setData({ localPaths: [], submitting: false });
@@ -123,6 +197,7 @@ Page({
       wx.showToast({
         title: String((e && e.message) || e).slice(0, 40),
         icon: 'none',
+        duration: 2800,
       });
     }
   },
@@ -147,7 +222,6 @@ Page({
   onMaterial(e) { this.setData({ material: e.detail.value }); },
   onSizeText(e) { this.setData({ sizeText: e.detail.value }); },
   onDesc(e) { this.setData({ description: e.detail.value }); },
-  onStatusTap(e) { this.setData({ status: e.currentTarget.dataset.v }); },
   onSkusChange(e) { this.setData({ skus: e.detail.skus || [] }); },
   /** 保留旧 confirm（step2 人工确认）；主按钮已走异步建品 */
   async confirmPublish() {
@@ -158,8 +232,11 @@ Page({
       wx.showToast({ title: '请填款号和名称', icon: 'none' });
       return;
     }
-    if (!this.data.levelId) {
-      wx.showToast({ title: '无商品等级，请先在设置里添加', icon: 'none' });
+    let meta;
+    try {
+      meta = await this.ensurePublishMeta({ silent: false });
+    } catch (e) {
+      wx.showToast({ title: String((e && e.message) || e).slice(0, 40), icon: 'none' });
       return;
     }
     const skus = (this.data.skus || [])
@@ -185,8 +262,9 @@ Page({
           name,
           material: this.data.material.trim() || null,
           description: description || null,
-          levelId: this.data.levelId,
-          status: this.data.status,
+          levelId: meta.levelId,
+          groupId: meta.groupId,
+          status: 'on_sale',
           skus,
           images: this.data.images.map((im) => ({
             mediaId: im.mediaId,

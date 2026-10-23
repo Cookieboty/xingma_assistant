@@ -119,7 +119,7 @@ export class ProductGroupsService {
     if (latest) return latest.id;
     const any = await this.repo().findOne({
       where: { tenantId, status: 'active' },
-      order: { sortOrder: 'ASC' },
+      order: { createdAt: 'DESC' },
     });
     return any?.id || null;
   }
