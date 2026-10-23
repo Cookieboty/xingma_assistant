@@ -20,6 +20,9 @@ export function registerPromoImageHandler(jobs: JobsService, promo: PromoService
       { ...(job.input as any), _frameworkJobId: job.id },
       {
         onProgress: async (p) => ctx.updateProgress(p),
+        appendEvent: async (event, message, data) => {
+          if (ctx.appendEvent) await ctx.appendEvent(event, message, data);
+        },
       },
     );
   };

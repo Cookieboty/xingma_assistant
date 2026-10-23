@@ -163,14 +163,12 @@ export class TenantsService {
       const repo = this.db.getRepository(TenantMember);
       const m = await repo.findOne({ where: { id: memberId, tenantId } });
       if (!m) throw new Error('NOT_FOUND');
-      if (m.role === 'owner') throw new Error('CANNOT_DISABLE_OWNER');
       m.status = 'disabled';
       await repo.save(m);
       return { ok: true, id: m.id };
     }
     for (const [k, m] of this.memMembers) {
       if (m.tenantId === tenantId && m.id === memberId) {
-        if (m.role === 'owner') throw new Error('CANNOT_DISABLE_OWNER');
         this.memMembers.delete(k);
         return { ok: true, id: memberId };
       }

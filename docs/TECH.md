@@ -260,6 +260,13 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 ---
 
+## 6.1 IMAGE_GEN 提示词与参数留痕
+
+- **不需新表**：`job_events.data`（JSON，追加）+ `promo_sets.images[]`（JSON）即可。
+- 每次 IMAGE_GEN：写 `job_events` 事件 `image_gen`（完整 `prompt`、`model`、`size`、`setId`、`index`、`refObjectKeys`、`via`、成败/耗时）。
+- `promo_sets.images[i].prompt/model/size` = 该槽**最近一次**完整提示词与参数；`genCalls[]` **追加**历次调用（重生不丢历史，每槽最多 30 条）。
+- `promo_sets.params.imageGenModel` = 上游模型名；进度仍走 `jobs.progress`（重生只更新进度/结果槽位）。
+
 ## 7. 部署注意（只动 wool-api）
 
 服务器目录：`/srv/wool-stall-miniapp`。同机可能跑**多个** pm2 应用。

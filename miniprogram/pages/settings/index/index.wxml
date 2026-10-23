@@ -36,13 +36,22 @@
   </view>
 
   <view class="card" wx:if="{{canInvite}}">
+    <view class="section">档口资料</view>
+    <view class="sub-section">联系二维码</view>
+    <view class="muted">展示在客户商品页底部，方便加微信；选图确认后自动保存</view>
+    <image wx:if="{{contactQrUrl}}" src="{{contactQrUrl}}" mode="aspectFit" class="qr-preview" style="margin-top:16rpx;" />
+    <view class="btn-ghost mini" style="margin-top:16rpx;" bindtap="pickContactQr">{{contactQrUrl ? '更换二维码' : '上传二维码'}}</view>
+    <view class="link danger" wx:if="{{contactQrUrl}}" style="margin-top:12rpx;" bindtap="clearContactQr">清除</view>
+  </view>
+
+  <view class="card" wx:if="{{canInvite}}">
     <view class="section">当前成员</view>
     <view class="row item" wx:for="{{members}}" wx:key="id">
       <view>
         <text>{{item.nickname || '未设昵称'}}</text>
-        <text class="tag">{{item.role === 'owner' ? '业主' : '员工'}}</text>
+        <text class="tag">员工</text>
       </view>
-      <view class="ops" wx:if="{{isOwner && item.role !== 'owner' && item.id !== myMemberId}}">
+      <view class="ops" wx:if="{{item.id !== myMemberId}}">
         <text class="link danger" data-id="{{item.id}}" data-name="{{item.nickname}}" bindtap="kickMember">踢除</text>
       </view>
     </view>

@@ -217,20 +217,20 @@ export class InvitesService {
       throw new ForbiddenException('无权查看成员');
     }
     const rows = await this.tenants.listMembers(user.tenantId);
-    // 不向前端返回 openid；保留真实 role 供踢除鉴权展示
+    // 不向前端返回 openid；角色对外统一为员工（平权）
     return rows.map((m) => ({
       id: m.id,
       nickname: m.nickname,
       status: m.status,
-      role: m.role === 'owner' ? 'owner' : 'staff',
+      role: 'staff',
       createdAt: m.createdAt,
     }));
   }
 
-  /** 业主踢除员工：逻辑禁用，之后不能再以员工登录；可再被邀请激活 */
+  /** 踢除员工（平权：任意员工可踢，不可踢自己）：逻辑禁用，之后不能再以员工登录；可再被邀请激活 */
   async disableMember(user: AuthContext, memberId: string) {
-    if (user.role !== 'owner') {
-      throw new ForbiddenException('仅业主可踢除员工');
+    if (user.role !== 'owner' && user.role !== 'staff') {
+      throw new ForbiddenException('无权踢除员工');
     }
     const id = String(memberId || '').trim();
     if (!id) throw new BadRequestException('缺少成员 id');
@@ -250,7 +250,6 @@ export class InvitesService {
     } catch (e) {
       const msg = (e as Error).message;
       if (msg === 'NOT_FOUND') throw new NotFoundException('成员不存在');
-      if (msg === 'CANNOT_DISABLE_OWNER') throw new BadRequestException('不能踢除业主');
       throw e;
     }
   }

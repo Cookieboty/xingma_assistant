@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { MediaAsset } from '../common/entities/media-asset.entity';
-import { PromoSetEntity, PromoSetImage } from '../common/entities/promo-set.entity';
+import { PromoSetEntity, PromoSetImage, ImageGenCallRecord } from '../common/entities/promo-set.entity';
 import { newId } from '../common/utils/id';
 import { ProductsService } from '../products/products.service';
 import { ImageGenClient } from './image-gen.client';
@@ -63,6 +63,12 @@ interface JobItem {
   error?: string;
   savedMediaId?: string;
   ms?: number;
+  /** 本次 IMAGE_GEN 调用记录（重生时与 prior.genCalls 合并） */
+  genCall?: ImageGenCallRecord;
+  /** 保留未重生槽位的历史 */
+  genCalls?: ImageGenCallRecord[];
+  model?: string;
+  size?: string;
 }
 interface PromoJob {
   id: string;
@@ -783,6 +789,8 @@ export class PromoService implements OnModuleInit {
         mediaId,
         error: opts.item.error,
         ms: opts.item.ms,
+        prompt: opts.item.prompt || undefined,
+        size: opts.size,
       },
     ];
 
@@ -956,7 +964,10 @@ export class PromoService implements OnModuleInit {
     user: AuthContext,
     productId: string,
     input: GenerateInput & Record<string, unknown>,
-    opts?: { onProgress?: (p: Partial<JobProgress>) => Promise<void> },
+    opts?: {
+      onProgress?: (p: Partial<JobProgress>) => Promise<void>;
+      appendEvent?: (event: string, message?: string, data?: Record<string, unknown>) => Promise<void>;
+    },
   ) {
     const tpl = findTemplate(String(input?.templateId || ''));
     if (!tpl) throw new Error('未知模板');
@@ -1066,7 +1077,10 @@ export class PromoService implements OnModuleInit {
           sceneId: prior.sceneId || scene?.id,
           objectKey: prior.objectKey,
           savedMediaId: prior.mediaId,
-          prompt: '',
+          prompt: prior.prompt || '',
+          genCalls: Array.isArray(prior.genCalls) ? prior.genCalls : [],
+          model: prior.model,
+          size: prior.size,
         });
         continue;
       }
@@ -1177,15 +1191,77 @@ export class PromoService implements OnModuleInit {
           });
           const prompt = styleBlock ? `${it.prompt} ${styleBlock}` : it.prompt;
           if (styleBlock) it.prompt = prompt;
-          const r = await this.gen.generate({ prompt, size: legacy.size, refs: refsForShot });
-          const ext = r.mime.includes('jpeg') ? '.jpg' : r.mime.includes('webp') ? '.webp' : '.png';
-          const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${ext}`;
-          fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
-          await this.oss.putObjectSafe(r.buffer, objectKey, r.mime);
-          Object.assign(it, { status: 'done', objectKey, via: r.via });
+          const garmentKeys =
+            isMultiColor && refs[it.index]
+              ? [refs[it.index]!.objectKey]
+              : refs.map((r) => r!.objectKey);
+          const refObjectKeys = styleKeysRaw.length
+            ? [...garmentKeys, ...styleKeysRaw]
+            : garmentKeys;
+          const callBase: ImageGenCallRecord = {
+            at: new Date().toISOString(),
+            prompt,
+            model: this.gen.model,
+            size: legacy.size,
+            status: 'ok',
+            jobId: String(input._frameworkJobId || '') || undefined,
+            legacyJobId: legacy.id,
+            setId: String(input.setId || '') || undefined,
+            index: it.index,
+            refObjectKeys,
+            refCount: refsForShot.length,
+          };
+          try {
+            const r = await this.gen.generate({ prompt, size: legacy.size, refs: refsForShot });
+            const ext = r.mime.includes('jpeg') ? '.jpg' : r.mime.includes('webp') ? '.webp' : '.png';
+            const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${ext}`;
+            fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
+            await this.oss.putObjectSafe(r.buffer, objectKey, r.mime);
+            const genCall: ImageGenCallRecord = {
+              ...callBase,
+              status: 'ok',
+              via: r.via,
+              ms: Date.now() - t0,
+            };
+            Object.assign(it, {
+              status: 'done',
+              objectKey,
+              via: r.via,
+              prompt,
+              model: this.gen.model,
+              size: legacy.size,
+              genCall,
+            });
+            await opts?.appendEvent?.(
+              'image_gen',
+              `生图 #${it.index + 1} 成功`,
+              genCall as unknown as Record<string, unknown>,
+            );
+          } catch (genErr: any) {
+            const msg = String(genErr?.message || genErr).slice(0, 500);
+            const genCall: ImageGenCallRecord = {
+              ...callBase,
+              status: 'failed',
+              error: msg,
+              ms: Date.now() - t0,
+            };
+            it.status = 'failed';
+            it.error = msg;
+            it.prompt = prompt;
+            it.model = this.gen.model;
+            it.size = legacy.size;
+            it.genCall = genCall;
+            await opts?.appendEvent?.(
+              'image_gen',
+              `生图 #${it.index + 1} 失败`,
+              genCall as unknown as Record<string, unknown>,
+            );
+          }
         } catch (e: any) {
-          it.status = 'failed';
-          it.error = String(e.message || e).slice(0, 500);
+          if (it.status !== 'failed') {
+            it.status = 'failed';
+            it.error = String(e.message || e).slice(0, 500);
+          }
         } finally {
           it.ms = Date.now() - t0;
           done += 1;
@@ -1302,8 +1378,21 @@ export class PromoService implements OnModuleInit {
       }
     }
 
+    const priorByIndex = new Map((row.images || []).map((x) => [x.index, x]));
+    const mergeGenCalls = (it: JobItem): ImageGenCallRecord[] => {
+      const prior = priorByIndex.get(it.index);
+      const hist = Array.isArray(it.genCalls)
+        ? [...it.genCalls]
+        : Array.isArray(prior?.genCalls)
+          ? [...prior!.genCalls!]
+          : [];
+      if (it.genCall) hist.push(it.genCall);
+      // 每槽最多保留 30 次，便于分析且控 JSON 体积
+      return hist.slice(-30);
+    };
     for (const it of opts.items) {
       if (it.status !== 'done' || !it.objectKey) {
+        const genCalls = mergeGenCalls(it);
         images.push({
           index: it.index,
           status: it.status === 'failed' ? 'failed' : it.status,
@@ -1313,6 +1402,10 @@ export class PromoService implements OnModuleInit {
           ms: it.ms,
           objectKey: it.objectKey,
           mediaId: it.savedMediaId,
+          prompt: it.prompt || priorByIndex.get(it.index)?.prompt,
+          model: it.model || it.genCall?.model || priorByIndex.get(it.index)?.model,
+          size: it.size || it.genCall?.size || priorByIndex.get(it.index)?.size,
+          genCalls: genCalls.length ? genCalls : undefined,
         });
         continue;
       }
@@ -1339,6 +1432,7 @@ export class PromoService implements OnModuleInit {
       } else {
         await mediaRepo.update({ id: mediaId, tenantId: user.tenantId }, { promoSetId: setId, productId });
       }
+      const genCalls = mergeGenCalls(it);
       images.push({
         index: it.index,
         status: 'done',
@@ -1347,6 +1441,10 @@ export class PromoService implements OnModuleInit {
         poseId: it.poseId,
         sceneId: it.sceneId,
         ms: it.ms,
+        prompt: it.prompt || priorByIndex.get(it.index)?.prompt,
+        model: it.model || it.genCall?.model || priorByIndex.get(it.index)?.model,
+        size: it.size || it.genCall?.size || priorByIndex.get(it.index)?.size,
+        genCalls: genCalls.length ? genCalls : undefined,
       });
     }
 
@@ -1359,6 +1457,7 @@ export class PromoService implements OnModuleInit {
       feature: opts.input.feature || '',
       referenceAssetIds: opts.input.referenceAssetIds || [],
       modelId: opts.input.modelId || null,
+      imageGenModel: this.gen.model,
       poses: opts.input.poses || [],
       scenes: opts.input.scenes || [],
       poseText: opts.input.poseText || undefined,
@@ -1429,10 +1528,42 @@ export class PromoService implements OnModuleInit {
           const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${ext}`;
           fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
           await this.oss.putObjectSafe(r.buffer, objectKey, r.mime);
-          Object.assign(it, { status: 'done', objectKey, via: r.via });
+          const genCall: ImageGenCallRecord = {
+            at: new Date().toISOString(),
+            prompt: it.prompt,
+            model: this.gen.model,
+            size: job.size,
+            status: 'ok',
+            via: r.via,
+            ms: Date.now() - t0,
+            legacyJobId: job.id,
+            index: it.index,
+            refCount: refPaths.length,
+          };
+          Object.assign(it, {
+            status: 'done',
+            objectKey,
+            via: r.via,
+            model: this.gen.model,
+            size: job.size,
+            genCall,
+          });
         } catch (e: any) {
+          const msg = String(e.message || e).slice(0, 500);
           it.status = 'failed';
-          it.error = String(e.message || e).slice(0, 500);
+          it.error = msg;
+          it.genCall = {
+            at: new Date().toISOString(),
+            prompt: it.prompt,
+            model: this.gen.model,
+            size: job.size,
+            status: 'failed',
+            error: msg,
+            ms: Date.now() - t0,
+            legacyJobId: job.id,
+            index: it.index,
+            refCount: refPaths.length,
+          };
         } finally {
           it.ms = Date.now() - t0;
           this.release();
@@ -1612,6 +1743,11 @@ export class PromoService implements OnModuleInit {
         ms: i.ms,
         saved: !!i.mediaId,
         regenerating: !!regenerating && !!i.objectKey,
+        // IMAGE_GEN 可分析：最近完整提示词 + 历次调用（重生追加）
+        prompt: i.prompt || null,
+        model: i.model || null,
+        size: i.size || null,
+        genCalls: Array.isArray(i.genCalls) ? i.genCalls : [],
       };
     });
     const done = images.filter((i) => i.status === 'done' && i.url).length;

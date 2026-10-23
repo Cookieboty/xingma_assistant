@@ -34,10 +34,10 @@ export class InvitesController {
     return this.invites.listMembers(user);
   }
 
-  /** 业主踢除员工（须写在 :id/revoke 之前，避免 members 被当成 id） */
+  /** 踢除员工（平权：owner/staff 均可；须写在 :id/revoke 之前，避免 members 被当成 id） */
   @Post('members/:memberId/disable')
   @UseGuards(RolesGuard)
-  @Roles('owner')
+  @Roles('owner', 'staff')
   disableMember(@AuthUser() user: AuthContext, @Param('memberId') memberId: string) {
     return this.invites.disableMember(user, memberId);
   }

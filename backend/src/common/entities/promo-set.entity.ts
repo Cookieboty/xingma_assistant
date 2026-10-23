@@ -9,6 +9,25 @@ import {
 
 export type PromoSetStatus = 'generating' | 'done' | 'partial' | 'failed' | 'deleted';
 
+/** 单次 IMAGE_GEN 调用的可分析记录（追加不覆盖） */
+export interface ImageGenCallRecord {
+  at: string;
+  prompt: string;
+  model: string;
+  size: string;
+  via?: string;
+  status: 'ok' | 'failed';
+  error?: string;
+  ms?: number;
+  jobId?: string;
+  legacyJobId?: string;
+  setId?: string;
+  index: number;
+  /** 本次参考图 objectKey（商品图 + 风格样例） */
+  refObjectKeys?: string[];
+  refCount?: number;
+}
+
 export interface PromoSetImage {
   index: number;
   status: 'pending' | 'running' | 'done' | 'failed';
@@ -18,6 +37,12 @@ export interface PromoSetImage {
   sceneId?: string;
   error?: string;
   ms?: number;
+  /** 最近一次完整提示词（便于查看当前图） */
+  prompt?: string;
+  model?: string;
+  size?: string;
+  /** 历次 IMAGE_GEN 调用（重生追加，不丢历史） */
+  genCalls?: ImageGenCallRecord[];
 }
 
 @Entity('promo_sets')

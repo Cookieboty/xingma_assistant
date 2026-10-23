@@ -10,6 +10,7 @@ Page({
     phoneBinding: false,
     needProfileGuide: false,
     profileSaving: false,
+    contactQrUrl: '',
     isOwner: false,
     canInvite: false,
     myMemberId: '',
@@ -32,19 +33,22 @@ Page({
       const canInvite = role === 'owner' || role === 'staff';
       const tasks = [
         request({ url: '/api/auth/me' }).catch(() => null),
+        request({ url: '/api/tenants/current' }).catch(() => null),
         request({ url: '/api/invites/members' }).catch(() => []),
       ];
       if (canInvite) tasks.push(request({ url: '/api/invites' }).catch(() => []));
       const results = await Promise.all(tasks);
       const me = results[0];
-      const rawMembers = results[1] || [];
+      const tenant = results[1];
+      const rawMembers = results[2] || [];
+      // 前端不展示 openid；统一显示为员工（平权）
       const members = (Array.isArray(rawMembers) ? rawMembers : []).map((m) => ({
         id: m.id,
         nickname: m.nickname || '',
         status: m.status,
-        role: m.role === 'owner' ? 'owner' : 'staff',
+        role: 'staff',
       }));
-      const invites = canInvite ? (results[2] || []) : [];
+      const invites = canInvite ? (results[3] || []) : [];
       const nickname = (me && me.nickname) || '';
       const avatarUrl = (me && me.avatarUrl) || '';
       const phone = (me && me.phone) || '';
@@ -57,6 +61,7 @@ Page({
         avatarUrl,
         phone,
         needProfileGuide,
+        contactQrUrl: (tenant && tenant.contactQrUrl) || '',
         members,
         invites,
       });
@@ -170,6 +175,57 @@ Page({
       wx.showToast({ title: (e && e.message) || '保存失败', icon: 'none' });
     } finally {
       this.setData({ profileSaving: false });
+    }
+  },
+  pickContactQr() {
+    wx.chooseMedia({
+      count: 1,
+      mediaType: ['image'],
+      success: async (res) => {
+        const path = res.tempFiles && res.tempFiles[0] && res.tempFiles[0].tempFilePath;
+        if (!path) return;
+        try {
+          const app = getApp();
+          const baseUrl = (app.globalData && app.globalData.baseUrl) || '';
+          const token = app.globalData.token || wx.getStorageSync('token') || '';
+          const upload = await new Promise((resolve, reject) => {
+            wx.uploadFile({
+              url: baseUrl + '/api/media/upload',
+              filePath: path,
+              name: 'file',
+              header: { Authorization: token ? `Bearer ${token}` : '' },
+              formData: { purpose: 'contact_qr' },
+              success: (r) => {
+                try {
+                  const data = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+                  if (r.statusCode >= 200 && r.statusCode < 300) resolve(data);
+                  else reject(new Error((data && data.message) || '上传失败'));
+                } catch (e) { reject(e); }
+              },
+              fail: reject,
+            });
+          });
+          const url = upload.url || upload.publicUrl || upload.avatarUrl || path;
+          await request({
+            url: '/api/tenants/current/contact-qr',
+            method: 'PATCH',
+            data: { url },
+          });
+          this.setData({ contactQrUrl: url });
+          wx.showToast({ title: '二维码已更新', icon: 'none' });
+        } catch (e) {
+          wx.showToast({ title: (e && e.message) || '请配置媒体上传', icon: 'none' });
+        }
+      },
+    });
+  },
+  async clearContactQr() {
+    try {
+      await request({ url: '/api/tenants/current/contact-qr', method: 'PATCH', data: { url: null } });
+      this.setData({ contactQrUrl: '' });
+      wx.showToast({ title: '已清除', icon: 'none' });
+    } catch (e) {
+      wx.showToast({ title: e.message || '失败', icon: 'none' });
     }
   },
   async createInvite() {
