@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { MediaAsset } from '../common/entities/media-asset.entity';
-import { PromoSetEntity, PromoSetImage, ImageGenCallRecord } from '../common/entities/promo-set.entity';
+import { PromoSetEntity, PromoSetImage, ImageGenCallRecord, OutfitCompareRecord } from '../common/entities/promo-set.entity';
 import { newId } from '../common/utils/id';
 import { ProductsService } from '../products/products.service';
 import { ImageGenClient } from './image-gen.client';
@@ -20,6 +20,7 @@ import { OssClient } from '../media/oss.client';
 import { buildPromoCaption } from './promo.captions';
 import { buildJobDisplayTitle } from '../jobs/job-display-title';
 import { VideoGenClient } from './video-gen.client';
+import { ExternalOutfitClient } from './external-outfit.client';
 
 export interface GenerateInput {
   templateId: string;
@@ -72,6 +73,8 @@ interface JobItem {
   genCalls?: ImageGenCallRecord[];
   model?: string;
   size?: string;
+  /** 同图对比（self vs external） */
+  compare?: OutfitCompareRecord;
 }
 interface PromoJob {
   id: string;
@@ -101,6 +104,7 @@ export class PromoService implements OnModuleInit {
     private readonly videoGen: VideoGenClient,
     private readonly jobs: JobsService,
     private readonly oss: OssClient,
+    private readonly externalOutfit: ExternalOutfitClient,
     @Optional() private readonly vision?: VisionClient,
     @Optional() private readonly dataSource?: DataSource,
   ) {}
@@ -974,7 +978,13 @@ export class PromoService implements OnModuleInit {
   ) {
     const tpl = findTemplate(String(input?.templateId || ''));
     if (!tpl) throw new Error('未知模板');
-    if (!this.gen.configured()) throw new Error('服务端未配置生图密钥');
+    const outfitEngine = this.externalOutfit.engineMode();
+    if (outfitEngine !== 'external' && !this.gen.configured()) {
+      throw new Error('服务端未配置生图密钥');
+    }
+    if (outfitEngine !== 'self' && !this.externalOutfit.configured()) {
+      throw new Error('外部穿搭 Agent 未配置（OUTFIT_AGENT_ENABLED + API_KEY/.secrets），无法使用 external/both');
+    }
     const { product, assets } = await this.productAssets(user, productId);
     const refIds = ((input.referenceAssetIds as string[]) || []).filter(Boolean);
     if (refIds.length < tpl.reference.min || refIds.length > tpl.reference.max) {
@@ -1213,8 +1223,14 @@ export class PromoService implements OnModuleInit {
     }
 
     let done = 0;
+    // external 单引擎：跳过 IMAGE_GEN，后面统一拉外部结果
+    const skipSelfGen = outfitEngine === 'external';
     await Promise.all(
       items.map(async (it) => {
+        if (skipSelfGen) {
+          done += 1;
+          return;
+        }
         if (it.status === 'done' && it.objectKey) {
           done += 1;
           const okKeep = items.filter((x) => x.status === 'done').length;
@@ -1349,6 +1365,115 @@ export class PromoService implements OnModuleInit {
       }),
     );
 
+    // 外部 Agent：同图对比 / 或纯外部引擎（定稿对接预留，Token 只读 env/secrets）
+    if (outfitEngine === 'both' || outfitEngine === 'external') {
+      await opts?.onProgress?.({
+        percent: 92,
+        step: 'external_outfit',
+        message: outfitEngine === 'both' ? '外部 Agent 同图对比中…' : '外部穿搭 Agent 生图中…',
+        done: items.filter((x) => x.status === 'done').length,
+        total: items.length,
+      });
+      const garmentKeysForExt =
+        garmentPrep.refs
+          .map((r) => r.objectKey)
+          .filter((k): k is string => !!k)
+          .slice(0, 9) ||
+        refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
+      // 宫格无 objectKey：退回用户所选商品图签名 URL
+      const keys =
+        garmentKeysForExt.length > 0
+          ? garmentKeysForExt
+          : refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
+      const garmentUrls = keys.map((k) => this.oss.publicUrl(k)).filter((u) => /^https?:\/\//i.test(u));
+      const instruction = [poseTextZh, sceneTextZh, feature].filter(Boolean).join('；').slice(0, 800);
+      const ext = await this.externalOutfit.invoke({
+        garmentImages: garmentUrls,
+        instruction: instruction || undefined,
+      });
+      await opts?.appendEvent?.('external_outfit', ext.ok ? '外部 Agent 成功' : '外部 Agent 失败', {
+        ok: ext.ok,
+        ms: ext.ms,
+        requestId: ext.requestId,
+        agentCode: ext.agentCode,
+        imageCount: ext.imageUrls.length,
+        error: ext.error,
+        engine: outfitEngine,
+      });
+
+      if (outfitEngine === 'external') {
+        // 纯外部：把结果图拉回本地作为主图槽
+        if (!ext.ok || !ext.imageUrls.length) {
+          throw new Error(ext.error || '外部穿搭 Agent 未返回结果图');
+        }
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.status === 'done' && it.objectKey) continue;
+          const url = ext.imageUrls[Math.min(i, ext.imageUrls.length - 1)];
+          try {
+            const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
+            const extName = url.toLowerCase().includes('.png') ? '.png' : '.jpg';
+            const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${extName}`;
+            fs.writeFileSync(path.join(this.storageRoot(), objectKey), buf);
+            await this.oss.putObjectSafe(buf, objectKey, extName === '.png' ? 'image/png' : 'image/jpeg');
+            it.status = 'done';
+            it.objectKey = objectKey;
+            it.via = 'external_outfit';
+            it.compare = {
+              engine: 'external',
+              external: {
+                status: 'ok',
+                imageUrls: ext.imageUrls,
+                requestId: ext.requestId,
+                ms: ext.ms,
+                agentCode: ext.agentCode,
+              },
+              self: { status: 'skipped' },
+            };
+          } catch (e: any) {
+            it.status = 'failed';
+            it.error = String(e?.message || e).slice(0, 500);
+            it.compare = {
+              engine: 'external',
+              external: { status: 'failed', error: it.error, requestId: ext.requestId, ms: ext.ms },
+              self: { status: 'skipped' },
+            };
+          }
+        }
+      } else {
+        // both：自建主图保留；两侧写入 compare 留痕
+        for (const it of items) {
+          it.compare = {
+            engine: 'both',
+            self: {
+              status: it.status === 'done' ? 'ok' : 'failed',
+              objectKey: it.objectKey,
+              prompt: it.prompt,
+              promptZh: it.promptZh,
+              promptEn: it.prompt,
+              ms: it.ms,
+              error: it.error,
+            },
+            external: ext.ok
+              ? {
+                  status: 'ok',
+                  imageUrls: ext.imageUrls,
+                  requestId: ext.requestId,
+                  ms: ext.ms,
+                  agentCode: ext.agentCode,
+                }
+              : {
+                  status: 'failed',
+                  error: ext.error,
+                  requestId: ext.requestId,
+                  ms: ext.ms,
+                  agentCode: ext.agentCode,
+                },
+          };
+        }
+      }
+    }
+
     const ok = items.filter((i) => i.status === 'done').length;
     legacy.status = ok === items.length ? 'done' : ok ? 'partial' : 'failed';
     this.saveJob(legacy);
@@ -1478,6 +1603,7 @@ export class PromoService implements OnModuleInit {
           model: it.model || it.genCall?.model || priorByIndex.get(it.index)?.model,
           size: it.size || it.genCall?.size || priorByIndex.get(it.index)?.size,
           genCalls: genCalls.length ? genCalls : undefined,
+          compare: it.compare || priorByIndex.get(it.index)?.compare,
         });
         continue;
       }
@@ -1519,6 +1645,7 @@ export class PromoService implements OnModuleInit {
         model: it.model || it.genCall?.model || priorByIndex.get(it.index)?.model,
         size: it.size || it.genCall?.size || priorByIndex.get(it.index)?.size,
         genCalls: genCalls.length ? genCalls : undefined,
+        compare: it.compare || priorByIndex.get(it.index)?.compare,
       });
     }
 
@@ -1825,6 +1952,7 @@ export class PromoService implements OnModuleInit {
         model: i.model || null,
         size: i.size || null,
         genCalls: Array.isArray(i.genCalls) ? i.genCalls : [],
+        compare: i.compare || null,
       };
     });
     const done = images.filter((i) => i.status === 'done' && i.url).length;

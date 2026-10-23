@@ -40,6 +40,26 @@ export interface ImageGenCallRecord {
   };
 }
 
+/** 同图对比：自建羊毛衫 vs 外部 Agent */
+export interface OutfitCompareSide {
+  status: 'ok' | 'failed' | 'skipped';
+  objectKey?: string;
+  imageUrls?: string[];
+  prompt?: string;
+  promptZh?: string;
+  promptEn?: string;
+  requestId?: string;
+  ms?: number;
+  error?: string;
+  agentCode?: string;
+}
+
+export interface OutfitCompareRecord {
+  engine: 'self' | 'external' | 'both';
+  self?: OutfitCompareSide;
+  external?: OutfitCompareSide;
+}
+
 export interface PromoSetImage {
   index: number;
   status: 'pending' | 'running' | 'done' | 'failed';
@@ -58,6 +78,8 @@ export interface PromoSetImage {
   size?: string;
   /** 历次 IMAGE_GEN 调用（重生追加，不丢历史） */
   genCalls?: ImageGenCallRecord[];
+  /** 同图双引擎对比（OUTFIT_ENGINE=both 时写入） */
+  compare?: OutfitCompareRecord;
 }
 
 @Entity('promo_sets')

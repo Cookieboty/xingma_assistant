@@ -13,3 +13,7 @@ backend/data/
 coverage/
 backend/.env
 backend/storage/
+
+# 本机 secrets（Token 勿入仓）
+backend/.secrets/
+*.secret

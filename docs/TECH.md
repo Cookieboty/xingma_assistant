@@ -279,6 +279,17 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 扩展：鞋子/裤子/衬衣在 `CATEGORY_PREPARE_REGISTRY` 另立专用流程后再注册；未注册品类直接拒生，禁止复用羊毛衫逻辑充数。
 
+## 6.3 外部穿搭 Agent 与同图对比
+
+详见 [PROMO_EXTERNAL_OUTFIT.md](./PROMO_EXTERNAL_OUTFIT.md)。
+
+- 客户端：`external-outfit.client.ts`；`POST {OUTFIT_AGENT_BASE_URL}/api/invocations/sync`，`Authorization: Bearer`，`agentCode=ai-adaptive-outfit-workflow`。
+- 参数：`garmentImages` 1～9、可选 `modelImageUrl` / `instruction`。Token：`OUTFIT_AGENT_API_KEY` 或 `OUTFIT_AGENT_API_KEY_FILE`（本机 `.secrets/`，不入仓）。
+- `OUTFIT_ENGINE=self|external|both`：`both` 时同参考图双跑，结果写入 `promo_sets.images[i].compare`（self 主图 + external.imageUrls）。
+- 事件：`external_outfit`（job_events）。
+
+环境变量：`OUTFIT_AGENT_ENABLED` `OUTFIT_AGENT_BASE_URL` `OUTFIT_AGENT_API_KEY` `OUTFIT_AGENT_API_KEY_FILE` `OUTFIT_AGENT_CODE` `OUTFIT_AGENT_TIMEOUT_MS` `OUTFIT_ENGINE`。
+
 ## 7. 部署注意（只动 wool-api）
 
 服务器目录：`/srv/wool-stall-miniapp`。同机可能跑**多个** pm2 应用。
