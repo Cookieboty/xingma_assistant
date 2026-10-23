@@ -40,22 +40,37 @@ export class ImageGenClient {
     return !!this.key;
   }
 
+  private isTransientGenError(msg: string) {
+    const s = String(msg || '');
+    return /IMAGE_TASK_UNKNOWN|HTTP 502|HTTP 503|HTTP 504|ECONNRESET|ETIMEDOUT|任务状态待确认|gateway|timeout/i.test(s);
+  }
+
   async generate(req: GenRequest): Promise<GenResult> {
     if (!this.key) throw new Error('未配置 IMAGE_GEN_API_KEY');
     const modes = req.refs.length
       ? (process.env.IMAGE_GEN_REF_MODE || 'task,edits').split(',').map((s) => s.trim())
       : ['text'];
     const errors: string[] = [];
-    for (const m of modes) {
-      try {
-        if (m === 'task') return await this.task(req);
-        if (m === 'edits') return await this.edits(req);
-        if (m === 'gen_image') return await this.generations(req, true);
-        if (m === 'text') return await this.generations(req, false);
-      } catch (e: any) {
-        errors.push(`${m}: ${e.message}`);
-        this.logger.warn(`生图方式 ${m} 失败: ${e.message}`);
+    const maxRounds = 2; // 瞬时 502 / IMAGE_TASK_UNKNOWN 整轮再试一次
+    for (let round = 0; round < maxRounds; round++) {
+      const roundErrors: string[] = [];
+      for (const m of modes) {
+        try {
+          if (m === 'task') return await this.task(req);
+          if (m === 'edits') return await this.edits(req);
+          if (m === 'gen_image') return await this.generations(req, true);
+          if (m === 'text') return await this.generations(req, false);
+        } catch (e: any) {
+          const msg = String(e?.message || e);
+          roundErrors.push(`${m}: ${msg}`);
+          this.logger.warn(`生图方式 ${m} 失败(round=${round + 1}): ${msg.slice(0, 160)}`);
+        }
       }
+      errors.push(...roundErrors);
+      const transient = roundErrors.some((x) => this.isTransientGenError(x));
+      if (!transient || round + 1 >= maxRounds) break;
+      await new Promise((r) => setTimeout(r, 2500));
+      this.logger.warn(`生图瞬时失败，整轮重试 (${round + 2}/${maxRounds})`);
     }
     throw new Error(errors.join(' | '));
   }

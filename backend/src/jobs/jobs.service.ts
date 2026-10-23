@@ -124,36 +124,62 @@ export class JobsService {
     payload: Record<string, unknown>,
     opts?: { existingJobId?: string | null; maxAttempts?: number; runAt?: Date },
   ) {
-    const existingId = String(opts?.existingJobId || '').trim();
-    if (existingId) {
-      const repo = this.jobs();
-      const row = await repo.findOne({ where: { id: existingId, tenantId: user.tenantId } });
-      if (row && this.isOwnedBy(row, user) && row.type === type) {
-        const displayTitle = buildJobDisplayTitle(type, payload);
-        const enrichedPayload = {
-          ...payload,
-          displayTitle: (payload as any).displayTitle || displayTitle,
-        };
-        row.status = 'queued';
-        row.payload = enrichedPayload;
-        row.progress = { percent: 0, step: 'queued', message: displayTitle };
-        row.result = null;
-        row.error = null;
-        row.lockedBy = null;
-        row.nextRunAt = opts?.runAt || null;
-        row.startedAt = null;
-        row.finishedAt = null;
-        // 重生视为新一轮，重置 attempts，避免历史失败占满次数
-        row.attempts = 0;
-        if (opts?.maxAttempts) row.maxAttempts = opts.maxAttempts;
-        await repo.save(row);
-        await this.appendEvent(row, 'reused', '复用任务重新排队', {
+    const repo = this.jobs();
+    let row =
+      (String(opts?.existingJobId || '').trim()
+        ? await repo.findOne({
+            where: { id: String(opts?.existingJobId).trim(), tenantId: user.tenantId },
+          })
+        : null) || null;
+
+    // 组 id 兜底：避免 set.jobId 丢失时重生又新开任务中心一行
+    const setId = String((payload as any)?.setId || '').trim();
+    if ((!row || !this.isOwnedBy(row, user) || row.type !== type) && setId) {
+      const owners = this.ownerIds(user);
+      const candidates = await repo.find({
+        where: {
+          tenantId: user.tenantId,
           type,
-          setId: (payload as any)?.setId || null,
-        });
-        this.logger.log(`reuseOrCreate type=${type} jobId=${row.id} setId=${(payload as any)?.setId || '-'}`);
-        return this.toDto(row);
-      }
+          ...(owners.length === 1
+            ? { createdBy: owners[0] }
+            : owners.length
+              ? { createdBy: In(owners) }
+              : {}),
+        },
+        order: { createdAt: 'DESC' },
+        take: 40,
+      });
+      row =
+        candidates.find(
+          (j) => this.isOwnedBy(j, user) && String((j.payload as any)?.setId || '').trim() === setId,
+        ) || null;
+    }
+
+    if (row && this.isOwnedBy(row, user) && row.type === type) {
+      const displayTitle = buildJobDisplayTitle(type, payload);
+      const enrichedPayload = {
+        ...payload,
+        displayTitle: (payload as any).displayTitle || displayTitle,
+      };
+      row.status = 'queued';
+      row.payload = enrichedPayload;
+      row.progress = { percent: 0, step: 'queued', message: displayTitle };
+      row.result = null;
+      row.error = null;
+      row.lockedBy = null;
+      row.nextRunAt = opts?.runAt || null;
+      row.startedAt = null;
+      row.finishedAt = null;
+      // 重生视为新一轮，重置 attempts，避免历史失败占满次数
+      row.attempts = 0;
+      if (opts?.maxAttempts) row.maxAttempts = opts.maxAttempts;
+      await repo.save(row);
+      await this.appendEvent(row, 'reused', '复用任务重新排队', {
+        type,
+        setId: setId || null,
+      });
+      this.logger.log(`reuseOrCreate type=${type} jobId=${row.id} setId=${setId || '-'}`);
+      return this.toDto(row);
     }
     return this.create(user, type, payload, opts);
   }

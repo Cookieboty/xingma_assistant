@@ -63,6 +63,11 @@
         <picker mode="selector" range="{{productLevels}}" range-key="name" value="{{levelIndex}}" bindchange="onLevelChange">
           <view class="picker">{{productLevels[levelIndex].name || '请选择'}}</view>
         </picker>
+        <view class="field-label">所属分组</view>
+        <picker mode="selector" range="{{groups}}" range-key="name" value="{{groupIndex}}" bindchange="onGroupChange">
+          <view class="picker">{{groups[groupIndex].name || '请选择分组'}}</view>
+        </picker>
+        <view class="section-hint" wx:if="{{!groups.length}}">暂无分组：请到商品列表点「管理」新建</view>
       </view>
 
       <view class="card">
@@ -137,6 +142,11 @@
       <picker mode="selector" range="{{productLevels}}" range-key="name" value="{{levelIndex}}" bindchange="onLevelChange">
         <view class="picker">{{productLevels[levelIndex].name || '请选择'}}</view>
       </picker>
+      <view class="field-label">所属分组</view>
+      <picker mode="selector" range="{{groups}}" range-key="name" value="{{groupIndex}}" bindchange="onGroupChange">
+        <view class="picker">{{groups[groupIndex].name || '请选择分组'}}</view>
+      </picker>
+      <view class="section-hint" wx:if="{{!groups.length}}">暂无分组：请到商品列表点「管理」新建</view>
       <view class="field-label">客户下载图片</view>
       <view class="seg">
         <view class="seg-item {{!allowCustomerDownload?'on':''}}" data-v="0" bindtap="onDownloadTap">禁止</view>

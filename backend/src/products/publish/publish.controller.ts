@@ -40,6 +40,7 @@ export class PublishController {
     body: {
       batchId?: string;
       levelId?: string;
+      groupId?: string;
       status?: 'on_sale' | 'off_sale' | 'draft';
       priceDisplay?: 'show' | 'hide';
       styleNo?: string;
@@ -61,6 +62,7 @@ export class PublishController {
       objectKeys: string[];
       batchId?: string;
       levelId?: string;
+      groupId?: string;
       status?: string;
       priceDisplay?: string;
       styleNo?: string;
@@ -78,6 +80,7 @@ export class PublishController {
     @Body()
     body: {
       levelId?: string;
+      groupId?: string;
       status?: string;
       priceDisplay?: string;
       styleNo?: string;

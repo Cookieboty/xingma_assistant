@@ -127,7 +127,10 @@ function guessRoleFromFilename(name: string): { role: ImageRole; confidence: num
   if (/多色|合照|色卡|群组|挂拍|multicolor|swatch|hang/.test(n))
     return { role: 'multi_color', confidence: 0.8 };
   if (/细节|领口|袖口|detail|close/.test(n)) return { role: 'detail', confidence: 0.75 };
-  if (/主图|封面|main|cover|模特|平铺/.test(n)) return { role: 'main', confidence: 0.7 };
+  if (/场景|模特|上身|街拍|lookbook|\bmodel\b/.test(n) && !/挂拍|平铺|主图/.test(n)) {
+    return { role: 'unknown', confidence: 0.55 }; // 模特/场景不进商品主图角色
+  }
+  if (/主图|封面|main|cover|平铺|挂拍/.test(n)) return { role: 'main', confidence: 0.7 };
   if (/尺码|尺寸表|size.?chart/.test(n)) return { role: 'unknown', confidence: 0.5 };
   return { role: 'unknown', confidence: 0.2 };
 }

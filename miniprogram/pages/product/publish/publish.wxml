@@ -2,8 +2,8 @@
   <upload-float />
   <!-- Step 1: 选图 + 异步发品 -->
   <view class="card" wx:if="{{step===1}}">
-    <view class="section-title">上传商品图</view>
-    <view class="section-hint">一次可选多张（微信单次最多 9 张，可继续点「选图」累加到 60）。点发品后立刻离开本页，图片直传 OSS，后台分析建品；可同时开多批。锁屏后再打开会尽量续传。</view>
+    <view class="section-title">选择商品图片</view>
+    <view class="section-hint">一次可选多张（微信单次最多 9 张，可继续点「选图」累加到 60）。点发品后立刻离开本页，图片直传 OSS，后台分析建品；可同时开多批。锁屏后再打开会尽量续传。新商品会进入「本季」分组（商品列表可管理分组）。</view>
     <view class="muted" wx:if="{{runningHint}}" style="margin-bottom:12rpx;">{{runningHint}}</view>
     <view class="img-grid">
       <view class="img-cell" wx:for="{{localPaths}}" wx:key="*this">
@@ -16,14 +16,6 @@
       </view>
     </view>
     <view class="muted" style="margin-top:16rpx;" wx:if="{{localPaths.length}}">已选 {{localPaths.length}} 张</view>
-  </view>
-
-  <view class="card" wx:if="{{step===1}}">
-    <view class="field-label">状态</view>
-    <view class="seg">
-      <view class="seg-item {{status==='on_sale'?'on':''}}" data-v="on_sale" bindtap="onStatusTap">直接上架</view>
-      <view class="seg-item {{status==='draft'?'on':''}}" data-v="draft" bindtap="onStatusTap">存草稿</view>
-    </view>
   </view>
 
   <!-- Step 2: 旧人工确认（主路径已异步建品，一般不会进入） -->
@@ -57,20 +49,12 @@
     <view class="card">
       <sku-list skus="{{skus}}" title="颜色 SKU 草案" bind:change="onSkusChange" />
     </view>
-
-    <view class="card">
-      <view class="field-label">状态</view>
-      <view class="seg">
-        <view class="seg-item {{status==='on_sale'?'on':''}}" data-v="on_sale" bindtap="onStatusTap">直接上架</view>
-        <view class="seg-item {{status==='draft'?'on':''}}" data-v="draft" bindtap="onStatusTap">存草稿</view>
-      </view>
-    </view>
   </block>
 </view>
 
 <view class="btn-block-footer" wx:if="{{step===1}}">
   <view class="btn-primary {{submitting||!localPaths.length?'disabled':''}}" bindtap="uploadAndPublish">
-    {{submitting ? '已提交…' : '上传并发品'}}
+    {{submitting ? '已提交…' : '发品'}}
   </view>
 </view>
 <view class="btn-block-footer dual" wx:if="{{step===2}}">

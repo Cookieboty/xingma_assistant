@@ -48,6 +48,9 @@ Page({
     skus: [{ color: '', price: '' }],
     productLevels: [],
     levelIndex: 0,
+    groups: [],
+    groupId: '',
+    groupIndex: 0,
     images: [],
     allowCustomerDownload: false,
     saving: false,
@@ -55,26 +58,56 @@ Page({
     reordering: false,
   },
   async onLoad(q) {
-    await this.loadLevels();
+    await Promise.all([this.loadLevels(), this.loadGroups()]);
     if (q.id) {
       this.setData({ id: q.id, parsed: true });
       wx.setNavigationBarTitle({ title: '编辑商品' });
       await this.loadProduct(q.id);
     } else {
       wx.setNavigationBarTitle({ title: '手工发品' });
+      // 新建默认进本季/最新分组
+      const groups = this.data.groups || [];
+      const latest = groups.find((g) => g.isLatest) || groups[0];
+      if (latest) {
+        this.setData({ groupId: latest.id, groupIndex: groups.indexOf(latest) });
+      }
     }
   },
   async loadLevels() {
     try {
       const productLevels = await request({ url: '/api/levels/product' });
-      const list = productLevels || [];
+      const list = Array.isArray(productLevels) ? productLevels : (productLevels && productLevels.items) || [];
+      const open = list.find((l) => {
+        const code = String((l && l.code) || '').toLowerCase();
+        const id = String((l && l.id) || '');
+        return code === 'open' || id === 'pl_open';
+      }) || list[0];
+      const levelId = this.data.levelId || (open && open.id) || '';
+      let levelIndex = list.findIndex((l) => l.id === levelId);
+      if (levelIndex < 0) levelIndex = 0;
       this.setData({
         productLevels: list,
-        levelId: this.data.levelId || (list[0] && list[0].id) || '',
-        levelIndex: 0,
+        levelId: levelId || (list[0] && list[0].id) || '',
+        levelIndex,
       });
     } catch (e) {
       wx.showToast({ title: e.message || '等级加载失败', icon: 'none' });
+    }
+  },
+  async loadGroups() {
+    try {
+      const res = await request({ url: '/api/product-groups' });
+      const groups = (res && res.items) || [];
+      let groupId = this.data.groupId;
+      let groupIndex = groups.findIndex((g) => g.id === groupId);
+      if (groupIndex < 0) {
+        const latest = groups.find((g) => g.isLatest) || groups[0];
+        groupId = latest ? latest.id : '';
+        groupIndex = latest ? groups.indexOf(latest) : 0;
+      }
+      this.setData({ groups, groupId, groupIndex: Math.max(0, groupIndex) });
+    } catch (e) {
+      this.setData({ groups: [] });
     }
   },
   async loadProduct(id) {
@@ -86,6 +119,13 @@ Page({
       const sizeText = parseSizeFromDesc(p.description);
       let description = p.description || '';
       description = description.replace(/^尺码[：:].+\n?/m, '').trim();
+      const groups = this.data.groups || [];
+      let groupIndex = groups.findIndex((g) => g.id === p.groupId);
+      if (groupIndex < 0) {
+        const latest = groups.find((g) => g.isLatest) || groups[0];
+        groupIndex = latest ? groups.indexOf(latest) : 0;
+      }
+      const groupId = (groups[groupIndex] && groups[groupIndex].id) || p.groupId || '';
       this.setData({
         styleNo: p.styleNo || '',
         name: p.name || '',
@@ -93,6 +133,8 @@ Page({
         description,
         sizeText,
         levelId: p.levelId || '',
+        groupId,
+        groupIndex: Math.max(0, groupIndex),
         priceDisplay: p.priceDisplay || 'show',
         status: p.status || 'draft',
         skus: (p.skus && p.skus.length)
@@ -103,7 +145,7 @@ Page({
             }))
           : [{ color: '', price: '' }],
         levelIndex,
-        images: (p.images || []).filter((im) => im && im.url),
+        images: (p.images || []).filter((im) => im && im.url && !im.isPromo),
         allowCustomerDownload: !!p.allowCustomerDownload,
       });
     } catch (e) {
@@ -285,6 +327,11 @@ Page({
     const level = this.data.productLevels[idx];
     this.setData({ levelIndex: idx, levelId: level ? level.id : '' });
   },
+  onGroupChange(e) {
+    const idx = Number(e.detail.value);
+    const group = this.data.groups[idx];
+    this.setData({ groupIndex: idx, groupId: group ? group.id : '' });
+  },
   onSkusChange(e) {
     this.setData({ skus: e.detail.skus || [] });
   },
@@ -336,6 +383,7 @@ Page({
       material: this.data.material.trim() || null,
       description: buildDescription(this.data.sizeText, this.data.description),
       levelId: this.data.levelId,
+      groupId: this.data.groupId || null,
       priceDisplay: this.data.priceDisplay,
       status: this.data.status,
       allowCustomerDownload: !!this.data.allowCustomerDownload,

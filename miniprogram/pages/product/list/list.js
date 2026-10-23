@@ -178,24 +178,6 @@ Page({
 
   async onGroupPanelRowTap(e) {
     const id = e.currentTarget.dataset.id;
-    if (this.data.groupPanelMode === 'move') {
-      const productId = this.data.moveProductId;
-      const target = (this.data.groups || []).find((g) => g.id === id);
-      if (!productId || !target) return;
-      this.closeGroupPanel();
-      try {
-        await request({
-          url: '/api/product-groups/move-product',
-          method: 'POST',
-          data: { productId, groupId: target.id },
-        });
-        wx.showToast({ title: `已移到${target.name}`, icon: 'none' });
-        this.reload();
-      } catch (err) {
-        wx.showToast({ title: err.message || '调组失败', icon: 'none' });
-      }
-      return;
-    }
     const group = (this.data.groups || []).find((g) => g.id === id);
     if (!group) return;
     await this.manageOneGroup(group);
@@ -212,7 +194,7 @@ Page({
       await request({
         url: '/api/product-groups',
         method: 'POST',
-        data: { name },
+        data: { name, isLatest: true },
       });
       wx.showToast({ title: '已创建', icon: 'success' });
       await this.afterGroupChange(false);
@@ -289,40 +271,6 @@ Page({
     }
   },
 
-  async moveGroup(e) {
-    const productId = e.currentTarget.dataset.id;
-    const groups = this.data.groups || [];
-    if (!productId) return;
-    if (groups.length < 2) {
-      wx.showToast({ title: '请先新建分组', icon: 'none' });
-      return;
-    }
-    // ≤5 其它目标时用 ActionSheet；更多则走面板（ActionSheet 上限 6）
-    const others = groups; // 允许移到当前组（幂等），列表更直观
-    if (others.length <= 6) {
-      const names = others.map((g) => (g.isLatest ? `${g.name}（本季）` : g.name));
-      const tap = await actionSheet(names);
-      if (tap < 0) return;
-      const target = others[tap];
-      try {
-        await request({
-          url: '/api/product-groups/move-product',
-          method: 'POST',
-          data: { productId, groupId: target.id },
-        });
-        wx.showToast({ title: `已移到${target.name}`, icon: 'none' });
-        this.reload();
-      } catch (err) {
-        wx.showToast({ title: err.message || '调组失败', icon: 'none' });
-      }
-      return;
-    }
-    this.setData({
-      groupPanelVisible: true,
-      groupPanelMode: 'move',
-      moveProductId: productId,
-    });
-  },
 
   reload() {
     this.setData({ page: 1, hasMore: true, list: [] });
