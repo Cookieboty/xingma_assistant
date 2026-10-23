@@ -53,7 +53,7 @@ export class TypeOrmLevelsRepository implements ILevelsRepository {
 
   async listCustomerLevels(tenantId: string) {
     const rows = await this.customerLevels.find({
-      where: { tenantId },
+      where: { tenantId, status: 'active' },
       order: { rank: 'ASC' },
     });
     return rows.map((r) => this.toCl(r));
@@ -105,13 +105,14 @@ export class TypeOrmLevelsRepository implements ILevelsRepository {
   async deleteCustomerLevel(tenantId: string, id: string) {
     const e = await this.customerLevels.findOne({ where: { id, tenantId } });
     if (!e || e.isDefault) return false;
-    await this.customerLevels.delete({ id, tenantId });
+    e.status = 'deleted';
+    await this.customerLevels.save(e);
     return true;
   }
 
   async listProductLevels(tenantId: string) {
     const rows = await this.productLevels.find({
-      where: { tenantId },
+      where: { tenantId, status: 'active' },
       order: { rank: 'ASC' },
     });
     return rows.map((r) => this.toPl(r));
@@ -148,7 +149,10 @@ export class TypeOrmLevelsRepository implements ILevelsRepository {
   }
 
   async deleteProductLevel(tenantId: string, id: string) {
-    const result = await this.productLevels.delete({ id, tenantId });
-    return (result.affected || 0) > 0;
+    const e = await this.productLevels.findOne({ where: { id, tenantId } });
+    if (!e) return false;
+    e.status = 'deleted';
+    await this.productLevels.save(e);
+    return true;
   }
 }

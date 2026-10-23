@@ -20,4 +20,7 @@ export class FollowUp extends TenantScopedEntity {
 
   @Column({ type: 'varchar', length: 32, default: 'note', comment: 'note|reply' })
   kind!: string;
+
+  @Column({ type: 'varchar', length: 16, default: 'active', comment: 'active|deleted' })
+  status!: string;
 }

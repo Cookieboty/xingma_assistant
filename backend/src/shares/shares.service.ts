@@ -75,7 +75,7 @@ export class SharesService {
   private async loadBindings(tenantId: string, shareId: string): Promise<string[]> {
     if (this.db) {
       const rows = await this.db.getRepository(ShareEventBinding).find({
-        where: { tenantId, shareEventId: shareId },
+        where: { tenantId, shareEventId: shareId, status: 'active' },
         order: { boundAt: 'ASC' },
       });
       return rows.map((r) => r.customerId);
@@ -180,7 +180,7 @@ export class SharesService {
         // 简单策略：若总数超限且当前客户不是前 limit 位，删除并拒绝
         const keep = new Set(idsAfter.slice(0, limit));
         if (!keep.has(customerId)) {
-          await repo.delete({ shareEventId: share.id, customerId, tenantId: share.tenantId });
+          await repo.update({ shareEventId: share.id, customerId, tenantId: share.tenantId }, { status: 'revoked' });
           return { ok: false, boundNow: false, ids: idsAfter.slice(0, limit), reason: 'slots_full' };
         }
       }

@@ -1655,11 +1655,12 @@ export class PromoService implements OnModuleInit {
   async listSets(user: AuthContext, productId: string) {
     await this.products.getDetail(user, productId);
     await this.migrateLegacyJobsToSets(user, productId);
-    const rows = await this.setsRepo().find({
+    let rows = await this.setsRepo().find({
       where: { tenantId: user.tenantId, productId },
       order: { createdAt: 'DESC' },
       take: 50,
     });
+    rows = rows.filter((r) => r.status !== 'deleted');
     // 附带尚未落库完成的排队中任务（仅 payload.setId 已有）
     const dtos = rows.map((r) => this.setDto(r));
     try {
@@ -1773,7 +1774,8 @@ export class PromoService implements OnModuleInit {
       const covers = (product.coverMediaIds || []).filter((id: string) => !mediaIds.includes(id));
       await this.products.update(user, productId, { coverMediaIds: covers });
     }
-    await this.setsRepo().delete({ id: setId, tenantId: user.tenantId, productId });
+    row.status = 'deleted';
+    await this.setsRepo().save(row);
     return { deleted: setId, mediaRemoved: mediaIds.length };
   }
 

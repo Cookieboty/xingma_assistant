@@ -112,7 +112,7 @@ export class MemoryCustomersRepository implements ICustomersRepository {
   async removeFollowUp(tenantId: string, id: string) {
     const f = this.followUps.get(id);
     if (!f || f.tenantId !== tenantId) return false;
-    this.followUps.delete(id);
+    (f as any).status = 'deleted';
     return true;
   }
 
@@ -166,7 +166,7 @@ export class MemoryCustomersRepository implements ICustomersRepository {
   async removeRule(tenantId: string, id: string) {
     const r = this.rules.get(id);
     if (!r || r.tenantId !== tenantId) return false;
-    this.rules.delete(id);
+    (r as any).status = 'deleted';
     return true;
   }
 }

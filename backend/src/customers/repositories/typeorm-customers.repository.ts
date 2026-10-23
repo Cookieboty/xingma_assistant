@@ -113,7 +113,7 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
 
   async listFollowUps(tenantId: string, customerId: string) {
     const rows = await this.followUps.find({
-      where: { tenantId, customerId },
+      where: { tenantId, customerId, status: 'active' as any },
       order: { createdAt: 'DESC' },
     });
     return rows.map(
@@ -165,8 +165,11 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
   }
 
   async removeFollowUp(tenantId: string, id: string) {
-    const result = await this.followUps.delete({ id, tenantId });
-    return (result.affected || 0) > 0;
+    const row = await this.followUps.findOne({ where: { id, tenantId } });
+    if (!row) return false;
+    (row as any).status = 'deleted';
+    await this.followUps.save(row);
+    return true;
   }
 
   async listRules(tenantId: string, customerId?: string, productId?: string) {
@@ -174,7 +177,7 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
     if (customerId) where.customerId = customerId;
     if (productId) where.productId = productId;
     const rows = await this.rules.find({ where });
-    return rows.map(
+    return rows.filter((r) => (r as any).status !== 'deleted').map(
       (r): CustomerProductRuleRec => ({
         id: r.id,
         tenantId: r.tenantId,
@@ -236,7 +239,10 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
   }
 
   async removeRule(tenantId: string, id: string) {
-    const result = await this.rules.delete({ id, tenantId });
-    return (result.affected || 0) > 0;
+    const row = await this.rules.findOne({ where: { id, tenantId } });
+    if (!row) return false;
+    (row as any).status = 'deleted';
+    await this.rules.save(row);
+    return true;
   }
 }

@@ -12,7 +12,7 @@ export class InvitesController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles('owner')
+  @Roles('owner', 'staff')
   create(
     @AuthUser() user: AuthContext,
     @Body() body: { role?: string; maxUses?: number; expiresInDays?: number },
@@ -22,7 +22,7 @@ export class InvitesController {
 
   @Get()
   @UseGuards(RolesGuard)
-  @Roles('owner')
+  @Roles('owner', 'staff')
   list(@AuthUser() user: AuthContext) {
     return this.invites.list(user);
   }
@@ -41,7 +41,7 @@ export class InvitesController {
 
   @Post(':id/revoke')
   @UseGuards(RolesGuard)
-  @Roles('owner')
+  @Roles('owner', 'staff')
   revoke(@AuthUser() user: AuthContext, @Param('id') id: string) {
     return this.invites.revoke(user, id);
   }

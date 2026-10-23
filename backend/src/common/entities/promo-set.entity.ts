@@ -7,7 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export type PromoSetStatus = 'generating' | 'done' | 'partial' | 'failed';
+export type PromoSetStatus = 'generating' | 'done' | 'partial' | 'failed' | 'deleted';
 
 export interface PromoSetImage {
   index: number;

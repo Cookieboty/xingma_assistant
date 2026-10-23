@@ -82,7 +82,7 @@ export class MemoryLevelsRepository implements ILevelsRepository {
 
   async listCustomerLevels(tenantId: string) {
     return [...this.customerLevels.values()]
-      .filter((c) => c.tenantId === tenantId)
+      .filter((c) => c.tenantId === tenantId && (c as any).status !== 'deleted')
       .sort((a, b) => a.rank - b.rank)
       .map((c) => ({ ...c }));
   }
@@ -141,13 +141,13 @@ export class MemoryLevelsRepository implements ILevelsRepository {
     const c = this.customerLevels.get(id);
     if (!c || c.tenantId !== tenantId) return false;
     if (c.isDefault) return false;
-    this.customerLevels.delete(id);
+    (c as any).status = 'deleted';
     return true;
   }
 
   async listProductLevels(tenantId: string) {
     return [...this.productLevels.values()]
-      .filter((p) => p.tenantId === tenantId)
+      .filter((p) => p.tenantId === tenantId && (p as any).status !== 'deleted')
       .sort((a, b) => a.rank - b.rank)
       .map((p) => ({ ...p }));
   }
@@ -190,7 +190,7 @@ export class MemoryLevelsRepository implements ILevelsRepository {
   async deleteProductLevel(tenantId: string, id: string) {
     const p = this.productLevels.get(id);
     if (!p || p.tenantId !== tenantId) return false;
-    this.productLevels.delete(id);
+    (p as any).status = 'deleted';
     return true;
   }
 }

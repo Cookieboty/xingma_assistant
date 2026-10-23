@@ -188,7 +188,7 @@ export class TypeOrmProductsRepository implements IProductsRepository {
 
   async listSkus(tenantId: string, productId: string) {
     const rows = await this.skus.find({ where: { tenantId, productId } });
-    return rows.map((r) => this.toSku(r));
+    return rows.filter((r) => r.status !== 'deleted').map((r) => this.toSku(r));
   }
 
   async findSku(tenantId: string, skuId: string) {
@@ -230,7 +230,10 @@ export class TypeOrmProductsRepository implements IProductsRepository {
   }
 
   async removeSku(tenantId: string, skuId: string) {
-    const result = await this.skus.delete({ id: skuId, tenantId });
-    return (result.affected || 0) > 0;
+    const s = await this.skus.findOne({ where: { id: skuId, tenantId } });
+    if (!s) return false;
+    s.status = 'deleted';
+    await this.skus.save(s);
+    return true;
   }
 }

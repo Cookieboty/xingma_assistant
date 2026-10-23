@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { AuthService, LoginResult } from '../auth/auth.service';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
+import { AuditService } from '../common/audit.service';
 import { CustomersService } from '../customers/customers.service';
 import { TenantsService, TenantInfo, PROD_APP_ID } from '../tenants/tenants.service';
 import { WechatService } from '../wechat/wechat.service';
@@ -31,6 +32,7 @@ export class LoginService {
     private readonly customers: CustomersService,
     private readonly wechat: WechatService,
     private readonly invites: InvitesService,
+    private readonly audit: AuditService,
   ) {}
 
   async login(params: {
@@ -153,9 +155,25 @@ export class LoginService {
         { tenantId: user.tenantId, openid: user.openid, role: 'customer', customerId: user.customerId },
         patch,
       );
+      await this.audit.record({
+        tenantId: user.tenantId,
+        actor: user,
+        action: 'profile.update',
+        targetType: 'member',
+        targetId: user.memberId || user.openid,
+        detail: { fields: Object.keys(patch) },
+      });
       return this.getMe(user);
     }
     await this.customers.updateSelfProfile(user, patch);
+    await this.audit.record({
+      tenantId: user.tenantId,
+      actor: user,
+      action: 'profile.update',
+      targetType: 'customer',
+      targetId: user.customerId || user.openid,
+      detail: { fields: Object.keys(patch) },
+    });
     return this.getMe(user);
   }
 

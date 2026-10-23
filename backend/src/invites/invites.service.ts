@@ -15,6 +15,7 @@ import { MemberInvite } from '../common/entities/member-invite.entity';
 import { OssClient } from '../media/oss.client';
 import { TenantsService, MemberRec } from '../tenants/tenants.service';
 import { WechatService } from '../wechat/wechat.service';
+import { AuditService } from '../common/audit.service';
 
 export type InviteRole = 'owner' | 'staff';
 
@@ -44,6 +45,7 @@ export class InvitesService {
     private readonly tenants: TenantsService,
     private readonly wechat: WechatService,
     private readonly oss: OssClient,
+    private readonly audit: AuditService,
     @Optional() private readonly ds?: DataSource,
   ) {}
 
@@ -63,12 +65,11 @@ export class InvitesService {
     return {
       id: row.id,
       code: row.code,
-      role: row.role,
+      role: 'staff', // UI 平权：对外一律员工
       status: row.status,
       maxUses: row.maxUses,
       useCount: row.useCount,
       expiresAt: row.expiresAt,
-      acceptedOpenid: row.acceptedOpenid,
       acceptedMemberId: row.acceptedMemberId,
       acceptedAt: row.acceptedAt,
       createdAt: 'createdAt' in row ? row.createdAt : undefined,
@@ -82,8 +83,11 @@ export class InvitesService {
     user: AuthContext,
     body: { role?: string; maxUses?: number; expiresInDays?: number },
   ) {
-    if (user.role !== 'owner') throw new ForbiddenException('仅业主可创建邀请');
-    const role = (body.role === 'owner' ? 'owner' : 'staff') as InviteRole;
+    if (user.role !== 'owner' && user.role !== 'staff') {
+      throw new ForbiddenException('无权创建邀请');
+    }
+    // 员工平权：新邀请一律 staff（忽略 body.role 的 owner）
+    const role = 'staff' as InviteRole;
     const maxUses = Math.min(Math.max(Number(body.maxUses) || 1, 1), 50);
     const days = body.expiresInDays != null ? Number(body.expiresInDays) : 7;
     const expiresAt =
@@ -140,11 +144,21 @@ export class InvitesService {
     }
 
     const wxacodeUrl = await this.ensureWxacode(user.tenantId, invite);
+    await this.audit.record({
+      tenantId: user.tenantId,
+      actor: user,
+      action: 'invite.create',
+      targetType: 'member_invite',
+      targetId: invite.id,
+      detail: { code: invite.code, role, maxUses, expiresAt },
+    });
     return this.toDto(invite, wxacodeUrl);
   }
 
   async list(user: AuthContext) {
-    if (user.role !== 'owner') throw new ForbiddenException('仅业主可查看邀请');
+    if (user.role !== 'owner' && user.role !== 'staff') {
+      throw new ForbiddenException('无权查看邀请');
+    }
     if (this.db) {
       const rows = await this.db.getRepository(MemberInvite).find({
         where: { tenantId: user.tenantId },
@@ -164,7 +178,9 @@ export class InvitesService {
   }
 
   async revoke(user: AuthContext, id: string) {
-    if (user.role !== 'owner') throw new ForbiddenException('仅业主可撤销邀请');
+    if (user.role !== 'owner' && user.role !== 'staff') {
+      throw new ForbiddenException('无权撤销邀请');
+    }
     if (this.db) {
       const repo = this.db.getRepository(MemberInvite);
       const row = await repo.findOne({ where: { id, tenantId: user.tenantId } });
@@ -172,11 +188,27 @@ export class InvitesService {
       if (row.status === 'revoked') return this.toDto(row);
       row.status = 'revoked';
       await repo.save(row);
+      await this.audit.record({
+        tenantId: user.tenantId,
+        actor: user,
+        action: 'invite.revoke',
+        targetType: 'member_invite',
+        targetId: row.id,
+        detail: { code: row.code },
+      });
       return this.toDto(row, row.wxacodeObjectKey ? this.oss.publicUrl(row.wxacodeObjectKey) : null);
     }
     const row = [...this.mem.values()].find((x) => x.id === id && x.tenantId === user.tenantId);
     if (!row) throw new NotFoundException('邀请不存在');
     row.status = 'revoked';
+    await this.audit.record({
+      tenantId: user.tenantId,
+      actor: user,
+      action: 'invite.revoke',
+      targetType: 'member_invite',
+      targetId: row.id,
+      detail: { code: row.code },
+    });
     return this.toDto(row);
   }
 
@@ -184,7 +216,15 @@ export class InvitesService {
     if (user.role !== 'owner' && user.role !== 'staff') {
       throw new ForbiddenException('无权查看成员');
     }
-    return this.tenants.listMembers(user.tenantId);
+    const rows = await this.tenants.listMembers(user.tenantId);
+    // 不向前端返回 openid；角色对外统一为员工
+    return rows.map((m) => ({
+      id: m.id,
+      nickname: m.nickname,
+      status: m.status,
+      role: 'staff',
+      createdAt: m.createdAt,
+    }));
   }
 
   async acceptByCode(
@@ -230,6 +270,14 @@ export class InvitesService {
 
   async accept(user: AuthContext, body: { code?: string }) {
     const r = await this.acceptByCode(user.tenantId, user.openid, body?.code || '');
+    await this.audit.record({
+      tenantId: user.tenantId,
+      actor: user,
+      action: 'member.accept',
+      targetType: 'tenant_member',
+      targetId: r.member.id,
+      detail: { inviteCode: r.inviteCode, role: r.role },
+    });
     return { ok: true, role: r.role, memberId: r.member.id, inviteCode: r.inviteCode };
   }
 

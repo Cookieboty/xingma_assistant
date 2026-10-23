@@ -186,9 +186,9 @@ export class MemoryProductsRepository implements IProductsRepository {
   }
 
   async listSkus(tenantId: string, productId: string) {
-    return [...this.skus.values()]
-      .filter((s) => s.tenantId === tenantId && s.productId === productId)
-      .map((s) => ({ ...s }));
+    return [...this.skus.values()].filter(
+      (s) => s.tenantId === tenantId && s.productId === productId && s.status !== 'deleted',
+    );
   }
 
   async findSku(tenantId: string, skuId: string) {
@@ -238,7 +238,7 @@ export class MemoryProductsRepository implements IProductsRepository {
   async removeSku(tenantId: string, skuId: string) {
     const s = this.skus.get(skuId);
     if (!s || s.tenantId !== tenantId) return false;
-    this.skus.delete(skuId);
+    s.status = 'deleted';
     return true;
   }
 }

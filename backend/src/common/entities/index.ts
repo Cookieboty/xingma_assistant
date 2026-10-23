@@ -2,6 +2,7 @@ export * from './base.entity';
 export * from './tenant.entity';
 export * from './tenant-member.entity';
 export * from './member-invite.entity';
+export * from './audit-log.entity';
 export * from './customer-level.entity';
 export * from './customer-profile.entity';
 export * from './product-level.entity';

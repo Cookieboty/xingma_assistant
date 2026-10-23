@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { Tenant } from '../common/entities/tenant.entity';
 import { TenantMember } from '../common/entities/tenant-member.entity';
+import { AuditService } from '../common/audit.service';
+import { AuthContext } from '../common/interfaces/auth-context.interface';
 
 export interface TenantInfo {
   id: string;
@@ -36,6 +38,7 @@ export class TenantsService {
 
   constructor(
     private readonly config: ConfigService,
+    private readonly audit: AuditService,
     @Optional() private readonly ds?: DataSource,
   ) {
     // 兼容旧的开发占位 AppID
@@ -188,22 +191,33 @@ export class TenantsService {
     return info?.contactQrUrl || null;
   }
 
-  async setContactQr(tenantId: string, url: string | null) {
+  async setContactQr(tenantId: string, url: string | null, actor?: AuthContext | null) {
+    let result: { contactQrUrl: string | null | undefined };
     if (this.db) {
       const repo = this.db.getRepository(Tenant);
       const row = await repo.findOne({ where: { id: tenantId } });
       if (!row) throw new NotFoundException('租户不存在');
       row.contactQrUrl = url;
       await repo.save(row);
-      return { contactQrUrl: row.contactQrUrl };
+      result = { contactQrUrl: row.contactQrUrl };
+    } else {
+      const mem = this.memTenants.find((x) => x.id === tenantId);
+      if (!mem) throw new NotFoundException('租户不存在');
+      mem.contactQrUrl = url;
+      result = { contactQrUrl: mem.contactQrUrl };
     }
-    const mem = this.memTenants.find((x) => x.id === tenantId);
-    if (!mem) throw new NotFoundException('租户不存在');
-    mem.contactQrUrl = url;
-    return { contactQrUrl: mem.contactQrUrl };
+    await this.audit.record({
+      tenantId,
+      actor: actor || null,
+      action: 'tenant.contact_qr',
+      targetType: 'tenant',
+      targetId: tenantId,
+      detail: { cleared: url == null, hasUrl: !!url },
+    });
+    return result;
   }
 
-  async setAllowCustomerDownload(tenantId: string, allow: boolean) {
+  async setAllowCustomerDownload(tenantId: string, allow: boolean, actor?: AuthContext | null) {
     const value = !!allow;
     if (this.db) {
       const repo = this.db.getRepository(Tenant);
@@ -211,11 +225,19 @@ export class TenantsService {
       if (!row) throw new NotFoundException('租户不存在');
       (row as any).allowCustomerDownload = value;
       await repo.save(row);
-      return { allowCustomerDownload: value };
+    } else {
+      const mem = this.memTenants.find((x) => x.id === tenantId);
+      if (!mem) throw new NotFoundException('租户不存在');
+      mem.allowCustomerDownload = value;
     }
-    const mem = this.memTenants.find((x) => x.id === tenantId);
-    if (!mem) throw new NotFoundException('租户不存在');
-    mem.allowCustomerDownload = value;
+    await this.audit.record({
+      tenantId,
+      actor: actor || null,
+      action: 'tenant.allow_download',
+      targetType: 'tenant',
+      targetId: tenantId,
+      detail: { allow: value },
+    });
     return { allowCustomerDownload: value };
   }
 }

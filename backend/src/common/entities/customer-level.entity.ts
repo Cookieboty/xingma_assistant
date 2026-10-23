@@ -19,4 +19,7 @@ export class CustomerLevel extends TenantScopedEntity {
 
   @Column({ type: 'varchar', length: 255, nullable: true, comment: '备注' })
   remark!: string | null;
+
+  @Column({ type: 'varchar', length: 16, default: 'active', comment: 'active|deleted' })
+  status!: string;
 }
