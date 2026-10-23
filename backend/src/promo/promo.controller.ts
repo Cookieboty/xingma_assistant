@@ -56,7 +56,16 @@ export class PromoController {
     return this.promo.deleteSet(u, id, setId);
   }
   @Post('products/:id/promo/sets/:setId/regenerate')
-  regenSet(@AuthUser() u: AuthContext, @Param('id') id: string, @Param('setId') setId: string) {
+  regenSet(
+    @AuthUser() u: AuthContext,
+    @Param('id') id: string,
+    @Param('setId') setId: string,
+    @Body() body?: { indexes?: number[] },
+  ) {
+    const indexes = Array.isArray(body?.indexes) ? body!.indexes : [];
+    if (indexes.length) {
+      return this.promo.regenerateImages(u, id, setId, indexes);
+    }
     return this.promo.regenerateSet(u, id, setId);
   }
   @Post('products/:id/promo/sets/:setId/images/:index/regenerate')

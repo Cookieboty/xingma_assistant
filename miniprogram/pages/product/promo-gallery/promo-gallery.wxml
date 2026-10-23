@@ -68,8 +68,8 @@
             src="{{im.url}}"
             mode="aspectFill"
             lazy-load
-            data-url="{{im.url}}"
             data-setid="{{item.id}}"
+            data-index="{{idx}}"
             bindtap="preview"
           />
           <view class="placeholder" wx:elif="{{im.failed}}">失败</view>

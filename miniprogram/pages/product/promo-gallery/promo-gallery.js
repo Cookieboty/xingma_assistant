@@ -187,12 +187,53 @@ Page({
     // 全屏用 video 组件即可；此处保证展开
   },
 
-  preview(e) {
-    const { url, setid } = e.currentTarget.dataset;
-    const set = this.data.sets.find((s) => s.id === setid);
-    const urls = ((set && set.items) || []).filter((i) => i.url).map((i) => i.url);
-    if (!url || !urls.length) return;
-    wx.previewImage({ urls, current: url });
+  /**
+   * 预览：不用 data-url（签名 URL 含 & 会被 dataset 截断）。
+   * 私有桶签名会过期；列表为防闪烁会复用旧 src，预览前拉一次新鲜签名。
+   */
+  async preview(e) {
+    const setid = e.currentTarget.dataset.setid;
+    const index = Number(e.currentTarget.dataset.index);
+    const productId = this.data.id;
+    if (!setid || !productId) return;
+    const localSet = (this.data.sets || []).find((s) => s.id === setid);
+    const localItems = (localSet && localSet.items) || [];
+    const fallbackCurrent = localItems[index] && localItems[index].url
+      ? localItems[index].url
+      : '';
+    wx.showLoading({ title: '打开预览…', mask: true });
+    try {
+      const setsRaw = await request({ url: `/api/products/${productId}/promo/sets` });
+      const list = Array.isArray(setsRaw) ? setsRaw : (setsRaw.items || []);
+      const fresh = list.find((s) => s.id === setid) || null;
+      const items = (fresh && fresh.items) || localItems;
+      const urls = items.filter((i) => i && i.url).map((i) => i.url);
+      let current = '';
+      if (Number.isInteger(index) && items[index] && items[index].url) {
+        current = items[index].url;
+      } else if (fallbackCurrent) {
+        const fp = urlPath(fallbackCurrent);
+        current = (urls.find((u) => urlPath(u) === fp) || urls[0] || '');
+      } else {
+        current = urls[0] || '';
+      }
+      wx.hideLoading();
+      if (!urls.length || !current) {
+        wx.showToast({ title: '暂无可预览图片', icon: 'none' });
+        return;
+      }
+      wx.previewImage({ urls, current });
+    } catch (err) {
+      wx.hideLoading();
+      // 回退：用列表里已有 URL（可能仍有效）
+      const urls = localItems.filter((i) => i && i.url).map((i) => i.url);
+      const current = (localItems[index] && localItems[index].url) || urls[0] || '';
+      if (urls.length && current) {
+        wx.previewImage({ urls, current });
+        return;
+      }
+      wx.showToast({ title: (err && err.message) || '预览失败', icon: 'none' });
+    }
   },
 
   toggleAlbumItem(e) {
@@ -303,48 +344,68 @@ Page({
     if (!setId || this.data.actingId) return;
     const set = this.data.sets.find((s) => s.id === setId);
     if (!set) return;
-    const selected = ((set.items) || []).filter((i) => i && i.url && i.albumSelected);
+    if (set.busy) {
+      wx.showToast({ title: '该组正在生成中', icon: 'none' });
+      return;
+    }
+    const items = set.items || [];
+    const selected = items.filter((i) => i && i.url && i.albumSelected);
     if (!selected.length) {
       wx.showToast({ title: '请先勾选要重新生成的图片', icon: 'none' });
       return;
     }
-    const allWithUrl = ((set.items) || []).filter((i) => i && i.url);
-    const whole = selected.length === allWithUrl.length;
-    const title = whole ? '重新生成整组' : (selected.length === 1 ? '重新生成选中图片' : `重新生成 ${selected.length} 张`);
-    const content = whole
-      ? '将按原参数重新生成该组全部图片'
-      : '将按原参数重新生成已勾选的图片';
-    const ok = await new Promise((resolve) => {
-      wx.showModal({
-        title,
-        content,
-        success: (r) => resolve(!!r.confirm),
-      });
-    });
-    if (!ok) return;
-    this.setData({ actingId: setId });
-    try {
-      if (whole) {
-        await request({
-          url: `/api/products/${this.data.id}/promo/sets/${setId}/regenerate`,
-          method: 'POST',
-          data: {},
-        });
-      } else {
-        for (const im of selected) {
-          const index = Number(im.index);
-          if (!Number.isFinite(index)) throw new Error('图片序号缺失');
-          await request({
-            url: `/api/products/${this.data.id}/promo/sets/${setId}/images/${index}/regenerate`,
-            method: 'POST',
-            data: {},
-          });
+    const allWithUrl = items.filter((i) => i && i.url);
+    const whole = selected.length === allWithUrl.length && allWithUrl.length > 0;
+    const indexes = [];
+    if (!whole) {
+      for (const im of selected) {
+        const index = Number(im.index);
+        if (!Number.isInteger(index) || index < 0) {
+          wx.showToast({ title: '图片序号缺失，请下拉刷新后重试', icon: 'none' });
+          return;
         }
+        indexes.push(index);
       }
-      wx.showToast({ title: '已提交重新生成', icon: 'none' });
-      this.load();
+    }
+
+    // 乐观更新：展开、占位、防连点
+    const optimistic = (this.data.sets || []).map((s) => {
+      if (s.id !== setId) return s;
+      const nextItems = (s.items || []).map((it) => {
+        if (!it) return it;
+        const hit = whole || indexes.indexOf(Number(it.index)) >= 0;
+        if (!hit) return Object.assign({}, it, { albumSelected: false });
+        return Object.assign({}, it, {
+          albumSelected: false,
+          url: null,
+          pending: true,
+          status: 'pending',
+        });
+      });
+      return enrichSet(Object.assign({}, s, {
+        items: nextItems,
+        status: 'generating',
+        busy: true,
+        expanded: true,
+        progressText: whole ? '整组重新生成中…' : `重新生成 ${indexes.length} 张…`,
+        percent: 5,
+      }), null);
+    });
+    this.setData({ actingId: setId, sets: optimistic, showJobsEntry: true, focusSetId: setId });
+    wx.showLoading({ title: '提交中…', mask: true });
+    try {
+      await request({
+        url: `/api/products/${this.data.id}/promo/sets/${setId}/regenerate`,
+        method: 'POST',
+        data: whole ? {} : { indexes },
+      });
+      wx.hideLoading();
+      wx.showToast({ title: whole ? '已开始整组重生' : '已开始重新生成', icon: 'none' });
+      await this.load({ silent: true });
     } catch (err) {
+      wx.hideLoading();
       wx.showToast({ title: err.message || '提交失败', icon: 'none' });
+      await this.load({ silent: true });
     } finally {
       this.setData({ actingId: '' });
     }

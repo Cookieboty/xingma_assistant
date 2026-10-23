@@ -114,6 +114,95 @@ export class JobsService {
     return this.toDto(row);
   }
 
+  /**
+   * 重生/同组再次生成：复用已有 job 行重新排队，不新建任务中心条目。
+   * 找不到可复用行时才 create。
+   */
+  async reuseOrCreate(
+    user: AuthContext,
+    type: JobType,
+    payload: Record<string, unknown>,
+    opts?: { existingJobId?: string | null; maxAttempts?: number; runAt?: Date },
+  ) {
+    const existingId = String(opts?.existingJobId || '').trim();
+    if (existingId) {
+      const repo = this.jobs();
+      const row = await repo.findOne({ where: { id: existingId, tenantId: user.tenantId } });
+      if (row && this.isOwnedBy(row, user) && row.type === type) {
+        const displayTitle = buildJobDisplayTitle(type, payload);
+        const enrichedPayload = {
+          ...payload,
+          displayTitle: (payload as any).displayTitle || displayTitle,
+        };
+        row.status = 'queued';
+        row.payload = enrichedPayload;
+        row.progress = { percent: 0, step: 'queued', message: displayTitle };
+        row.result = null;
+        row.error = null;
+        row.lockedBy = null;
+        row.nextRunAt = opts?.runAt || null;
+        row.startedAt = null;
+        row.finishedAt = null;
+        // 重生视为新一轮，重置 attempts，避免历史失败占满次数
+        row.attempts = 0;
+        if (opts?.maxAttempts) row.maxAttempts = opts.maxAttempts;
+        await repo.save(row);
+        await this.appendEvent(row, 'reused', '复用任务重新排队', {
+          type,
+          setId: (payload as any)?.setId || null,
+        });
+        this.logger.log(`reuseOrCreate type=${type} jobId=${row.id} setId=${(payload as any)?.setId || '-'}`);
+        return this.toDto(row);
+      }
+    }
+    return this.create(user, type, payload, opts);
+  }
+
+  /**
+   * 取消同 set 上其它仍在排队/执行的 promo 任务（历史重复行），避免并行写同一组。
+   */
+  async cancelSiblingPromoJobs(
+    user: AuthContext,
+    opts: { setId: string; exceptJobId?: string | null; types?: string[] },
+  ) {
+    const setId = String(opts.setId || '').trim();
+    if (!setId) return 0;
+    const types = opts.types?.length ? opts.types : ['promo_image', 'promo_video'];
+    const except = String(opts.exceptJobId || '').trim();
+    const owners = this.ownerIds(user);
+    if (!owners.length) return 0;
+    const repo = this.jobs();
+    const rows = await repo.find({
+      where: {
+        tenantId: user.tenantId,
+        createdBy: owners.length === 1 ? owners[0] : In(owners),
+        type: types.length === 1 ? types[0] : In(types),
+        status: In(['queued', 'running'] as JobStatus[]),
+      },
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+    let n = 0;
+    for (const row of rows) {
+      if (except && row.id === except) continue;
+      const sid = String((row.payload as any)?.setId || '').trim();
+      if (sid !== setId) continue;
+      row.status = 'cancelled';
+      row.finishedAt = new Date();
+      row.lockedBy = null;
+      row.progress = {
+        ...(row.progress || {}),
+        step: 'cancelled',
+        message: '已被同组重生取代',
+        percent: (row.progress as any)?.percent ?? 0,
+      };
+      await repo.save(row);
+      await this.appendEvent(row, 'cancel', '同组重生取消重复任务');
+      n += 1;
+    }
+    return n;
+  }
+
   async get(user: AuthContext, jobId: string) {
     const row = this.assertOwned(
       await this.jobs().findOne({ where: { id: jobId, tenantId: user.tenantId } }),
@@ -568,7 +657,10 @@ export class JobsService {
   }
 }
 
-/** 进行中的 promo_image：同一 setId（或同商品+模板）只留最新一条，避免「两条多色」 */
+/**
+ * promo_image：同一 setId 只留最新一条（含已完成历史），避免重生堆积多条任务。
+ * 无 setId 的进行中任务：同商品+模板只留最新。
+ */
 function dedupePromoJobs<T extends {
   id: string;
   type?: string;
@@ -582,7 +674,7 @@ function dedupePromoJobs<T extends {
   const seenTpl = new Set<string>();
   const out: T[] = [];
   for (const it of items) {
-    if (it.type !== 'promo_image' || !active.has(String(it.status || ''))) {
+    if (it.type !== 'promo_image') {
       out.push(it);
       continue;
     }
@@ -592,7 +684,11 @@ function dedupePromoJobs<T extends {
     if (setId) {
       if (seenSet.has(setId)) continue;
       seenSet.add(setId);
-    } else if (productId && templateId) {
+      out.push(it);
+      continue;
+    }
+    // 无 setId：仅折叠进行中的同模板重复
+    if (active.has(String(it.status || '')) && productId && templateId) {
       const key = `${productId}::${templateId}`;
       if (seenTpl.has(key)) continue;
       seenTpl.add(key);

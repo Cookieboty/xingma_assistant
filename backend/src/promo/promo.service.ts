@@ -334,10 +334,11 @@ export class PromoService implements OnModuleInit {
     };
 
     const isPartialRegen = Array.isArray(input.regenIndexes) && input.regenIndexes.length > 0;
+    const isExplicitSetRegen = !!String(input.setId || '').trim();
     const repo = this.setsRepo();
 
-    // 防重复：同商品+模板已有 generating 组 / 排队中任务 → 复用（整组重生同 set 也复用进行中 job）
-    if (!isPartialRegen) {
+    // 仅「全新生成」防重复提交；已有 set 的重生必须重新排队（不可静默返回进行中 job）
+    if (!isPartialRegen && !isExplicitSetRegen) {
       const reused = await this.findActivePromo(user, productId, tpl.id, input.setId);
       if (reused) {
         this.logger.log(
@@ -348,6 +349,7 @@ export class PromoService implements OnModuleInit {
     }
 
     let setId = input.setId;
+    let existingJobId: string | null = null;
     if (setId) {
       const existing = await repo.findOne({ where: { id: setId, tenantId: user.tenantId, productId } });
       if (!existing) throw new NotFoundException('宣传图组不存在');
@@ -355,6 +357,26 @@ export class PromoService implements OnModuleInit {
       existing.params = params;
       existing.caption = caption;
       existing.templateId = tpl.id;
+      // 局部重生：目标槽位标 pending，列表立刻显示「生成中」占位；整组则全部 pending
+      const regenIdx = isPartialRegen
+        ? new Set((input.regenIndexes || []).map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0))
+        : null;
+      const prevImages = Array.isArray(existing.images) ? existing.images : [];
+      if (prevImages.length) {
+        existing.images = prevImages.map((img) => {
+          const shouldPending = !regenIdx || regenIdx.has(Number(img.index));
+          if (!shouldPending) return img;
+          return {
+            ...img,
+            status: 'pending' as const,
+            error: undefined,
+            ms: undefined,
+          };
+        });
+      } else if (!isPartialRegen) {
+        existing.images = Array.from({ length: count }, (_, i) => ({ index: i, status: 'pending' as const }));
+      }
+      existingJobId = existing.jobId || null;
       await repo.save(existing);
     } else {
       setId = newId('ps');
@@ -383,10 +405,22 @@ export class PromoService implements OnModuleInit {
     };
     // multi_color 不写入易错的场景模特 displayTitle，由 buildJobDisplayTitle 现算
     const displayTitle = buildJobDisplayTitle('promo_image', { ...jobPayload, displayTitle: undefined });
-    const job = await this.jobs.create(user, 'promo_image', {
-      ...jobPayload,
-      displayTitle,
-    });
+    // 重生：复用该组已有 job，不在任务中心新开一行
+    const job = await this.jobs.reuseOrCreate(
+      user,
+      'promo_image',
+      { ...jobPayload, displayTitle },
+      { existingJobId },
+    );
+    try {
+      await this.jobs.cancelSiblingPromoJobs(user, {
+        setId,
+        exceptJobId: job.id,
+        types: ['promo_image'],
+      });
+    } catch (e: any) {
+      this.logger.warn(`cancelSiblingPromoJobs: ${e?.message || e}`);
+    }
     await repo.update({ id: setId, tenantId: user.tenantId }, { jobId: job.id });
 
     return {
@@ -881,7 +915,7 @@ export class PromoService implements OnModuleInit {
     return null;
   }
 
-  /** 整组重生成：沿用 params */
+  /** 整组重生成：沿用 params，复用同组 job */
   async regenerateSet(user: AuthContext, productId: string, setId: string) {
     const set = await this.getSetEntity(user, productId, setId);
     const p = (set.params || {}) as unknown as GenerateInput;
@@ -891,16 +925,21 @@ export class PromoService implements OnModuleInit {
     return this.generate(user, productId, { ...p, setId, regenIndexes: undefined });
   }
 
-  /** 单张重生成 */
+  /** 单张重生成（兼容旧路径） */
   async regenerateImage(user: AuthContext, productId: string, setId: string, index: number) {
+    return this.regenerateImages(user, productId, setId, [index]);
+  }
+
+  /** 批量局部重生成：一次请求、一个 job、同一 set */
+  async regenerateImages(user: AuthContext, productId: string, setId: string, indexes: number[]) {
     const set = await this.getSetEntity(user, productId, setId);
     const p = (set.params || {}) as unknown as GenerateInput;
     if (!p.templateId || !(p.referenceAssetIds || []).length) {
       throw new BadRequestException('该组缺少生成参数，无法重生成');
     }
-    const idx = Number(index);
-    if (!Number.isInteger(idx) || idx < 0) throw new BadRequestException('无效图片下标');
-    return this.generate(user, productId, { ...p, setId, regenIndexes: [idx] });
+    const idxs = [...new Set((indexes || []).map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0))];
+    if (!idxs.length) throw new BadRequestException('请指定要重生成的图片下标');
+    return this.generate(user, productId, { ...p, setId, regenIndexes: idxs });
   }
 
   private async getSetEntity(user: AuthContext, productId: string, setId: string) {
@@ -1556,17 +1595,22 @@ export class PromoService implements OnModuleInit {
 
   // ---------- 宣传图组（UI 以 set 为中心） ----------
   private setDto(row: PromoSetEntity) {
-    const images = (row.images || []).map((i) => ({
-      index: i.index,
-      status: i.status,
-      poseId: i.poseId,
-      sceneId: i.sceneId,
-      mediaId: i.mediaId || null,
-      url: i.objectKey ? this.publicUrl(i.objectKey) : null,
-      error: i.error,
-      ms: i.ms,
-      saved: !!i.mediaId,
-    }));
+    const images = (row.images || []).map((i) => {
+      const regenerating = i.status === 'pending' || i.status === 'running';
+      return {
+        index: i.index,
+        status: i.status,
+        poseId: i.poseId,
+        sceneId: i.sceneId,
+        mediaId: i.mediaId || null,
+        // 重生中的槽位先藏旧图，列表立刻出现「生成中」占位
+        url: i.objectKey && !regenerating ? this.publicUrl(i.objectKey) : null,
+        error: i.error,
+        ms: i.ms,
+        saved: !!i.mediaId,
+        regenerating: !!regenerating && !!i.objectKey,
+      };
+    });
     const done = images.filter((i) => i.status === 'done' && i.url).length;
     const tpl = findTemplate(row.templateId);
     const kind = (row as any).kind || (row.params as any)?.kind || (row.params as any)?.mediaKind || 'image';
