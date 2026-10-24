@@ -1,6 +1,7 @@
 const { request, ensureSilentSession } = require('../../../utils/request');
 const { saveUrlsToAlbum } = require('../../../utils/saveAlbum');
 const { maybeCollectProfile, stableMediaUrl } = require('../../../utils/profile');
+const { isUserVisibleJobType } = require('../../../utils/job-visibility');
 
 const STATUS_LABEL = {
   generating: '生成中',
@@ -34,7 +35,7 @@ function mapProductJob(j) {
   const title =
     j.title ||
     (j.payload && j.payload.displayTitle) ||
-    (j.type === 'promo_image' ? '宣传生图' : j.type === 'promo_video' ? '宣传视频' : j.type === 'publish_product' ? '选图发品' : '任务');
+    (j.type === 'promo_image' ? '宣传生图' : j.type === 'promo_video' ? '宣传视频' : '任务');
   let hint = '';
   if (j.status === 'failed') hint = String(j.error || progress.message || '').slice(0, 36);
   else if (j.status === 'queued' || j.status === 'running') {
@@ -186,15 +187,14 @@ Page({
     }
   },
   /**
-   * 业主「本商品任务」：进行中/失败的 promo_set（生图/视频）+ 发品 job。
-   * 不把框架层并行/重生 job 当独立任务列出；成功素材在列表「素材」→ 宣传素材页。
+   * 业主「本商品任务」：仅 user-facing 生图/视频（进行中/失败的 promo_set）。
+   * 分析图、发品、封面等系统 job 不展示；成功素材在「素材」→ 宣传素材页。
    */
   async loadProductJobs(productId) {
     if (!productId) return;
     this.setData({ productJobsLoading: true });
     try {
       const tasks = [];
-      // 1) 素材任务 = promo_sets 中需关注项
       const sets = this.data.promoSets || [];
       sets.forEach((s) => {
         const busy = s.statusClass === 'run';
@@ -211,14 +211,17 @@ Page({
           hint: s.metaText || '',
         });
       });
-      // 2) 非素材类框架任务（发品等）；promo_* 有 set 的已在上方
+      // 兜底：无 set 表达的 user-facing job（与任务中心同一白名单）
       const res = await request({ url: `/api/jobs?productId=${productId}&limit=30` });
+      const seenSets = {};
+      tasks.forEach((t) => { if (t.setId) seenSets[t.setId] = true; });
       ((res && res.items) || []).forEach((j) => {
-        const st = j && j.status;
+        if (!isUserVisibleJobType(j && j.type)) return;
+        const st = j.status;
         if (st !== 'queued' && st !== 'running' && st !== 'failed') return;
-        const isPromo = j.type === 'promo_image' || j.type === 'promo_video' || j.type === 'cover_reselect';
-        if (isPromo) return; // 已由 set 表达
-        tasks.push(Object.assign(mapProductJob(j), { kind: 'job' }));
+        const setId = (j.payload && j.payload.setId) || (j.result && j.result.setId) || '';
+        if (setId && seenSets[setId]) return;
+        tasks.push(Object.assign(mapProductJob(j), { kind: 'job', setId }));
       });
       this.setData({ productJobs: tasks, productJobsLoading: false });
     } catch (e) {

@@ -17,6 +17,8 @@ import {
   JobRecord,
   JobStatus,
   JobType,
+  USER_VISIBLE_JOB_TYPES,
+  isUserVisibleJobType,
 } from './job.types';
 import { buildJobDisplayTitle } from './job-display-title';
 import { Product } from '../common/entities/product.entity';
@@ -261,7 +263,16 @@ export class JobsService {
       tenantId: user.tenantId,
       createdBy: owners.length === 1 ? owners[0] : In(owners),
     };
-    if (query?.type) where.type = query.type;
+    // 业主列表默认只返回 user-facing 类型；未知/系统 job 默认隐藏
+    const rawType = String(query?.type || '').trim();
+    if (rawType) {
+      if (!isUserVisibleJobType(rawType)) {
+        return { items: [], total: 0 };
+      }
+      where.type = rawType;
+    } else {
+      where.type = In([...USER_VISIBLE_JOB_TYPES]);
+    }
     if (query?.status) where.status = query.status;
     // 按商品筛时多取一些再内存过滤（payload JSON），保证详情页能列全
     const productId = String(query?.productId || '').trim();

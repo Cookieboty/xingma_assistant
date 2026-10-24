@@ -49,7 +49,7 @@
 
     <view class="card">
       <view class="section-title">本商品任务</view>
-      <view class="muted small">进行中 / 失败的生图·生视频·发品；点开看该次任务。已完成素材请从商品列表「素材」进入</view>
+      <view class="muted small">进行中 / 失败的宣传生图·宣传视频；点开看该次任务。系统任务不展示；已完成素材请从商品列表「素材」进入</view>
       <view class="muted small" wx:if="{{productJobsLoading && !productJobs.length}}">加载任务…</view>
       <view class="muted small" wx:elif="{{!productJobs.length}}">暂无进行中或失败任务</view>
       <view class="job-mini" wx:for="{{productJobs}}" wx:key="id" data-id="{{item.id}}" data-kind="{{item.kind}}" data-set-id="{{item.setId}}" bindtap="goJobDetail">
