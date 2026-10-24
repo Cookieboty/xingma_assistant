@@ -33,7 +33,7 @@ Page({
     steps: [], stepIdx: -1, stepKey: '', stepNames: STEP_NAMES,
     assets: [], colors: [], feature: '', featureDirty: false,
     sellingPoint: '',
-    script: '', scriptBeats: [], scriptSeconds: 10, scriptVia: '', scriptLoading: false, scriptDirty: false,
+    script: '', scriptSeconds: 10, scriptVia: '', scriptLoading: false, scriptDirty: false,
     sel: { refs: [], colors: [], modelId: '', poses: [], scenes: [], poseText: '', sceneText: '', count: 1, sizeId: '' },
     // 风格样例（可选，不进商品图库）：{ objectKey, url, uploading? }
     styleRefs: [],
@@ -326,9 +326,9 @@ Page({
           seconds: this.data.scriptSeconds || 10,
         },
       });
+      // beats 仍可能由后端返回供日志，UI 只展示可编辑 script
       this.setData({
         script: r.script || '',
-        scriptBeats: r.beats || [],
         scriptSeconds: r.seconds || 10,
         scriptVia: r.via || '',
         scriptDirty: false,

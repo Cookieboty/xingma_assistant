@@ -93,12 +93,9 @@
 
     <view class="card" wx:if="{{stepKey === 'script'}}">
       <view class="section-title">{{stepNames.script}}</view>
-      <view class="section-hint">自动生成约 {{scriptSeconds || 10}} 秒竖屏分镜，可直接改；确认后再生成视频</view>
+      <view class="section-hint">约 {{scriptSeconds || 10}} 秒竖屏分镜草稿。改这里就会进成片；确认后再生成视频</view>
       <view class="muted small" wx:if="{{scriptLoading}}">正在生成脚本…</view>
-      <view class="chips" wx:if="{{scriptBeats.length}}">
-        <text class="chip" wx:for="{{scriptBeats}}" wx:key="*this">{{item}}</text>
-      </view>
-      <textarea class="textarea" style="height:420rpx;" maxlength="1200" value="{{script}}" bindinput="onScript" disabled="{{scriptLoading}}" />
+      <textarea class="textarea" style="height:420rpx;" maxlength="1200" placeholder="改这里就会进成片" value="{{script}}" bindinput="onScript" disabled="{{scriptLoading}}" />
       <view class="link" style="margin-top:12rpx;" bindtap="refreshScript">重新生成脚本</view>
       <view class="muted small" wx:if="{{scriptVia}}">来源：{{scriptVia === 'llm' ? '智能草稿' : '规则草稿'}}</view>
     </view>
