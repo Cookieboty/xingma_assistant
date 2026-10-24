@@ -227,3 +227,8 @@
   font-size: 28rpx;
 }
 .sub-label { font-size: 26rpx; color: #666; margin-bottom: 8rpx; }
+
+.tpl-head { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
+.tpl-head-left { display: flex; align-items: center; gap: 12rpx; flex: 1; min-width: 0; }
+.tpl-switch { flex-shrink: 0; padding: 8rpx 20rpx !important; font-size: 24rpx !important; }
+.quick-links .link { color: #c45c26; }

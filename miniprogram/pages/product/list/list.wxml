@@ -61,7 +61,7 @@
     <view class="pc-actions">
       <view class="pc-act" catchtap="goEdit" data-id="{{item.id}}">编辑</view>
       <view class="pc-act-div"></view>
-      <button class="pc-act pc-share" open-type="share" data-id="{{item.id}}" data-name="{{item.name}}" data-style="{{item.styleNo}}" data-cover="{{item.coverUrl}}" catchtap="onShareTap">微信转发</button>
+      <view class="pc-act" catchtap="openShareSheet" data-id="{{item.id}}" data-name="{{item.name}}" data-style="{{item.styleNo}}" data-cover="{{item.coverUrl}}">转发</view>
       <view class="pc-act-div"></view>
       <view class="pc-act" catchtap="goMaterials" data-id="{{item.id}}">素材</view>
       <view class="pc-act-div"></view>
@@ -104,6 +104,28 @@
         </view>
         <view class="muted empty" wx:if="{{!groups.length}}" style="padding:40rpx;">暂无分组</view>
       </scroll-view>
+    </view>
+  </view>
+
+  <!-- 列表转发：公开 / 限量，不进商品详情 -->
+  <view class="share-mask" wx:if="{{shareSheetVisible}}" catchtouchmove="noop" catchtap="closeShareSheet">
+    <view class="share-sheet card" catchtap="noop">
+      <view class="share-sheet-title">转发给微信好友</view>
+      <view class="muted small" wx:if="{{shareSheetProduct.name}}">{{shareSheetProduct.name}} · {{shareSheetProduct.styleNo}}</view>
+      <view class="muted small" style="margin-top:8rpx;">素材下载请点「素材」，与转发分开</view>
+      <button
+        class="btn-primary share-sheet-btn"
+        open-type="share"
+        data-policy="open"
+        catchtap="onShareSheetTap"
+      >公开转发</button>
+      <button
+        class="btn-ghost share-sheet-btn"
+        open-type="share"
+        data-policy="limited"
+        catchtap="onShareSheetTap"
+      >限量转发（前几位打开可看）</button>
+      <view class="share-sheet-cancel" bindtap="closeShareSheet">取消</view>
     </view>
   </view>
 

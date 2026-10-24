@@ -25,7 +25,7 @@
     <view wx:if="{{filter==='pending'}}">暂无待处理询价</view>
     <block wx:else>
       <view>还没有客户</view>
-      <view class="muted small" style="margin-top:8rpx;">去商品列表点「微信转发」，对方打开后会自动出现在这里</view>
+      <view class="muted small" style="margin-top:8rpx;">去商品列表点「转发」，对方打开后会自动出现在这里</view>
     </block>
   </view>
 

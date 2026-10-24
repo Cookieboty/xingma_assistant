@@ -20,7 +20,14 @@
   <!-- 步骤 -->
   <block wx:if="{{tpl && stepKey !== 'result'}}">
     <view class="card">
-      <view class="tpl-head"><text class="tpl-name">{{tpl.name}}</text><text class="link" bindtap="backToTemplates">换模板</text></view>
+      <view class="tpl-head">
+        <view class="tpl-head-left">
+          <text class="tpl-name">{{tpl.name}}</text>
+          <text class="tag" wx:if="{{quickMode}}">短路径</text>
+        </view>
+        <view class="btn-ghost mini tpl-switch" bindtap="backToTemplates">换模板</view>
+      </view>
+      <view class="muted small" wx:if="{{quickMode}}" style="margin-top:8rpx;">默认挂拍静物 · 风格参考 / 模特 / 多色请点「换模板」</view>
       <view class="progress">
         <text wx:for="{{steps}}" wx:key="*this" class="dot {{index <= stepIdx ? 'on' : ''}}">{{stepNames[item]}}</text>
       </view>
@@ -38,8 +45,11 @@
       </view>
       <view class="muted small">点选切换勾选（可多张）· 长按预览{{quickMode ? ' · 已自动勾选主图' : ''}}</view>
       <view class="quick-bar" wx:if="{{quickMode}}" style="margin-top:16rpx;">
-        <view class="muted small">短路径：默认 1 张、姿势/场景用模板预设。特征与张数等可展开。</view>
-        <view class="link" style="margin-top:8rpx;" bindtap="showMoreOptions">更多选项</view>
+        <view class="muted small">短路径：默认 1 张、姿势/场景用模板预设。</view>
+        <view class="quick-links" style="margin-top:12rpx;display:flex;gap:28rpx;flex-wrap:wrap;">
+          <view class="link" bindtap="backToTemplates">换模板（风格参考等）</view>
+          <view class="link" bindtap="showMoreOptions">更多选项</view>
+        </view>
       </view>
 
       <!-- 风格样例：仅 style_ref（styleRef.max>0）必传；其它模板不展示。视频一期不做 -->

@@ -94,6 +94,8 @@ Page({
     groupPanelVisible: false,
     groupPanelMode: 'manage',
     moveProductId: '',
+    shareSheetVisible: false,
+    shareSheetProduct: { id: '', name: '', styleNo: '', coverUrl: '' },
   },
 
   onShow() {
@@ -322,46 +324,73 @@ Page({
     if (!id) return;
     wx.navigateTo({ url: `/pages/product/promo-gallery/promo-gallery?id=${id}` });
   },
-  /** 列表「微信转发」：记下目标商品，open-type=share 弹出转发面板 */
-  onShareTap(e) {
+  /** 列表「转发」→ 公开 / 限量（与详情页策略对齐，不进详情） */
+  openShareSheet(e) {
     const ds = (e && e.currentTarget && e.currentTarget.dataset) || {};
     const id = ds.id || '';
     if (!id) return;
-    this._shareTarget = {
+    const product = {
       id,
       name: ds.name || '',
       styleNo: ds.style || '',
       coverUrl: ds.cover || '',
     };
-    // 预创建公开分享，缩短 promise 等待
-    this._prefetchShare(id).catch(() => {});
+    this._shareTarget = product;
+    this._sharePolicy = 'open';
+    this.setData({ shareSheetVisible: true, shareSheetProduct: product });
+    // 预热两种策略
+    this._prefetchShare(id, 'open').catch(() => {});
+    this._prefetchShare(id, 'limited').catch(() => {});
   },
-  async _prefetchShare(productId) {
-    if (!productId) return null;
-    if (!this._shareCache) this._shareCache = {};
-    if (this._shareCache[productId] && this._shareCache[productId].shareId) {
-      return this._shareCache[productId];
+  closeShareSheet() {
+    this.setData({ shareSheetVisible: false });
+  },
+  onShareSheetTap(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {};
+    const policy = ds.policy === 'limited' ? 'limited' : 'open';
+    this._sharePolicy = policy;
+    const p = this.data.shareSheetProduct || this._shareTarget || {};
+    if (p.id) {
+      this._shareTarget = p;
+      this._prefetchShare(p.id, policy).catch(() => {});
     }
+  },
+  async _prefetchShare(productId, mode) {
+    if (!productId) return null;
+    const m = mode === 'limited' ? 'limited' : 'open';
+    const policy = m === 'limited' ? 'designated_only' : 'open';
+    if (!this._shareCache) this._shareCache = {};
+    const key = `${productId}::${m}`;
+    if (this._shareCache[key] && this._shareCache[key].shareId) {
+      return this._shareCache[key];
+    }
+    const data = { productId, sharePolicy: policy };
     const res = await request({
       url: '/api/shares',
       method: 'POST',
-      data: { productId, sharePolicy: 'open' },
+      data,
     });
-    this._shareCache[productId] = res;
+    this._shareCache[key] = res;
     return res;
   },
   onShareAppMessage() {
-    const t = this._shareTarget || {};
-    const productId = t.id || '';
-    const title = (t.name || t.styleNo || '商品分享').trim();
-    const imageUrl = t.coverUrl || '';
+    const tgt = this._shareTarget || this.data.shareSheetProduct || {};
+    const productId = tgt.id || '';
+    const mode = this._sharePolicy === 'limited' ? 'limited' : 'open';
+    const title = (tgt.name || tgt.styleNo || '商品分享').trim();
+    const imageUrl = tgt.coverUrl || '';
     const fallback = productId
       ? `/pages/share/landing/landing?productId=${productId}`
       : '/pages/share/landing/landing';
-    const cached = productId && this._shareCache && this._shareCache[productId];
+    const key = productId ? `${productId}::${mode}` : '';
+    const cached = key && this._shareCache && this._shareCache[key];
     const syncPath = (cached && cached.shareId)
       ? `/pages/share/landing/landing?shareId=${cached.shareId}`
       : fallback;
+    // 发出后收起面板
+    setTimeout(() => {
+      try { this.setData({ shareSheetVisible: false }); } catch (e) { /* */ }
+    }, 400);
     if (!productId) {
       return { title: '商品分享', path: fallback };
     }
@@ -369,7 +398,7 @@ Page({
       title,
       path: syncPath,
       imageUrl: imageUrl || undefined,
-      promise: this._prefetchShare(productId)
+      promise: this._prefetchShare(productId, mode)
         .then((shareRes) => {
           const sid = shareRes && shareRes.shareId;
           return {
