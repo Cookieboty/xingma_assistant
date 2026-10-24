@@ -25,6 +25,39 @@ export interface GarmentRefInput {
   objectKey?: string;
   assetId?: string;
   filename?: string;
+  /** 落库复用：已有异步分析结果 */
+  priorKind?: GarmentRefKind;
+  priorRoleZh?: string;
+  priorRoleEn?: string;
+}
+
+/** 商品级异步分析结果（落 products.ref_analysis） */
+export interface ProductRefAnalysis {
+  analyzedAt: string;
+  via: 'vision' | 'heuristic';
+  isClothing: boolean;
+  completeEnough: boolean;
+  detailEnough: boolean;
+  hasFullSilhouette?: boolean;
+  garmentDescZh: string;
+  garmentConstraintEn: string;
+  refuseReasonZh?: string;
+  assets: Array<{
+    assetId: string;
+    objectKey?: string;
+    kind: GarmentRefKind;
+    roleZh: string;
+    roleEn: string;
+    sortHint: number;
+  }>;
+}
+
+export function sortHintForKind(kind: GarmentRefKind, roleZh?: string): number {
+  if (kind === 'hang') return 0;
+  if (kind === 'detail' || kind === 'grid_cell') return 1;
+  const zh = roleZh || '';
+  if (/场景|模特|上身|街拍/.test(zh)) return 2;
+  return 3; // 文档/吊牌等
 }
 
 export interface ClassifiedRef {
@@ -279,21 +312,39 @@ function buildConstraintBlock(en: string): string {
 export async function prepareGarmentRefs(
   vision: VisionClient | null | undefined,
   inputs: GarmentRefInput[],
-  opts?: { workDir?: string; preferGrid?: '2x3' | '3x3' },
+  opts?: { workDir?: string; preferGrid?: '2x3' | '3x3'; reuseCached?: boolean; cachedAnalysis?: ProductRefAnalysis | null },
 ): Promise<GarmentPrepareResult> {
   const existing = (inputs || []).filter((r) => r?.localPath && fs.existsSync(r.localPath));
   if (!existing.length) {
     return { ok: false, reasonZh: '没有可用的商品参考图，无法生图' };
   }
 
+  const allHavePrior = existing.every(
+    (inp) => inp.priorKind === 'hang' || inp.priorKind === 'detail' || inp.priorKind === 'unusable',
+  );
+  const preferReuse = !!opts?.reuseCached && allHavePrior;
+
   let via: 'vision' | 'heuristic' = 'heuristic';
   let visionRead: VisionReadResult | null = null;
-  if (vision?.configured()) {
+  if (preferReuse) {
+    via = 'heuristic'; // 复用落库分类；硬约束可来自 opts.cachedAnalysis
+    log.log(`复用落库分类 refs=${existing.length}`);
+  } else if (vision?.configured()) {
     visionRead = await visionClassifyAndRead(vision, existing);
     if (visionRead) via = 'vision';
   }
 
   const classified: ClassifiedRef[] = existing.map((inp, i) => {
+    if (preferReuse && inp.priorKind) {
+      return {
+        localPath: inp.localPath,
+        objectKey: inp.objectKey,
+        assetId: inp.assetId,
+        kind: inp.priorKind,
+        roleZh: inp.priorRoleZh || heuristicKind(basenameOf(inp)).roleZh,
+        roleEn: inp.priorRoleEn || heuristicKind(basenameOf(inp)).roleEn,
+      };
+    }
     if (visionRead) {
       const it = visionRead.items[i];
       return {
@@ -374,9 +425,11 @@ export async function prepareGarmentRefs(
   const usable: ClassifiedRef[] = [...hangs, ...details];
 
   let detailSufficiency: GarmentPrepareOk['detailSufficiency'] = 'enough';
+  const cachedDetailEnough = preferReuse ? !!opts?.cachedAnalysis?.detailEnough : false;
   const needGrid =
     (visionRead && !visionRead.detailEnough) ||
-    (!visionRead && details.length === 0 && hangs.length > 0);
+    (preferReuse && !cachedDetailEnough && details.length === 0 && hangs.length > 0) ||
+    (!visionRead && !preferReuse && details.length === 0 && hangs.length > 0);
 
   if (needGrid && hangs.length > 0) {
     detailSufficiency = 'augmented_grid';
@@ -425,9 +478,11 @@ export async function prepareGarmentRefs(
     };
   }
 
-  // 硬约束：vision 英文；否则用占位 + 中文特征由上层 FEATURE 补
-  let garmentConstraintEn = visionRead?.garmentConstraintEn || '';
-  let garmentDescZh = visionRead?.garmentDescZh || '';
+  // 硬约束：vision 英文；复用缓存；否则用占位 + 中文特征由上层 FEATURE 补
+  let garmentConstraintEn =
+    visionRead?.garmentConstraintEn || String(opts?.cachedAnalysis?.garmentConstraintEn || '').trim();
+  let garmentDescZh =
+    visionRead?.garmentDescZh || String(opts?.cachedAnalysis?.garmentDescZh || '').trim();
   if (!garmentConstraintEn) {
     garmentConstraintEn =
       'Keep the exact wool/knit sweater from the hang/detail references: same color, neckline, sleeve length, cut, stitch/cable pattern, ribbing and all visible construction details.';
@@ -439,6 +494,7 @@ export async function prepareGarmentRefs(
       .slice(0, 4)
       .join('、');
   }
+
 
   // vision 说不够完整但仍有挂拍时：已宫格增强则放行；若仍无轮廓则拒
   if (visionRead && !visionRead.completeEnough && !visionRead.hasFullSilhouette && hangs.length === 0) {
@@ -484,6 +540,76 @@ export function buildPromptZh(opts: {
 }
 
 
+
+/**
+ * 异步分析专用：对商品图做分类/读衣并返回可落库结构（不切宫格）。
+ * 供 media_analyze job 写入 media_assets.meta + products.ref_analysis。
+ */
+export async function analyzeGarmentImagesForStorage(
+  vision: VisionClient | null | undefined,
+  inputs: GarmentRefInput[],
+): Promise<ProductRefAnalysis> {
+  const existing = (inputs || []).filter((r) => r?.localPath && fs.existsSync(r.localPath));
+  const analyzedAt = new Date().toISOString();
+  if (!existing.length) {
+    return {
+      analyzedAt,
+      via: 'heuristic',
+      isClothing: false,
+      completeEnough: false,
+      detailEnough: false,
+      garmentDescZh: '',
+      garmentConstraintEn: '',
+      refuseReasonZh: '没有可用图片',
+      assets: [],
+    };
+  }
+
+  let via: 'vision' | 'heuristic' = 'heuristic';
+  let visionRead: VisionReadResult | null = null;
+  if (vision?.configured()) {
+    visionRead = await visionClassifyAndRead(vision, existing);
+    if (visionRead) via = 'vision';
+  }
+
+  const assets = existing.map((inp, i) => {
+    let kind: GarmentRefKind;
+    let roleZh: string;
+    let roleEn: string;
+    if (visionRead?.items[i]) {
+      kind = visionRead.items[i].kind;
+      roleZh = visionRead.items[i].roleZh;
+      roleEn = visionRead.items[i].roleEn;
+    } else {
+      const h = heuristicKind(basenameOf(inp));
+      kind = h.kind;
+      roleZh = h.roleZh;
+      roleEn = h.roleEn;
+    }
+    return {
+      assetId: String(inp.assetId || ''),
+      objectKey: inp.objectKey,
+      kind,
+      roleZh,
+      roleEn,
+      sortHint: sortHintForKind(kind, roleZh),
+    };
+  });
+
+  return {
+    analyzedAt,
+    via,
+    isClothing: visionRead ? visionRead.isClothing !== false : true,
+    completeEnough: visionRead ? visionRead.completeEnough !== false : true,
+    detailEnough: visionRead ? !!visionRead.detailEnough : assets.some((a) => a.kind === 'detail'),
+    hasFullSilhouette: visionRead ? !!visionRead.hasFullSilhouette : assets.some((a) => a.kind === 'hang'),
+    garmentDescZh: String(visionRead?.garmentDescZh || '').trim(),
+    garmentConstraintEn: String(visionRead?.garmentConstraintEn || '').trim(),
+    refuseReasonZh: visionRead?.refuseReasonZh,
+    assets: assets.filter((a) => a.assetId),
+  };
+}
+
 /** 生图参考图准备的品类标识（按品类扩展，勿糊成通用） */
 export type PromoGarmentCategory = 'knitwear' | 'shoes' | 'pants' | 'shirt';
 
@@ -497,7 +623,7 @@ export const PROMO_CATEGORY_LABEL_ZH: Record<PromoGarmentCategory, string> = {
 type CategoryPrepareFn = (
   vision: VisionClient | null | undefined,
   inputs: GarmentRefInput[],
-  opts?: { workDir?: string; preferGrid?: '2x3' | '3x3' },
+  opts?: { workDir?: string; preferGrid?: '2x3' | '3x3'; reuseCached?: boolean; cachedAnalysis?: ProductRefAnalysis | null },
 ) => Promise<GarmentPrepareResult>;
 
 /**
@@ -514,7 +640,7 @@ export async function prepareRefsForCategory(
   category: PromoGarmentCategory | string | undefined,
   vision: VisionClient | null | undefined,
   inputs: GarmentRefInput[],
-  opts?: { workDir?: string; preferGrid?: '2x3' | '3x3' },
+  opts?: { workDir?: string; preferGrid?: '2x3' | '3x3'; reuseCached?: boolean; cachedAnalysis?: ProductRefAnalysis | null },
 ): Promise<GarmentPrepareResult> {
   const cat = (category || 'knitwear') as PromoGarmentCategory;
   const fn = CATEGORY_PREPARE_REGISTRY[cat];
