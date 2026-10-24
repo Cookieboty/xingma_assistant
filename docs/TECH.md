@@ -232,7 +232,7 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 | OSS | `OSS_PROVIDER` `OSS_REGION` `OSS_ENDPOINT` `OSS_BUCKET` `OSS_PREFIX` `OSS_ACCESS_KEY_ID` `OSS_ACCESS_KEY_SECRET`；签名过期 `OSS_SIGNED_URL_EXPIRES`（默认 3600，兼容 `OSS_SIGNED_TTL`）；对象 ACL `OSS_OBJECT_ACL=public-read`（当前）；`OSS_PUBLIC_READ=1` 返回永久公网 URL；可选 `MEDIA_PUBLIC_BASE` `MEDIA_SERVE_LOCAL`；兼容别名 `ALIYUN_*` |
 | 生图 | `IMAGE_GEN_BASE_URL` `IMAGE_GEN_API_KEY` `IMAGE_GEN_MODEL` `IMAGE_GEN_REF_MODE` `IMAGE_GEN_CONCURRENCY` `IMAGE_GEN_TIMEOUT_MS` |
 | 视觉 | `VISION_BASE_URL` `VISION_API_KEY` `VISION_MODEL` `VISION_TIMEOUT_MS` `VISION_MAX_CANDIDATES` `VISION_OCR_CONCURRENCY` `ENABLE_MAC_VISION_OCR` |
-| 宣传视频 | `VIDEO_GEN_BASE_URL`(默认 VISION) `VIDEO_GEN_API_KEY`(默认 VISION) `VIDEO_GEN_MODEL` `VIDEO_GEN_SECONDS` `VIDEO_GEN_SIZE` `VIDEO_GEN_TIMEOUT_MS` `VIDEO_GEN_POLL_MS` |
+| 宣传视频 | `VIDEO_ENGINE=lkb|xytoken`；LKB：`VIDEO_LKB_AGENT_BASE_URL` `VIDEO_LKB_AGENT_KEY`/`KEY_FILE`/`LKB_AGENT_CALL_KEY` `VIDEO_LKB_AGENT_TENANT_ID` `VIDEO_LKB_AGENT_CODE`；xytoken 兜底：`VIDEO_GEN_*`（默认复用 VISION） |
 | 任务 | `JOB_SCHEDULER` `JOB_CONCURRENCY` `JOB_POLL_MS` `JOB_AUTO_RETRY` `JOB_STALE_MS`（默认 2700000=45min） `DEFAULT_PRODUCT_LEVEL_ID` |
 
 生产检查：`DEV_FAKE_LOGIN=false`；`WECHAT_APP_SECRET` 或 `tenants.wx_app_secret` 已配置；`JWT_SECRET` 非默认串。
@@ -344,12 +344,13 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 - 设置页上传走现有 media  
 - 客户详情「联系业主」读该字段；空则占位  
 
-### 8.4 宣传视频组（phase-1 已实现）
+### 8.4 宣传视频组（v2：LKB 单段竖屏）
 
-- job type `promo_video`；`promo_sets.params.kind=video`；`media_assets.type=video`  
-- 上游：xytoken `POST /v1/videos`（`VIDEO_GEN_*` 默认复用 `VISION_*`），模型 `doubao-seedance-2-5-260628`，约 15s、`720x1280`  
-- 小程序：详情/素材列表「新建视频」→ `promo?type=video` → 选参考图+特征 → generate；gallery 可播放  
-- 后续：更好 prompt → 模特出镜  
+- 业主 **task** = 一次视频动作（`promo_sets.params.kind=video`）；底层 `promo_video` job 不单独暴露为业主任务。  
+- 流程：选商品图 → 可选卖点/特征 → `POST …/promo/video-script` 自动短分镜（可编辑）→ `POST …/promo/generate` → 一条 9:16、约 8–12s → OSS → gallery。  
+- 上游默认 **LKB** `sinan-video-generator`：`POST /api/invocations/rsync` + poll；`videoGeneration`：`FREE` 或 `FIRST_LAST_FRAME`（有商品图作 `first_frame`），`ratio=9:16`，`resolution=720p`，`generateAudio/watermark=false`。密钥：`backend/.secrets/lkb-video-agent.key`（或 `VIDEO_LKB_AGENT_KEY` / `LKB_AGENT_CALL_KEY`），**不入仓**。  
+- 兜底：`VIDEO_ENGINE=xytoken` 走原 Seedance `/v1/videos`。  
+- 一期单段，不做多镜拼接。OUTFIT 仍走外部穿搭 Agent，与视频密钥分离。  
 
 ---
 

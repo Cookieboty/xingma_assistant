@@ -5,7 +5,7 @@
   <block wx:if="{{!loading && !tpl}}">
     <view class="card">
       <view class="section-title">{{mediaKind === 'video' ? '选择视频模板' : '选择出图模板'}}</view>
-      <view class="muted">{{mediaKind === 'video' ? '一期：竖版约 15 秒商品展示短视频' : '不同用途的出图方式、步骤和提示词都不同'}}</view>
+      <view class="muted">{{mediaKind === 'video' ? '竖版约 8～12 秒：选图 → 卖点 → 编辑分镜 → 生成一条' : '不同用途的出图方式、步骤和提示词都不同'}}</view>
     </view>
     <view class="card tpl" wx:for="{{templates}}" wx:key="id" data-id="{{item.id}}" bindtap="pickTemplate">
       <view class="tpl-head">
@@ -81,9 +81,26 @@
     </view>
 
     <view class="card" wx:if="{{stepKey === 'feature'}}">
-      <view class="section-title">{{stepNames.feature}}</view>
-      <view class="section-hint">根据商品信息自动生成，可修改；仅作提示，不会画进图里</view>
-      <textarea class="textarea" style="height:360rpx;" maxlength="2000" value="{{feature}}" bindinput="onFeature" />
+      <view class="section-title">{{mediaKind === 'video' ? '卖点 / 特征' : stepNames.feature}}</view>
+      <block wx:if="{{mediaKind === 'video'}}">
+        <view class="section-hint">可选填一句话卖点（写入分镜）；下方商品特征可改，不会画成字幕</view>
+        <input class="input" maxlength="200" placeholder="一句话卖点，例如：软糯亲肤，通勤也能穿" value="{{sellingPoint}}" bindinput="onSellingPoint" />
+        <view class="sub-label" style="margin-top:16rpx;">商品特征</view>
+      </block>
+      <view class="section-hint" wx:else>根据商品信息自动生成，可修改；仅作提示，不会画进图里</view>
+      <textarea class="textarea" style="height:{{mediaKind === 'video' ? '240rpx' : '360rpx'}};" maxlength="2000" value="{{feature}}" bindinput="onFeature" />
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'script'}}">
+      <view class="section-title">{{stepNames.script}}</view>
+      <view class="section-hint">自动生成约 {{scriptSeconds || 10}} 秒竖屏分镜，可直接改；确认后再生成视频</view>
+      <view class="muted small" wx:if="{{scriptLoading}}">正在生成脚本…</view>
+      <view class="chips" wx:if="{{scriptBeats.length}}">
+        <text class="chip" wx:for="{{scriptBeats}}" wx:key="*this">{{item}}</text>
+      </view>
+      <textarea class="textarea" style="height:420rpx;" maxlength="1200" value="{{script}}" bindinput="onScript" disabled="{{scriptLoading}}" />
+      <view class="link" style="margin-top:12rpx;" bindtap="refreshScript">重新生成脚本</view>
+      <view class="muted small" wx:if="{{scriptVia}}">来源：{{scriptVia === 'llm' ? '智能草稿' : '规则草稿'}}</view>
     </view>
 
     <view class="card" wx:if="{{stepKey === 'model'}}">
@@ -199,7 +216,7 @@
 
     <view class="footer">
       <view class="btn-weak half" bindtap="prev">上一步</view>
-      <view class="btn-primary half" bindtap="next">{{stepIdx >= steps.length - 1 ? (submitting ? '提交中…' : (styleUploading ? '上传中…' : '开始生成')) : '下一步'}}</view>
+      <view class="btn-primary half" bindtap="next">{{stepIdx >= steps.length - 1 ? (submitting ? '提交中…' : (styleUploading ? '上传中…' : (mediaKind === 'video' ? '确认生成视频' : '开始生成'))) : '下一步'}}</view>
     </view>
   </block>
 

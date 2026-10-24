@@ -217,3 +217,13 @@
 .style-ref-block .sub-label {
   color: #3d3229;
 }
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 16rpx 20rpx;
+  background: #f7f7f8;
+  border-radius: 12rpx;
+  font-size: 28rpx;
+}
+.sub-label { font-size: 26rpx; color: #666; margin-bottom: 8rpx; }

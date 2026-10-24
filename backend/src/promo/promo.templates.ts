@@ -4,7 +4,7 @@
  */
 
 export type Platform = 'moments' | 'xiaohongshu';
-export type PromoStep = 'reference' | 'feature' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count' | 'style_keywords';
+export type PromoStep = 'reference' | 'feature' | 'script' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count' | 'style_keywords';
 
 export interface Option {
   id: string;
@@ -406,7 +406,7 @@ export const TEMPLATES: PromoTemplate[] = [
   {
     id: 'product_showcase_video',
     name: '商品竖版短视频',
-    desc: '约 15 秒竖屏短视频：商品参考图驱动镜头运动与展示（一期纯跑通，暂不上模特出镜）',
+    desc: '约 8～12 秒竖屏短视频：选图 → 可选卖点 → 编辑分镜脚本 → 生成一条 9:16（一期单段，暂不上模特）',
     platforms: ['moments', 'xiaohongshu'],
     defaultSize: 'vertical_video',
     sizes: ['vertical_video'],
@@ -416,7 +416,7 @@ export const TEMPLATES: PromoTemplate[] = [
     sceneLabel: '场景',
     reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张商品主图/细节图作为视频参考' },
     count: { min: 1, max: 1, default: 1 },
-    steps: ['reference', 'feature'],
+    steps: ['reference', 'feature', 'script'],
     mediaKind: 'video',
     buildPrompt: (c) =>
       [

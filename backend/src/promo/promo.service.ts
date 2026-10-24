@@ -22,6 +22,8 @@ import { OssClient } from '../media/oss.client';
 import { buildPromoCaption } from './promo.captions';
 import { buildJobDisplayTitle } from '../jobs/job-display-title';
 import { VideoGenClient } from './video-gen.client';
+import { LkbVideoClient, clampDuration, LkbVideoAttachment } from './lkb-video.client';
+import { draftVideoBeatScript, resolveVideoPromptZh } from './video-script';
 import { ExternalOutfitClient } from './external-outfit.client';
 
 export interface GenerateInput {
@@ -58,8 +60,12 @@ export interface GenerateInput {
   styleKeywords?: Partial<StyleKeywordsZh> | null;
   /** 风格关键词自由文本（覆盖结构化字段拼句） */
   styleKeywordsText?: string;
-  /** 视频时长秒数（约 15）；仅 mediaKind=video */
+  /** 视频时长秒数（约 8–12，钳制 4–15）；仅 mediaKind=video */
   seconds?: number;
+  /** 可选一句话卖点（视频）；可与 feature 并存 */
+  sellingPoint?: string;
+  /** 业主确认/编辑后的中文分镜脚本 */
+  script?: string;
 }
 
 interface JobItem {
@@ -111,6 +117,7 @@ export class PromoService implements OnModuleInit {
     private readonly products: ProductsService,
     private readonly gen: ImageGenClient,
     private readonly videoGen: VideoGenClient,
+    private readonly lkbVideo: LkbVideoClient,
     private readonly jobs: JobsService,
     private readonly oss: OssClient,
     private readonly externalOutfit: ExternalOutfitClient,
@@ -260,7 +267,8 @@ export class PromoService implements OnModuleInit {
       featureSource: draft ? 'saved' : 'auto',
       template: tpl ? templateDto(tpl) : null,
       configured: this.gen.configured(),
-      videoConfigured: this.videoGen.configured(),
+      videoConfigured: this.videoEngineConfigured(),
+      videoEngine: this.resolveVideoEngine(),
     };
   }
 
@@ -528,9 +536,58 @@ export class PromoService implements OnModuleInit {
   }
 
 
+
+  /** VIDEO_ENGINE=lkb|xytoken；未设时：LKB 已配置则 lkb，否则 xytoken */
+  resolveVideoEngine(): 'lkb' | 'xytoken' {
+    const m = String(process.env.VIDEO_ENGINE || '').trim().toLowerCase();
+    if (m === 'lkb' || m === 'xytoken') return m;
+    return this.lkbVideo.configured() ? 'lkb' : 'xytoken';
+  }
+
+  videoEngineConfigured(): boolean {
+    const e = this.resolveVideoEngine();
+    if (e === 'lkb') return this.lkbVideo.configured();
+    return this.videoGen.configured();
+  }
+
+  /**
+   * 视频分镜脚本草案：业主可编辑后再 POST generate（script 字段）。
+   * 不创建 job / promo_set。
+   */
+  async draftVideoScript(
+    user: AuthContext,
+    productId: string,
+    body: {
+      feature?: string;
+      sellingPoint?: string;
+      referenceAssetIds?: string[];
+      seconds?: number;
+    },
+  ) {
+    const { product } = await this.productAssets(user, productId);
+    const feature =
+      String(body?.feature || '').trim() ||
+      this.readFeature(user.tenantId, productId)?.feature ||
+      this.defaultFeature(product);
+    const sellingPoint = String(body?.sellingPoint || '').trim().slice(0, 200);
+    const seconds = clampDuration(
+      Number(body?.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
+    );
+    const draft = await draftVideoBeatScript(this.vision, { feature, sellingPoint, seconds });
+    return {
+      ...draft,
+      feature,
+      sellingPoint: sellingPoint || null,
+      engine: this.resolveVideoEngine(),
+      configured: this.videoEngineConfigured(),
+      productId,
+      styleNo: product.styleNo,
+    };
+  }
+
   /**
    * 宣传视频：创建 promo_sets(kind=video) + jobs(type=promo_video)。
-   * 一期固定 1 条竖屏约 15s；模板默认 product_showcase_video。
+   * 一期固定 1 条竖屏约 8–12s；模板默认 product_showcase_video。
    */
   async generateVideo(user: AuthContext, productId: string, input: GenerateInput) {
     let tpl = findTemplate(input?.templateId);
@@ -538,7 +595,7 @@ export class PromoService implements OnModuleInit {
       tpl = findTemplate('product_showcase_video') || undefined;
     }
     if (!tpl) throw new BadRequestException('未知视频模板');
-    if (!this.videoGen.configured()) throw new BadRequestException('服务端未配置视频生成密钥');
+    if (!this.videoEngineConfigured()) throw new BadRequestException('服务端未配置视频生成密钥');
     const product: any = await this.products.getDetail(user, productId);
     const refs = (input.referenceAssetIds || []).filter(Boolean);
     if (refs.length < tpl.reference.min || refs.length > tpl.reference.max) {
@@ -547,12 +604,19 @@ export class PromoService implements OnModuleInit {
     const count = 1;
     const sizeId = tpl.sizes.includes(String(input.sizeId || '')) ? String(input.sizeId) : tpl.defaultSize;
     const feature = String(input.feature || '').slice(0, 2000);
+    const sellingPoint = String(input.sellingPoint || '').slice(0, 200);
+    const script = String(input.script || '').trim().slice(0, 1200);
+    const seconds = clampDuration(
+      Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
+    );
     const caption = this.captionFor(product, { ...input, feature, count, sizeId }, tpl.id);
     const params = {
       kind: 'video' as const,
       mediaKind: 'video' as const,
       templateId: tpl.id,
       feature,
+      sellingPoint: sellingPoint || undefined,
+      script: script || undefined,
       referenceAssetIds: refs,
       modelId: null,
       poses: [],
@@ -560,7 +624,8 @@ export class PromoService implements OnModuleInit {
       colors: [],
       count,
       sizeId,
-      seconds: parseInt(process.env.VIDEO_GEN_SECONDS || '15', 10) || 15,
+      seconds,
+      videoEngine: this.resolveVideoEngine(),
     };
 
     const repo = this.setsRepo();
@@ -643,7 +708,8 @@ export class PromoService implements OnModuleInit {
     let tpl = findTemplate(String(input?.templateId || ''));
     if (!tpl || !isVideoTemplate(tpl)) tpl = findTemplate('product_showcase_video') || undefined;
     if (!tpl) throw new Error('未知视频模板');
-    if (!this.videoGen.configured()) throw new Error('服务端未配置视频生成密钥');
+    if (!this.videoEngineConfigured()) throw new Error('服务端未配置视频生成密钥');
+    const engine = this.resolveVideoEngine();
 
     const { product, assets } = await this.productAssets(user, productId);
     const refIds = ((input.referenceAssetIds as string[]) || []).filter(Boolean);
@@ -657,11 +723,17 @@ export class PromoService implements OnModuleInit {
     const feature = String(
       input.feature ?? this.readFeature(user.tenantId, productId)?.feature ?? this.defaultFeature(product),
     ).slice(0, 2000);
+    const sellingPoint = String(input.sellingPoint || '').slice(0, 200);
+    const script = String(input.script || '').trim().slice(0, 1200);
     const sizeId = tpl.sizes.includes(String(input.sizeId || '')) ? String(input.sizeId) : tpl.defaultSize;
-    const upstreamSize = SIZES[sizeId]?.upstream || this.videoGen.defaultSize;
-    const seconds = Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? 15) || 15;
-    const prompt = tpl.buildPrompt({
-      feature,
+    const upstreamSize =
+      SIZES[sizeId]?.upstream || (engine === 'lkb' ? this.lkbVideo.defaultSize : this.videoGen.defaultSize);
+    const seconds = clampDuration(
+      Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
+    );
+    const promptZh = resolveVideoPromptZh({ script, feature, sellingPoint, seconds });
+    const promptEn = tpl.buildPrompt({
+      feature: [sellingPoint, feature].filter(Boolean).join('\n'),
       model: null,
       pose: null,
       scene: null,
@@ -669,14 +741,19 @@ export class PromoService implements OnModuleInit {
       index: 0,
       total: 1,
     });
+    // 上游：LKB 用中文分镜；xytoken 用英文模板 prompt
+    const prompt = engine === 'lkb' ? promptZh : promptEn;
 
     await opts?.onProgress?.({ percent: 10, step: 'refs', message: '准备参考图', done: 0, total: 1 });
 
     const refPaths: string[] = [];
+    const refUrls: string[] = [];
     for (const r of refs) {
       const local = await this.ensureLocal(r!.objectKey);
       if (!local) throw new Error(`参考图本地不可用：${r!.objectKey}`);
       refPaths.push(local);
+      const url = this.publicUrl(r!.objectKey);
+      if (/^https?:\/\//i.test(url)) refUrls.push(url);
     }
 
     const legacyId = newId('pj');
@@ -684,7 +761,7 @@ export class PromoService implements OnModuleInit {
     fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
 
     const setId = String(input.setId || '');
-    const item: JobItem = { index: 0, status: 'running', prompt };
+    const item: JobItem = { index: 0, status: 'running', prompt, promptZh };
     const legacy: PromoJob = {
       id: legacyId,
       tenantId: user.tenantId,
@@ -695,8 +772,11 @@ export class PromoService implements OnModuleInit {
         ...(input as GenerateInput),
         mediaKind: 'video',
         feature,
+        sellingPoint: sellingPoint || undefined,
+        script: script || promptZh,
         count: 1,
         sizeId,
+        seconds,
         _frameworkJobId: String(input._frameworkJobId || ''),
       } as any,
       size: upstreamSize,
@@ -706,15 +786,68 @@ export class PromoService implements OnModuleInit {
     };
     this.saveJob(legacy);
 
-    await opts?.onProgress?.({ percent: 20, step: 'generating', message: '视频生成中', done: 0, total: 1 });
+    await opts?.onProgress?.({
+      percent: 20,
+      step: 'generating',
+      message: engine === 'lkb' ? 'LKB 视频生成中' : '视频生成中',
+      done: 0,
+      total: 1,
+    });
     const t0 = Date.now();
     try {
-      const r = await this.videoGen.generate({
-        prompt,
-        size: upstreamSize,
-        seconds,
-        refs: refPaths,
-      });
+      let r: { buffer: Buffer; mime: string; via: string; videoId: string; seconds?: number; size?: string };
+      if (engine === 'lkb') {
+        const attachments: LkbVideoAttachment[] = [];
+        if (refUrls.length) {
+          // 有商品/宣传图作首帧 → FIRST_LAST_FRAME；其余作 reference_image
+          attachments.push({
+            type: 'image',
+            uri: refUrls[0],
+            mediaType: 'image/jpeg',
+            name: 'first_frame',
+            metadata: { role: 'first_frame' },
+          });
+          for (let i = 1; i < Math.min(refUrls.length, 4); i++) {
+            attachments.push({
+              type: 'image',
+              uri: refUrls[i],
+              mediaType: 'image/jpeg',
+              name: `ref_${i}`,
+              metadata: { role: 'reference_image' },
+            });
+          }
+        }
+        const taskType = attachments.some((a) => a.metadata.role === 'first_frame')
+          ? 'FIRST_LAST_FRAME'
+          : 'FREE';
+        // FREE 时仍可带 reference_image
+        if (taskType === 'FREE' && refUrls.length && !attachments.length) {
+          for (let i = 0; i < Math.min(refUrls.length, 4); i++) {
+            attachments.push({
+              type: 'image',
+              uri: refUrls[i],
+              mediaType: 'image/jpeg',
+              name: `ref_${i}`,
+              metadata: { role: 'reference_image' },
+            });
+          }
+        }
+        r = await this.lkbVideo.generate({
+          prompt: promptZh,
+          duration: seconds,
+          taskType,
+          attachments,
+          generateAudio: false,
+          watermark: false,
+        });
+      } else {
+        r = await this.videoGen.generate({
+          prompt: promptEn,
+          size: upstreamSize,
+          seconds,
+          refs: refPaths,
+        });
+      }
       const ext = r.mime.includes('webm') ? '.webm' : r.mime.includes('quicktime') ? '.mov' : '.mp4';
       const objectKey = `${keyDir}/01${ext}`;
       fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);

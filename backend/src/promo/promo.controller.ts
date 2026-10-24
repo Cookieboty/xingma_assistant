@@ -42,6 +42,22 @@ export class PromoController {
     return this.promo.generate(u, id, body);
   }
 
+  /** 视频分镜脚本草案（业主可编辑后再 generate） */
+  @Post('products/:id/promo/video-script')
+  videoScript(
+    @AuthUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      feature?: string;
+      sellingPoint?: string;
+      referenceAssetIds?: string[];
+      seconds?: number;
+    },
+  ) {
+    return this.promo.draftVideoScript(u, id, body || {});
+  }
+
   /** 风格样例识图 → 可编辑中文关键词（风格参考模板） */
   @Post('products/:id/promo/analyze-style-refs')
   analyzeStyleRefs(

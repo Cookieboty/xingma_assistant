@@ -12,7 +12,7 @@ const STYLE_STRENGTH_OPTS = [
 ];
 
 const STEP_NAMES = {
-  reference: '选参考图', colors: '选颜色', feature: '商品特征', model: '选模特',
+  reference: '选参考图', colors: '选颜色', feature: '商品特征', script: '分镜脚本', model: '选模特',
   pose: '动作 / 呈现', scene: '场景 / 背景', pose_scene: '姿势与场景',
   style_keywords: '风格关键词', count: '张数与尺寸',
 };
@@ -32,6 +32,8 @@ Page({
     templates: [], models: [], tpl: null,
     steps: [], stepIdx: -1, stepKey: '', stepNames: STEP_NAMES,
     assets: [], colors: [], feature: '', featureDirty: false,
+    sellingPoint: '',
+    script: '', scriptBeats: [], scriptSeconds: 10, scriptVia: '', scriptLoading: false, scriptDirty: false,
     sel: { refs: [], colors: [], modelId: '', poses: [], scenes: [], poseText: '', sceneText: '', count: 1, sizeId: '' },
     // 风格样例（可选，不进商品图库）：{ objectKey, url, uploading? }
     styleRefs: [],
@@ -135,6 +137,7 @@ Page({
       } catch (e) { wx.showToast({ title: '特征保存失败', icon: 'none' }); }
     }
     const leavingRef = this.data.stepKey === 'reference';
+    const leavingFeature = this.data.stepKey === 'feature';
     const tpl = this.data.tpl || {};
     const needAnalyze = leavingRef && (tpl.id === 'style_ref' || (tpl.styleRef && tpl.styleRef.min > 0));
     if (this.data.stepIdx >= this.data.steps.length - 1) return this.submit();
@@ -143,6 +146,9 @@ Page({
     this.setData({ stepIdx: i, stepKey: nextKey });
     if (needAnalyze && nextKey === 'style_keywords') {
       this.analyzeStyleRefs();
+    }
+    if (this.data.mediaKind === 'video' && nextKey === 'script' && (leavingFeature || leavingRef) && !this.data.scriptDirty) {
+      this.draftVideoScript();
     }
   },
   validate(k) {
@@ -169,6 +175,10 @@ Page({
       } else if (sel.colors.length && sel.colors.length !== sel.refs.length) {
         return `已选 ${sel.refs.length} 张图，请选同样数量的颜色（按顺序对应）`;
       }
+    }
+    if (k === 'script') {
+      if (this.data.scriptLoading) return '脚本生成中…';
+      if (!(this.data.script || '').trim()) return '请先生成或填写分镜脚本';
     }
     if (k === 'model' && tpl.model === 'required' && !sel.modelId) return '请选择模特';
     if (k === 'pose' && tpl.poses.length && !sel.poses.length && !sel.poseText) return '请选择动作或填写描述';
@@ -300,6 +310,36 @@ Page({
     this.setData({ 'sel.colors': cs, colors: this.data.colors.map((c) => Object.assign(c, { checked: cs.indexOf(c.name) >= 0 })) });
   },
   onFeature(e) { this.setData({ feature: e.detail.value, featureDirty: true }); },
+  onSellingPoint(e) { this.setData({ sellingPoint: e.detail.value }); },
+  onScript(e) { this.setData({ script: e.detail.value, scriptDirty: true }); },
+  async draftVideoScript() {
+    if (this.data.scriptLoading) return;
+    this.setData({ scriptLoading: true });
+    try {
+      const r = await request({
+        url: `/api/products/${this.data.id}/promo/video-script`,
+        method: 'POST',
+        data: {
+          feature: this.data.feature,
+          sellingPoint: this.data.sellingPoint || undefined,
+          referenceAssetIds: (this.data.sel && this.data.sel.refs) || [],
+          seconds: this.data.scriptSeconds || 10,
+        },
+      });
+      this.setData({
+        script: r.script || '',
+        scriptBeats: r.beats || [],
+        scriptSeconds: r.seconds || 10,
+        scriptVia: r.via || '',
+        scriptDirty: false,
+        scriptLoading: false,
+      });
+    } catch (e) {
+      this.setData({ scriptLoading: false });
+      wx.showToast({ title: (e && e.message) || '脚本生成失败', icon: 'none' });
+    }
+  },
+  refreshScript() { this.setData({ scriptDirty: false }); this.draftVideoScript(); },
   pickModel(e) {
     const id = e.currentTarget.dataset.id;
     this.setData({ 'sel.modelId': this.data.sel.modelId === id && this.data.tpl.model !== 'required' ? '' : id });
@@ -567,7 +607,7 @@ Page({
       const payload = {
         templateId: tpl.id,
         mediaKind: this.data.mediaKind === 'video' ? 'video' : 'image',
-        feature, referenceAssetIds: sel.refs,
+        feature, sellingPoint: this.data.sellingPoint || undefined, script: this.data.script || undefined, seconds: this.data.scriptSeconds || undefined, referenceAssetIds: sel.refs,
         modelId: sel.modelId || null, poses, scenes,
         poseText: poseText || undefined,
         sceneText: sceneText || undefined,
