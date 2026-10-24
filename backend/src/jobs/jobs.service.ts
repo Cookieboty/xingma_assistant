@@ -737,8 +737,10 @@ export class JobsService {
 }
 
 /**
- * promo_image：同一 setId 只留最新一条（含已完成历史），避免重生堆积多条任务。
- * 无 setId 的进行中任务：同商品+模板只留最新。
+ * promo 任务去重（列表展示用，不删库）：
+ * 1) 同一 setId 只留最新一条（重生不应堆多行）
+ * 2) 同一商品+模板：失败/取消若已被更新的成功或进行中任务取代 → 隐藏
+ * 3) 无 setId 的进行中：同商品+模板只留最新
  */
 function dedupePromoJobs<T extends {
   id: string;
@@ -749,29 +751,68 @@ function dedupePromoJobs<T extends {
   createdAt?: number;
 }>(items: T[]): T[] {
   const active = new Set(['queued', 'running']);
+  const rank = (st: string) => {
+    if (active.has(st)) return 3;
+    if (st === 'succeeded') return 2;
+    if (st === 'partial') return 1;
+    return 0;
+  };
+  // 先按 setId 去重（列表已按 createdAt DESC）
   const seenSet = new Set<string>();
-  const seenTpl = new Set<string>();
-  const out: T[] = [];
+  const bySet: T[] = [];
   for (const it of items) {
+    if (it.type !== 'promo_image' && it.type !== 'promo_video') {
+      bySet.push(it);
+      continue;
+    }
+    const setId = String(it.payload?.setId || '').trim();
+    if (setId) {
+      if (seenSet.has(setId)) continue;
+      seenSet.add(setId);
+    }
+    bySet.push(it);
+  }
+  // 同商品+模板：保留最优；失败/取消被更新成功/进行中盖掉
+  const bestByTpl = new Map<string, T>();
+  for (const it of bySet) {
+    if (it.type !== 'promo_image' && it.type !== 'promo_video') continue;
+    const productId = String(it.productId || it.payload?.productId || '').trim();
+    const templateId = String(it.payload?.templateId || '').trim();
+    if (!productId || !templateId) continue;
+    const key = `${productId}::${templateId}::${it.type}`;
+    const prev = bestByTpl.get(key);
+    if (!prev) {
+      bestByTpl.set(key, it);
+      continue;
+    }
+    const st = String(it.status || '');
+    const pst = String(prev.status || '');
+    // 已有更好的（进行中/成功），丢掉后面的失败/取消/更旧成功
+    if (rank(pst) > rank(st)) continue;
+    if (rank(st) > rank(pst)) {
+      bestByTpl.set(key, it);
+      continue;
+    }
+    // 同级：保留先见到的（更新）
+  }
+  const out: T[] = [];
+  const emitted = new Set<string>();
+  for (const it of bySet) {
     if (it.type !== 'promo_image' && it.type !== 'promo_video') {
       out.push(it);
       continue;
     }
-    const setId = String(it.payload?.setId || '').trim();
     const productId = String(it.productId || it.payload?.productId || '').trim();
     const templateId = String(it.payload?.templateId || '').trim();
-    if (setId) {
-      if (seenSet.has(setId)) continue;
-      seenSet.add(setId);
+    if (!productId || !templateId) {
       out.push(it);
       continue;
     }
-    // 无 setId：仅折叠进行中的同模板重复
-    if (active.has(String(it.status || '')) && productId && templateId) {
-      const key = `${productId}::${templateId}`;
-      if (seenTpl.has(key)) continue;
-      seenTpl.add(key);
-    }
+    const key = `${productId}::${templateId}::${it.type}`;
+    const best = bestByTpl.get(key);
+    if (!best || best.id !== it.id) continue;
+    if (emitted.has(key)) continue;
+    emitted.add(key);
     out.push(it);
   }
   return out;

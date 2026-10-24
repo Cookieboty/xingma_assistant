@@ -99,8 +99,9 @@
 
     <view class="card">
       <view class="section-title">本商品任务</view>
+      <view class="muted small">仅显示进行中 / 失败；已完成看上方宣传素材</view>
       <view class="muted small" wx:if="{{productJobsLoading && !productJobs.length}}">加载任务…</view>
-      <view class="muted small" wx:elif="{{!productJobs.length}}">暂无任务</view>
+      <view class="muted small" wx:elif="{{!productJobs.length}}">暂无进行中或失败任务</view>
       <view class="job-mini" wx:for="{{productJobs}}" wx:key="id" data-id="{{item.id}}" bindtap="goJobDetail">
         <view class="job-mini-main">
           <text class="job-mini-title">{{item.title}}</text>

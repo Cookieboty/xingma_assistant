@@ -11,6 +11,7 @@ import { ImageGenClient } from './image-gen.client';
 import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind } from './promo.templates';
 import { enrichPoseSceneText } from './pose-scene-enrich';
 import { prepareRefsForCategory, buildPromptZh } from './garment-ref-prepare';
+import type { ProductRefAnalysis, GarmentRefKind } from './garment-ref-prepare';
 import { VisionClient } from '../vision/vision.client';
 import { JobsService } from '../jobs/jobs.service';
 import { registerPromoImageHandler } from '../jobs/handlers/promo-image.handler';
@@ -205,7 +206,7 @@ export class PromoService implements OnModuleInit {
   // ---------- 素材 ----------
   private async productAssets(user: AuthContext, productId: string) {
     const product: any = await this.products.getDetail(user, productId);
-    let assets: Array<{ id: string; objectKey: string }> = [];
+    let assets: Array<{ id: string; objectKey: string; meta?: Record<string, unknown> | null }> = [];
     if (this.dataSource && process.env.DB_ENABLED === 'true') {
       const rows = await this.dataSource
         .getRepository(MediaAsset)
@@ -215,7 +216,7 @@ export class PromoService implements OnModuleInit {
         const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
         return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib) || a.objectKey.localeCompare(b.objectKey);
       });
-      assets = rows.map((r) => ({ id: r.id, objectKey: r.objectKey }));
+      assets = rows.map((r) => ({ id: r.id, objectKey: r.objectKey, meta: (r as any).meta || null }));
     }
     return { product, assets };
   }
@@ -306,7 +307,14 @@ export class PromoService implements OnModuleInit {
     if (wantVideo) {
       return this.generateVideo(user, productId, { ...input, mediaKind: 'video', templateId: tpl.id });
     }
-    if (!this.gen.configured()) throw new BadRequestException('服务端未配置生图密钥');
+    // OUTFIT_ENGINE=external 时不调用自建 IMAGE_GEN，无需 IMAGE_GEN 密钥
+    const outfitEngineEarly = this.externalOutfit.engineMode();
+    if (outfitEngineEarly !== 'external' && !this.gen.configured()) {
+      throw new BadRequestException('服务端未配置生图密钥');
+    }
+    if (outfitEngineEarly !== 'self' && !this.externalOutfit.configured()) {
+      throw new BadRequestException('外部穿搭 Agent 未配置（OUTFIT_AGENT_ENABLED / API Key）');
+    }
     const product: any = await this.products.getDetail(user, productId);
     const colorsIn = Array.isArray(input.colors) ? input.colors.map((c) => String(c || '').trim()).filter(Boolean) : [];
     let count: number;
@@ -392,21 +400,36 @@ export class PromoService implements OnModuleInit {
       existingJobId = existing.jobId || null;
       await repo.save(existing);
     } else {
-      setId = newId('ps');
-      await repo.save(
-        repo.create({
-          id: setId,
-          tenantId: user.tenantId,
-          productId,
-          templateId: tpl.id,
-          params,
-          caption,
-          jobId: null,
-          legacyJobId: null,
-          status: 'generating',
-          images: Array.from({ length: count }, (_, i) => ({ index: i, status: 'pending' as const })),
-        }),
-      );
+      // 同模板失败空壳：复用该 set，避免「本商品任务」再堆一行
+      const reusable = await this.findReusableFailedSet(user, productId, tpl.id);
+      if (reusable) {
+        setId = reusable.id;
+        reusable.status = 'generating';
+        reusable.params = params;
+        reusable.caption = caption;
+        reusable.templateId = tpl.id;
+        reusable.images = Array.from({ length: count }, (_, i) => ({ index: i, status: 'pending' as const }));
+        existingJobId = reusable.jobId || null;
+        await repo.save(reusable);
+        await this.softDeleteFailedEmptySets(user, productId, tpl.id, setId);
+      } else {
+        setId = newId('ps');
+        await repo.save(
+          repo.create({
+            id: setId,
+            tenantId: user.tenantId,
+            productId,
+            templateId: tpl.id,
+            params,
+            caption,
+            jobId: null,
+            legacyJobId: null,
+            status: 'generating',
+            images: Array.from({ length: count }, (_, i) => ({ index: i, status: 'pending' as const })),
+          }),
+        );
+        await this.softDeleteFailedEmptySets(user, productId, tpl.id, setId);
+      }
     }
 
     const jobPayload = {
@@ -1147,18 +1170,40 @@ export class PromoService implements OnModuleInit {
 
     // 商品参考图：ensureLocal（OSS→本地）；缺一不可
     const refPaths: string[] = [];
-    const refInputs: Array<{ localPath: string; objectKey?: string; assetId?: string; filename?: string }> = [];
+    const refInputs: Array<{
+      localPath: string;
+      objectKey?: string;
+      assetId?: string;
+      filename?: string;
+      priorKind?: GarmentRefKind;
+      priorRoleZh?: string;
+      priorRoleEn?: string;
+    }> = [];
+    const cachedAnalysis = (product as any)?.refAnalysis as ProductRefAnalysis | null | undefined;
+    const cachedByAsset = new Map(
+      (cachedAnalysis?.assets || []).filter((a) => a?.assetId).map((a) => [a.assetId, a]),
+    );
     for (const r of refs) {
       const local = await this.ensureLocal(r!.objectKey);
       if (!local) throw new Error(`参考图本地不可用：${r!.objectKey}`);
       refPaths.push(local);
+      const prior = cachedByAsset.get(r!.id) || ((r as any).meta as any) || null;
+      const priorKind = prior?.kind as GarmentRefKind | undefined;
       refInputs.push({
         localPath: local,
         objectKey: r!.objectKey,
         assetId: r!.id,
         filename: (r as any).filename || (r as any).originalName,
+        priorKind:
+          priorKind === 'hang' || priorKind === 'detail' || priorKind === 'unusable' ? priorKind : undefined,
+        priorRoleZh: prior?.roleZh ? String(prior.roleZh) : undefined,
+        priorRoleEn: prior?.roleEn ? String(prior.roleEn) : undefined,
       });
     }
+    const canReuseCached =
+      !!cachedAnalysis?.analyzedAt &&
+      refInputs.length > 0 &&
+      refInputs.every((i) => !!i.priorKind);
 
     const keyDir = `tenants/${user.tenantId}/products/${product.styleNo}/promo/${legacy.id}`;
     fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
@@ -1173,6 +1218,8 @@ export class PromoService implements OnModuleInit {
     });
     const garmentPrep = await prepareRefsForCategory('knitwear', this.vision, refInputs, {
       workDir: path.join(this.storageRoot(), keyDir, '_knitwear_grid'),
+      reuseCached: canReuseCached,
+      cachedAnalysis: canReuseCached ? cachedAnalysis || null : null,
     });
     if (!garmentPrep.ok) {
       throw new Error(garmentPrep.reasonZh || '羊毛衫参考图不可用，已拒绝生图');
@@ -2058,22 +2105,95 @@ export class PromoService implements OnModuleInit {
     return this.collapseBusySetsByTemplate(mapped);
   }
 
-  /** 同模板多条 generating 只留最新，避免素材列表「两条多色」 */
-  private collapseBusySetsByTemplate<T extends { id: string; templateId?: string; busy?: boolean; status?: string; createdAt?: any }>(
-    sets: T[],
-  ): T[] {
+  /**
+   * 素材列表去重：
+   * - 同模板多条 generating 只留最新
+   * - 失败且无可用图、且同模板已有更新成功组 → 不展示（避免「失败空壳」刷屏）
+   */
+  private collapseBusySetsByTemplate<T extends {
+    id: string;
+    templateId?: string;
+    busy?: boolean;
+    status?: string;
+    createdAt?: any;
+    done?: number;
+    total?: number;
+    items?: any[];
+  }>(sets: T[]): T[] {
     const seenBusyTpl = new Set<string>();
+    const hasDoneTpl = new Set<string>();
+    for (const s of sets) {
+      const tpl = String(s.templateId || '');
+      const done =
+        typeof s.done === 'number'
+          ? s.done
+          : (s.items || []).filter((i) => i && (i.status === 'done' || i.url)).length;
+      if (tpl && (s.status === 'done' || s.status === 'partial') && done > 0) {
+        hasDoneTpl.add(tpl);
+      }
+    }
     const out: T[] = [];
     for (const s of sets) {
       const busy = !!(s.busy || s.status === 'generating' || s.status === 'queued');
       const tpl = String(s.templateId || '');
+      const done =
+        typeof s.done === 'number'
+          ? s.done
+          : (s.items || []).filter((i) => i && (i.status === 'done' || i.url)).length;
       if (busy && tpl) {
         if (seenBusyTpl.has(tpl)) continue;
         seenBusyTpl.add(tpl);
       }
+      // 失败空壳：同模板已有成功成片时隐藏
+      if (s.status === 'failed' && done <= 0 && tpl && hasDoneTpl.has(tpl)) {
+        continue;
+      }
       out.push(s);
     }
     return out;
+  }
+
+  /** 软删同商品+模板下无成片的失败空壳组，避免新建时堆积 */
+  private async softDeleteFailedEmptySets(
+    user: AuthContext,
+    productId: string,
+    templateId: string,
+    exceptSetId?: string,
+  ) {
+    const repo = this.setsRepo();
+    const rows = await repo.find({
+      where: { tenantId: user.tenantId, productId, templateId, status: 'failed' },
+      take: 20,
+      order: { createdAt: 'DESC' },
+    });
+    for (const row of rows) {
+      if (exceptSetId && row.id === exceptSetId) continue;
+      const done = (row.images || []).filter((i) => i && i.status === 'done' && i.objectKey).length;
+      if (done > 0) continue;
+      row.status = 'deleted';
+      await repo.save(row);
+      this.logger.log(`soft-delete failed empty set ${row.id} tpl=${templateId}`);
+    }
+  }
+
+  /** 新建时优先复用同模板失败空壳 set，避免任务/素材双增 */
+  private async findReusableFailedSet(
+    user: AuthContext,
+    productId: string,
+    templateId: string,
+  ) {
+    const repo = this.setsRepo();
+    const rows = await repo.find({
+      where: { tenantId: user.tenantId, productId, templateId, status: 'failed' },
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+    for (const row of rows) {
+      const done = (row.images || []).filter((i) => i && i.status === 'done' && i.objectKey).length;
+      if (done > 0) continue;
+      return row;
+    }
+    return null;
   }
 
   async getSet(user: AuthContext, productId: string, setId: string) {

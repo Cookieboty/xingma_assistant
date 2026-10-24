@@ -1,6 +1,6 @@
 const { request, ensureSilentSession } = require('../../../utils/request');
 const { saveUrlsToAlbum } = require('../../../utils/saveAlbum');
-const { maybeCollectProfile } = require('../../../utils/profile');
+const { maybeCollectProfile, stableMediaUrl } = require('../../../utils/profile');
 
 const STATUS_LABEL = {
   generating: '生成中',
@@ -187,8 +187,13 @@ Page({
     if (!productId) return;
     this.setData({ productJobsLoading: true });
     try {
-      const res = await request({ url: `/api/jobs?productId=${productId}&limit=20` });
-      const items = ((res && res.items) || []).map(mapProductJob);
+      // 只展示需关注的任务（排队/执行/失败）；成功结果已在「宣传素材」
+      const res = await request({ url: `/api/jobs?productId=${productId}&limit=30` });
+      const raw = ((res && res.items) || []).filter((j) => {
+        const st = j && j.status;
+        return st === 'queued' || st === 'running' || st === 'failed';
+      });
+      const items = raw.map(mapProductJob);
       this.setData({ productJobs: items, productJobsLoading: false });
     } catch (e) {
       this.setData({ productJobsLoading: false });
@@ -377,7 +382,7 @@ Page({
   async loadContactQr() {
     try {
       const tenant = await request({ url: '/api/tenants/current' });
-      this.setData({ contactQrUrl: (tenant && tenant.contactQrUrl) || '' });
+      this.setData({ contactQrUrl: (stableMediaUrl((tenant && tenant.contactQrUrl) || '') || '') });
     } catch (e) {
       /* ignore */
     }
