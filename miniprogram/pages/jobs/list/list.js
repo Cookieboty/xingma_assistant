@@ -41,6 +41,7 @@ function enrich(j) {
     (j.result && (j.result.productId || (j.result.product && j.result.product.id))) ||
     '';
   const setId =
+    j.setId ||
     (j.payload && j.payload.setId) ||
     (j.result && j.result.setId) ||
     '';
@@ -208,23 +209,28 @@ Page({
   },
 
   /**
-   * 业主「查看」：生图/生视频有 setId → 进素材组（任务详情=槽位/进度）。
+   * 业主「查看」：promo 生图/视频 → 素材组详情（可下载）；无 setId 也进该商品素材列表。
    */
   openView(e) {
     const ds = e.currentTarget.dataset || {};
     const id = ds.id;
     const productId = ds.productId || '';
     const setId = ds.setId || '';
-    const isGen = ds.isGen === true || ds.isGen === 'true';
-    if (isGen && productId && setId) {
+    const isGen = ds.isGen === true || ds.isGen === 'true' || ds.isGen === 1 || ds.isGen === '1';
+    // 兜底：从当前列表项再取一次（dataset 偶发丢空串）
+    const row = (this.data.list || []).find((j) => j.id === id) || {};
+    const pid = productId || row.productId || '';
+    const sid = setId || row.setId || '';
+    const gen = isGen || row.isGenType;
+    if (gen && pid && sid) {
       wx.navigateTo({
-        url: `/pages/product/promo-gallery/promo-gallery?id=${productId}&setId=${setId}`,
+        url: `/pages/product/promo-gallery/promo-gallery?id=${pid}&setId=${sid}`,
       });
       return;
     }
-    if (isGen && productId) {
+    if (gen && pid) {
       wx.navigateTo({
-        url: `/pages/product/promo-gallery/promo-gallery?id=${productId}`,
+        url: `/pages/product/promo-gallery/promo-gallery?id=${pid}`,
       });
       return;
     }

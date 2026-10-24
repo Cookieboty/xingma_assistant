@@ -36,7 +36,11 @@
           <view class="mark" wx:if="{{item.isPromo}}">AI</view>
         </view>
       </view>
-      <view class="muted small">点选切换勾选（可多张）· 长按预览</view>
+      <view class="muted small">点选切换勾选（可多张）· 长按预览{{quickMode ? ' · 已自动勾选主图' : ''}}</view>
+      <view class="quick-bar" wx:if="{{quickMode}}" style="margin-top:16rpx;">
+        <view class="muted small">短路径：默认 1 张、姿势/场景用模板预设。特征与张数等可展开。</view>
+        <view class="link" style="margin-top:8rpx;" bindtap="showMoreOptions">更多选项</view>
+      </view>
 
       <!-- 风格样例：仅 style_ref（styleRef.max>0）必传；其它模板不展示。视频一期不做 -->
       <view class="style-ref-block" wx:if="{{mediaKind !== 'video' && tpl.styleRef && tpl.styleRef.max > 0}}">
@@ -215,7 +219,7 @@
     </view>
 
     <view class="footer">
-      <view class="btn-weak half" bindtap="prev">上一步</view>
+      <view class="btn-weak half" bindtap="prev">{{quickMode && stepIdx === 0 ? '换模板' : '上一步'}}</view>
       <view class="btn-primary half" bindtap="next">{{stepIdx >= steps.length - 1 ? (submitting ? '提交中…' : (styleUploading ? '上传中…' : (mediaKind === 'video' ? '确认生成视频' : '开始生成'))) : '下一步'}}</view>
     </view>
   </block>

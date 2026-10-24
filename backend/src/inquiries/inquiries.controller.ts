@@ -34,8 +34,9 @@ export class InquiriesController {
     @AuthUser() user: AuthContext,
     @Query('productId') productId?: string,
     @Query('customerId') customerId?: string,
+    @Query('status') status?: string,
   ) {
-    return this.inquiriesService.list(user, { productId, customerId });
+    return this.inquiriesService.list(user, { productId, customerId, status });
   }
 
   /** 单条询价标为已处理（可附处理说明） */

@@ -8,11 +8,25 @@ function statusLabel(s) {
 }
 
 Page({
-  data: { list: [] },
+  data: {
+    list: [],
+    status: 'open', // 默认待处理
+    statusChips: [
+      { id: 'open', name: '待处理' },
+      { id: '', name: '全部' },
+      { id: 'handled', name: '已处理' },
+    ],
+  },
   onShow() { this.load(); },
+  onStatus(e) {
+    this.setData({ status: e.currentTarget.dataset.id || '' });
+    this.load();
+  },
   async load() {
     try {
-      const raw = await request({ url: '/api/inquiries' });
+      const qs = [];
+      if (this.data.status) qs.push(`status=${encodeURIComponent(this.data.status)}`);
+      const raw = await request({ url: `/api/inquiries${qs.length ? '?' + qs.join('&') : ''}` });
       const list = (raw || []).map((i) => Object.assign({}, i, {
         statusLabel: statusLabel(i.status),
         title: i.productName || i.productId || '询价',

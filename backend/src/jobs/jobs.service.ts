@@ -676,6 +676,11 @@ export class JobsService {
         String((payload as any).productId || '').trim() ||
         String((rec.result as any)?.productId || (rec.result as any)?.product?.id || '').trim() ||
         '',
+      // 业主「查看」直达素材组详情；与 payload.setId 对齐
+      setId:
+        String((payload as any).setId || '').trim() ||
+        String((rec.result as any)?.setId || '').trim() ||
+        '',
     };
   }
 

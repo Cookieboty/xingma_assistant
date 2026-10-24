@@ -208,3 +208,16 @@
   border-radius: 8rpx;
 }
 .gm-hint { color: var(--color-muted); font-size: 24rpx; flex-shrink: 0; margin-left: 16rpx; }
+
+.pc-share {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  font-weight: inherit;
+}
+.pc-share::after { border: none; }

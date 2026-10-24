@@ -322,6 +322,67 @@ Page({
     if (!id) return;
     wx.navigateTo({ url: `/pages/product/promo-gallery/promo-gallery?id=${id}` });
   },
+  /** 列表「微信转发」：记下目标商品，open-type=share 弹出转发面板 */
+  onShareTap(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {};
+    const id = ds.id || '';
+    if (!id) return;
+    this._shareTarget = {
+      id,
+      name: ds.name || '',
+      styleNo: ds.style || '',
+      coverUrl: ds.cover || '',
+    };
+    // 预创建公开分享，缩短 promise 等待
+    this._prefetchShare(id).catch(() => {});
+  },
+  async _prefetchShare(productId) {
+    if (!productId) return null;
+    if (!this._shareCache) this._shareCache = {};
+    if (this._shareCache[productId] && this._shareCache[productId].shareId) {
+      return this._shareCache[productId];
+    }
+    const res = await request({
+      url: '/api/shares',
+      method: 'POST',
+      data: { productId, sharePolicy: 'open' },
+    });
+    this._shareCache[productId] = res;
+    return res;
+  },
+  onShareAppMessage() {
+    const t = this._shareTarget || {};
+    const productId = t.id || '';
+    const title = (t.name || t.styleNo || '商品分享').trim();
+    const imageUrl = t.coverUrl || '';
+    const fallback = productId
+      ? `/pages/share/landing/landing?productId=${productId}`
+      : '/pages/share/landing/landing';
+    const cached = productId && this._shareCache && this._shareCache[productId];
+    const syncPath = (cached && cached.shareId)
+      ? `/pages/share/landing/landing?shareId=${cached.shareId}`
+      : fallback;
+    if (!productId) {
+      return { title: '商品分享', path: fallback };
+    }
+    return {
+      title,
+      path: syncPath,
+      imageUrl: imageUrl || undefined,
+      promise: this._prefetchShare(productId)
+        .then((shareRes) => {
+          const sid = shareRes && shareRes.shareId;
+          return {
+            title,
+            path: sid
+              ? `/pages/share/landing/landing?shareId=${sid}`
+              : ((shareRes && shareRes.path) || fallback),
+            imageUrl: imageUrl || undefined,
+          };
+        })
+        .catch(() => ({ title, path: fallback, imageUrl: imageUrl || undefined })),
+    };
+  },
   goEdit(e) {
     const id = e.currentTarget.dataset.id;
     wx.navigateTo({

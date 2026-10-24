@@ -179,7 +179,8 @@ Page({
       const drafts = Object.assign({}, this.data.handleDrafts);
       delete drafts[id];
       this.setData({ handleDrafts: drafts });
-      this.load(this.data.id);
+      await this.load(this.data.id);
+      try { await refreshCustomerTabBadge(); } catch (e2) { /* */ }
       wx.showToast({ title: '已标记处理' });
     } catch (err) {
       wx.showToast({ title: err.message || '失败', icon: 'none' });

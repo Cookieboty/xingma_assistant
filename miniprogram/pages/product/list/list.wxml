@@ -61,7 +61,7 @@
     <view class="pc-actions">
       <view class="pc-act" catchtap="goEdit" data-id="{{item.id}}">编辑</view>
       <view class="pc-act-div"></view>
-      <view class="pc-act" catchtap="goDetail" data-id="{{item.id}}">分享</view>
+      <button class="pc-act pc-share" open-type="share" data-id="{{item.id}}" data-name="{{item.name}}" data-style="{{item.styleNo}}" data-cover="{{item.coverUrl}}" catchtap="onShareTap">微信转发</button>
       <view class="pc-act-div"></view>
       <view class="pc-act" catchtap="goMaterials" data-id="{{item.id}}">素材</view>
       <view class="pc-act-div"></view>
@@ -71,7 +71,11 @@
     </view>
   </view>
 
-  <view class="muted empty" wx:if="{{!list.length && !loading}}">暂无商品，点上方「选图发品」开始</view>
+  <view class="card muted empty" wx:if="{{!list.length && !loading}}">
+    <view>还没有商品</view>
+    <view class="muted small" style="margin-top:8rpx;">先发一款，再做素材和转发</view>
+    <view class="btn-primary" style="margin-top:24rpx;" bindtap="goPublish">选图发品</view>
+  </view>
   <view class="muted footer-tip" wx:if="{{loading}}">加载中…</view>
   <view class="muted footer-tip" wx:elif="{{loadingMore}}">加载更多…</view>
   <view class="muted footer-tip" wx:elif="{{list.length && !hasMore}}">没有更多了</view>

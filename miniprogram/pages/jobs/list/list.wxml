@@ -25,7 +25,10 @@
   </scroll-view>
 
   <view class="card muted" wx:if="{{loading && !list.length}}">加载中…</view>
-  <view class="card muted empty" wx:elif="{{!list.length}}">暂无宣传生图/生视频任务</view>
+  <view class="card muted empty" wx:elif="{{!list.length}}">
+    <view>还没有宣传任务</view>
+    <view class="muted small" style="margin-top:8rpx;">去商品列表点「素材」→「新建素材」开始生图或视频</view>
+  </view>
 
   <view class="card job" wx:for="{{list}}" wx:key="id">
     <view class="job-row">
@@ -55,8 +58,8 @@
           </view>
           <view class="foot-ops">
             <text class="link" wx:if="{{item.canView}}" data-id="{{item.id}}" data-product-id="{{item.productId}}" data-set-id="{{item.setId}}" data-is-gen="{{item.isGenType}}" bindtap="openView">查看</text>
-            <text class="link" wx:if="{{item.canCancel}}" data-id="{{item.id}}" bindtap="cancel">{{item.cancelLabel}}</text>
-            <text class="link primary" wx:if="{{item.canRetry}}" data-id="{{item.id}}" bindtap="retry">{{item.retryLabel}}</text>
+            <text class="link" wx:if="{{item.canCancel}}" data-id="{{item.id}}" catchtap="cancel">{{item.cancelLabel}}</text>
+            <text class="link primary retry" wx:if="{{item.canRetry}}" data-id="{{item.id}}" catchtap="retry">{{item.retryLabel || '重试'}}</text>
           </view>
         </view>
       </view>

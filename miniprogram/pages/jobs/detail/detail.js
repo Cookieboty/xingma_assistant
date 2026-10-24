@@ -39,6 +39,7 @@ function enrichJob(j) {
     (j.result && (j.result.productId || (j.result.product && j.result.product.id))) ||
     '';
   const setId =
+    j.setId ||
     (j.payload && j.payload.setId) ||
     (j.result && j.result.setId) ||
     '';
@@ -47,7 +48,7 @@ function enrichJob(j) {
     (j.payload && (j.payload.styleNo || j.payload.draftStyleNo)) ||
     (j.result && (j.result.styleNo || (j.result.product && j.result.product.styleNo))) ||
     '';
-  const isGenType = j.type === 'promo_image' || j.type === 'promo_video' || j.type === 'cover_reselect';
+  const isGenType = j.type === 'promo_image' || j.type === 'promo_video';
   const isCreateType = j.type === 'publish_product';
   const busy = j.status === 'queued' || j.status === 'running';
   const doneTotal =
@@ -66,6 +67,8 @@ function enrichJob(j) {
     productId,
     setId,
     styleNo,
+    isGenType,
+    isCreateType,
     canRetry: j.status === 'failed' || j.status === 'cancelled',
     canCancel: busy,
     cancelLabel: j.status === 'running' ? '停止' : '取消',

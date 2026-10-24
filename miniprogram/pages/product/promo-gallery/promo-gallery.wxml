@@ -111,8 +111,8 @@
 
     <view class="card muted" wx:if="{{loading && !sets.length}}">加载中…</view>
     <view class="card muted empty" wx:elif="{{!sets.length}}">
-      <view>暂无宣传素材</view>
-      <view class="muted small" style="margin-top:8rpx;">可新建宣传图或竖版短视频</view>
+      <view>还没有素材组</view>
+      <view class="muted small" style="margin-top:8rpx;">下一步：新建一组宣传图或竖版短视频，完成后可在这里下载</view>
       <view class="btn-primary" style="margin-top:24rpx;" bindtap="goGenerate">新建素材</view>
     </view>
 

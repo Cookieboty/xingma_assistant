@@ -170,11 +170,12 @@ export class InquiriesService {
 
   async list(
     user: AuthContext,
-    opts?: { productId?: string; customerId?: string },
+    opts?: { productId?: string; customerId?: string; status?: string },
   ) {
     const onlyMine = user.role === 'customer';
     const productId = opts?.productId ? String(opts.productId) : '';
     let customerId = opts?.customerId ? String(opts.customerId) : '';
+    const status = String(opts?.status || '').trim();
     if (onlyMine) customerId = user.customerId || '-';
     if (user.role === 'customer' && opts?.customerId && opts.customerId !== user.customerId) {
       throw new ForbiddenException('无权查看他人询价');
@@ -188,6 +189,7 @@ export class InquiriesService {
         .orderBy('i.created_at', 'DESC');
       if (customerId) qb.andWhere('i.customer_id = :customerId', { customerId });
       if (productId) qb.andWhere('i.product_id = :productId', { productId });
+      if (status) qb.andWhere('i.status = :status', { status });
       const rows = await qb.getMany();
       const productIds = [...new Set(rows.map((r) => r.productId))];
       const nameMap = new Map<string, string>();
@@ -210,6 +212,7 @@ export class InquiriesService {
         if (i.tenantId !== user.tenantId) return false;
         if (customerId && i.customerId !== customerId) return false;
         if (productId && i.productId !== productId) return false;
+        if (status && i.status !== status) return false;
         return true;
       })
       .map((i) => ({ ...i, unread: i.staffReadAt == null }));

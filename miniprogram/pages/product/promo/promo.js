@@ -46,6 +46,7 @@ Page({
     styleAnalyzing: false,
     styleKeywordChips: [],
     job: null, submitting: false, saving: false, singlePoseScene: false,
+    quickMode: false, fullSteps: [],
     voiceTarget: '', voiceListening: false, voiceHint: '按住说话',
     savingAlbum: false, albumSelectedCount: 0, albumAllSelected: false, albumSaveLabel: '保存到相册',
   },
@@ -83,6 +84,16 @@ Page({
       } else if (!s.configured) {
         wx.showToast({ title: '服务端未配置生图密钥', icon: 'none' });
       }
+      // 生图默认短路径：自动选「平铺/挂拍」模板（可换）；assets 显式传入避免 setData 未落地
+      if (mediaKind !== 'video') {
+        const prefer = uniq.find((t) => t.id === 'flatlay') || uniq.find((t) => t.id === 'detail_closeup') || uniq[0];
+        if (prefer) {
+          this.pickTemplate({
+            currentTarget: { dataset: { id: prefer.id } },
+            _assets: this.data.assets,
+          });
+        }
+      }
     } catch (e) {
       this.setData({ loading: false });
       wx.showToast({ title: e.message || '加载失败', icon: 'none' });
@@ -94,16 +105,53 @@ Page({
   },
 
   // ---- 模板 ----
+  /** 风格参考 / 多色 / 视频：完整步骤；其余默认短路径（参考图→生成），高级项折叠 */
+  _supportsQuick(tpl) {
+    if (!tpl) return false;
+    if (this.data.mediaKind === 'video') return false;
+    if (tpl.id === 'style_ref' || tpl.id === 'multi_color') return false;
+    if (tpl.styleRef && tpl.styleRef.min > 0) return false;
+    return true;
+  },
+  /** 自动勾选封面/前几张商品图作为参考 */
+  _autoPickRefs(tpl, assets) {
+    const list = (assets || []).filter((a) => a && a.id && !a.isPromo);
+    if (!list.length) return { refs: [], assets: assets || [] };
+    const preferCover = list.filter((a) => a.isCover);
+    const pool = (preferCover.length ? preferCover : list).concat(
+      list.filter((a) => preferCover.indexOf(a) < 0),
+    );
+    const seen = {};
+    const ordered = [];
+    pool.forEach((a) => { if (!seen[a.id]) { seen[a.id] = 1; ordered.push(a); } });
+    const max = Math.min(tpl.reference.max || 1, ordered.length);
+    const min = Math.min(tpl.reference.min || 1, max);
+    const n = Math.max(min, Math.min(max, min));
+    const refs = ordered.slice(0, n).map((a) => a.id);
+    const assetsOut = (assets || []).map((a) => Object.assign({}, a, {
+      checked: refs.indexOf(a.id) >= 0,
+      order: refs.indexOf(a.id) + 1,
+    }));
+    return { refs, assets: assetsOut };
+  },
   pickTemplate(e) {
     const tpl = this.data.templates.find((t) => t.id === e.currentTarget.dataset.id);
-    const steps = tpl.steps.filter((s) => !(s === 'model' && tpl.model === 'none'));
+    if (!tpl) return;
+    const fullSteps = tpl.steps.filter((s) => !(s === 'model' && tpl.model === 'none'));
+    const quickMode = this._supportsQuick(tpl);
+    const steps = quickMode ? ['reference'] : fullSteps;
     const singlePoseScene = tpl.id === 'multi_color';
+    const assetSrc = (e && e._assets) || this.data.assets;
+    const picked = this._autoPickRefs(tpl, assetSrc);
     this.setData({
-      tpl, steps, stepIdx: 0, stepKey: steps[0], job: null,
+      tpl, steps, fullSteps, quickMode, stepIdx: 0, stepKey: steps[0], job: null,
       singlePoseScene,
       sel: {
-        refs: [], colors: [], modelId: tpl.model === 'required' ? (this.data.models[0] || {}).id : '',
-        poses: tpl.poses.length ? [tpl.poses[0].id] : [], scenes: tpl.scenes.length ? [tpl.scenes[0].id] : [],
+        refs: picked.refs,
+        colors: [],
+        modelId: tpl.model === 'required' ? (this.data.models[0] || {}).id : '',
+        poses: tpl.poses.length ? [tpl.poses[0].id] : [],
+        scenes: tpl.scenes.length ? [tpl.scenes[0].id] : [],
         poseText: '', sceneText: '',
         count: tpl.count.default, sizeId: tpl.defaultSize,
       },
@@ -114,12 +162,21 @@ Page({
       styleKeywordsText: '',
       styleAnalyzing: false,
       styleKeywordChips: [],
-      assets: this.data.assets.map((a) => Object.assign(a, { checked: false })),
+      assets: picked.assets,
       colors: this.data.colors.map((c) => Object.assign(c, { checked: false })),
     });
     this.refreshOptionFlags();
   },
-  backToTemplates() { this.setData({ tpl: null, stepIdx: -1, stepKey: '', job: null }); },
+  /** 展开特征/模特/场景/张数等完整向导 */
+  showMoreOptions() {
+    const full = this.data.fullSteps || [];
+    if (!full.length) return;
+    const cur = this.data.stepKey;
+    let idx = full.indexOf(cur);
+    if (idx < 0) idx = 0;
+    this.setData({ quickMode: false, steps: full, stepIdx: idx, stepKey: full[idx] });
+  },
+  backToTemplates() { this.setData({ tpl: null, stepIdx: -1, stepKey: '', job: null, quickMode: false, fullSteps: [] }); },
 
   // ---- 步骤 ----
   prev() {

@@ -10,8 +10,24 @@
     <view class="search-btn" bindtap="onSearch">搜索</view>
   </view>
 
+  <scroll-view scroll-x class="chips-row" enable-flex>
+    <text
+      class="chip {{filter===item.id?'active':''}}"
+      wx:for="{{filterChips}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="onFilter"
+    >{{item.name}}</text>
+  </scroll-view>
+
   <view class="card muted" wx:if="{{loading && !list.length}}">加载中…</view>
-  <view class="card muted empty" wx:elif="{{!list.length}}">暂无客户。把商品分享出去后，对方打开即出现在这里。</view>
+  <view class="card muted empty" wx:elif="{{!list.length}}">
+    <view wx:if="{{filter==='pending'}}">暂无待处理询价</view>
+    <block wx:else>
+      <view>还没有客户</view>
+      <view class="muted small" style="margin-top:8rpx;">去商品列表点「微信转发」，对方打开后会自动出现在这里</view>
+    </block>
+  </view>
 
   <view class="card row" wx:for="{{list}}" wx:key="id" data-id="{{item.id}}" bindtap="goDetail">
     <view class="avatar-wrap">

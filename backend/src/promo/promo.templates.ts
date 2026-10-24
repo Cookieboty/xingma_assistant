@@ -196,7 +196,7 @@ export const TEMPLATES: PromoTemplate[] = [
       { id: 'dark', name: '深色质感', prompt: 'on a dark charcoal felt surface with moody directional light' },
     ],
     reference: { prefer: ['detail', 'main'], min: 1, max: 2, hint: '选 1-2 张细节图或主图（织纹清晰的优先）' },
-    count: { min: 1, max: 4, default: 2 },
+    count: { min: 1, max: 4, default: 1 },
     steps: ['reference', 'feature', 'pose_scene', 'count'],
     buildPrompt: (c) =>
       [
@@ -228,7 +228,7 @@ export const TEMPLATES: PromoTemplate[] = [
       { id: 'wood', name: '原木地板', prompt: 'on light wooden floorboards with soft daylight' },
     ],
     reference: { prefer: ['main'], min: 1, max: 1, hint: '选 1 张能看到整件衣服的主图' },
-    count: { min: 1, max: 4, default: 2 },
+    count: { min: 1, max: 4, default: 1 },
     steps: ['reference', 'feature', 'pose_scene', 'count'],
     buildPrompt: (c) =>
       [
@@ -254,7 +254,7 @@ export const TEMPLATES: PromoTemplate[] = [
     sceneLabel: '场景',
     scenes: MODEL_SCENES,
     reference: { prefer: ['main'], min: 1, max: 2, hint: '选 1-2 张清晰主图（正面整件）' },
-    count: { min: 1, max: 6, default: 2 },
+    count: { min: 1, max: 6, default: 1 },
     steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
     buildPrompt: (c) =>
       [
@@ -327,7 +327,7 @@ export const TEMPLATES: PromoTemplate[] = [
       { id: 'winter', name: '冬日暖光', prompt: 'a winter evening with fairy lights and warm bokeh' },
     ],
     reference: { prefer: ['main'], min: 1, max: 2, hint: '选 1-2 张主图' },
-    count: { min: 1, max: 4, default: 2 },
+    count: { min: 1, max: 4, default: 1 },
     steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
     buildPrompt: (c) => {
       const poseId = c.pose?.id || '';
