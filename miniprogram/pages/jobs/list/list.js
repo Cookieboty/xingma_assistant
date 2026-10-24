@@ -55,7 +55,7 @@ function enrich(j) {
     j.title ||
     (j.payload && j.payload.displayTitle) ||
     (rawMsg && !looksLikeId && rawMsg !== '排队中' && rawMsg !== '执行中' ? rawMsg : '') ||
-    (j.type === 'promo_image' ? '宣传生图' : j.type === 'publish_product' ? '选图发品' : '任务');
+    (j.type === 'promo_image' ? '宣传生图' : j.type === 'promo_video' ? '宣传视频' : j.type === 'publish_product' ? '选图发品' : '任务');
   const productThumb = j.productThumb || '';
   const doneTotal =
     progress.done != null && progress.total != null
@@ -63,7 +63,7 @@ function enrich(j) {
       : '';
   const isCreateType = j.type === 'publish_product';
   const isGenType = j.type === 'promo_image' || j.type === 'cover_reselect' || j.type === 'promo_video';
-  // 「查看」：一律进任务明细（进度/错误/关联素材组）
+  // 「查看」：生图进素材组（task）；发品进明细
   const canView = true;
   const busyHint =
     j.status === 'running' || j.status === 'queued'
@@ -124,6 +124,7 @@ Page({
       { id: '', name: '全部类型' },
       { id: 'publish_product', name: '发品' },
       { id: 'promo_image', name: '生图' },
+      { id: 'promo_video', name: '生视频' },
       { id: 'cover_reselect', name: '封面' },
     ],
   },
@@ -160,7 +161,16 @@ Page({
       if (this.data.status) qs.push(`status=${this.data.status}`);
       if (this.data.type) qs.push(`type=${this.data.type}`);
       const res = await request({ url: `/api/jobs?${qs.join('&')}` });
-      const items = (res.items || []).map(enrich);
+      // 业主任务：生图/视频成功结果已在「宣传素材」，默认不单列 succeeded（除非筛了「完成」）
+      let raw = res.items || [];
+      if (!this.data.status) {
+        raw = raw.filter((j) => {
+          const isPromo = j.type === 'promo_image' || j.type === 'promo_video' || j.type === 'cover_reselect';
+          if (!isPromo) return true;
+          return j.status !== 'succeeded';
+        });
+      }
+      const items = raw.map(enrich);
       this.setData({ list: items, total: res.total || items.length, loading: false });
       const busy = items.some((j) => j.status === 'queued' || j.status === 'running');
       if (busy) {
@@ -204,9 +214,28 @@ Page({
     }
   },
 
-  /** 统一「查看」：进任务明细（进度/错误/关联素材），不直接整商品素材页 */
+  /**
+   * 业主「查看」：生图/生视频有 setId → 进素材组（任务详情=槽位/进度）；
+   * 发品等无 set → 仍进 job 明细（开发向进度页）。
+   */
   openView(e) {
-    const id = e.currentTarget.dataset.id;
+    const ds = e.currentTarget.dataset || {};
+    const id = ds.id;
+    const productId = ds.productId || '';
+    const setId = ds.setId || '';
+    const isGen = ds.isGen === true || ds.isGen === 'true';
+    if (isGen && productId && setId) {
+      wx.navigateTo({
+        url: `/pages/product/promo-gallery/promo-gallery?id=${productId}&setId=${setId}`,
+      });
+      return;
+    }
+    if (isGen && productId) {
+      wx.navigateTo({
+        url: `/pages/product/promo-gallery/promo-gallery?id=${productId}`,
+      });
+      return;
+    }
     if (!id) return;
     wx.navigateTo({ url: `/pages/jobs/detail/detail?id=${id}` });
   },

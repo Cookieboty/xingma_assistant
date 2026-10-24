@@ -74,8 +74,8 @@
 
 ### 2.6 与模板的关系
 
-- 所有现网模板均可选用风格样例（含 `multi_color`）。
-- `multi_color`：每张出图仍只喂**该色商品参考图**；风格样例作为**整组共用**的附加输入，不按色拆分。
+- **已变更**：仅 `style_ref` 使用风格样例；其它模板 UI/DTO 不再提供。
+- （历史）`multi_color` 曾支持整组共用风格样例；现已移除。
 
 ---
 
@@ -281,11 +281,11 @@ tenants/{tenantId}/products/{styleNo}/promo/{legacyJobId|setJobId}/01.png
 
 ## 13. 专用模板「风格参考」`style_ref`（2026-10）
 
-与本文「全模板可选风格样例」并存，不替换：
+> **2026-10-24**：可选「风格样例」已从 flatlay / model_scene / detail_closeup / xhs_cover / multi_color（及视频）**移除**。风格样例**仅** `style_ref` 必传；其它模板 `templateDto.styleRef.max=0`，generate 忽略误传的 styleRef。
 
 - 模板 id `style_ref`：`styleRef.min=1` 必传样例；步骤含 `style_keywords`；`styleRefPrimary` 加强构图硬约束。
 - `POST /api/products/:id/promo/analyze-style-refs` 轻量 vision → 可编辑中文关键词；失败空结果仍可生成。
-- 其它五模板行为不变（风格样例仍可选）。
+- 上文「全模板可选风格样例」为历史设计；现网仅 `style_ref` 使用风格样例 + 强弱。
 
 ## 实现备注（研发）
 

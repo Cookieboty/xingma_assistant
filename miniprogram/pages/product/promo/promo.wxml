@@ -38,10 +38,10 @@
       </view>
       <view class="muted small">点选切换勾选（可多张）· 长按预览</view>
 
-      <!-- 风格样例：多数模板可选；风格参考模板必传。视频一期不做 -->
-      <view class="style-ref-block" wx:if="{{mediaKind !== 'video'}}">
-        <view class="sub-label">{{tpl.styleRef.min > 0 ? '风格样例（必传）' : '风格样例（可选）}}</view>
-        <view class="section-hint">{{tpl.styleRef.hint || '上传你喜欢的成片风格，系统尽量学构图和氛围；衣服仍以商品图为准'}} · {{styleRefs.length}}/{{tpl.styleRef.max || styleRefMax}}</view>
+      <!-- 风格样例：仅 style_ref（styleRef.max>0）必传；其它模板不展示。视频一期不做 -->
+      <view class="style-ref-block" wx:if="{{mediaKind !== 'video' && tpl.styleRef && tpl.styleRef.max > 0}}">
+        <view class="sub-label">风格样例（必传）</view>
+        <view class="section-hint">{{tpl.styleRef.hint || '上传你要照着出的成片样例；衣服仍以商品图为准'}} · {{styleRefs.length}}/{{tpl.styleRef.max || styleRefMax}}</view>
         <view class="grid">
           <view class="cell style-cell" wx:for="{{styleRefs}}" wx:key="index" data-index="{{index}}">
             <image src="{{item.url}}" mode="aspectFill" lazy-load data-url="{{item.url}}" bindtap="previewStyleRef" />

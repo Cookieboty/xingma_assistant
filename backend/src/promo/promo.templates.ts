@@ -74,8 +74,7 @@ export interface PromoTemplate {
   /** image（默认）| video：前端与 generate 分流 */
   mediaKind?: 'image' | 'video';
   /**
-   * 覆盖默认 STYLE_REF_RULE（如风格参考模板要求必传样例）。
-   * 缺省则用全局 STYLE_REF_RULE（min:0 可选）。
+   * 风格样例规则。仅 style_ref 等需要样例的模板声明；缺省 = 不支持风格样例。
    */
   styleRef?: { min: number; max: number; hint: string };
   /** style_ref 模板：风格图为硬参考（构图光影），仍低于服装 KEEP */
@@ -152,7 +151,10 @@ export function buildStyleRefPrompt(opts: {
   return lines.join(' ');
 }
 
-/** 下发给前端的风格样例规则（所有模板共用；非独立步骤） */
+/**
+ * 风格样例上限（仅 style_ref 等显式声明 styleRef 的模板使用）。
+ * 其它模板不再下发可选风格样例。
+ */
 export const STYLE_REF_RULE = {
   min: 0,
   max: 4,
@@ -482,9 +484,11 @@ export function listTemplatesByKind(kind: 'image' | 'video' | 'all' = 'image') {
 /** 给前端的纯数据（去掉函数） */
 export function templateDto(t: PromoTemplate) {
   const { buildPrompt, ...rest } = t;
-  const styleRef = t.styleRef
-    ? { min: t.styleRef.min, max: t.styleRef.max, hint: t.styleRef.hint }
-    : STYLE_REF_RULE;
+  // 仅显式声明且 max>0 的模板（当前：style_ref）下发风格样例；其它模板省略 / max=0
+  const styleRef =
+    t.styleRef && Number(t.styleRef.max) > 0
+      ? { min: t.styleRef.min, max: t.styleRef.max, hint: t.styleRef.hint }
+      : { min: 0, max: 0, hint: '' };
   return {
     ...rest,
     mediaKind: t.mediaKind || (isVideoTemplate(t) ? 'video' : 'image'),

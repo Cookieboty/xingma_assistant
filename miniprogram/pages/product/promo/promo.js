@@ -573,11 +573,12 @@ Page({
         sceneText: sceneText || undefined,
         colors: sel.colors, count, sizeId: sel.sizeId,
       };
-      if (this.data.mediaKind !== 'video' && styleRefObjectKeys.length) {
+      const styleAllowed = !!(tpl.styleRef && tpl.styleRef.max > 0);
+      if (styleAllowed && this.data.mediaKind !== 'video' && styleRefObjectKeys.length) {
         payload.styleRefObjectKeys = styleRefObjectKeys;
         payload.styleStrength = this.data.styleStrength || (tpl.id === 'style_ref' ? 'strong' : 'medium');
       }
-      if (tpl.id === 'style_ref' || (tpl.styleRef && tpl.styleRef.min > 0)) {
+      if (styleAllowed) {
         if (!styleRefObjectKeys.length) {
           wx.showToast({ title: '请上传风格样例', icon: 'none' });
           return;

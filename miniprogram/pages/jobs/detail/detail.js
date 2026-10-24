@@ -111,6 +111,19 @@ Page({
     try {
       const jobRaw = await request({ url: `/api/jobs/${id}` });
       const job = enrichJob(jobRaw || {});
+      // 业主：生图/视频任务详情 = 素材组槽位页，不展示框架 job 堆
+      if (job.isGenType && job.productId && job.setId) {
+        wx.redirectTo({
+          url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}&setId=${job.setId}`,
+        });
+        return;
+      }
+      if (job.isGenType && job.productId) {
+        wx.redirectTo({
+          url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}`,
+        });
+        return;
+      }
       this.setData({ job, loading: false });
       if (job.busy) {
         this.timer = setTimeout(() => this.load(), 3000);

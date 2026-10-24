@@ -368,9 +368,15 @@ export class PromoService implements OnModuleInit {
     } else {
       count = Math.min(tpl.count.max, Math.max(tpl.count.min, Number(input.count) || tpl.count.default));
     }
-    const styleRefObjectKeys = this.normalizeStyleRefs(user, input.styleRefObjectKeys);
-    const styleStrength = this.normalizeStyleStrength(input.styleStrength);
-    const styleRefMin = tpl.styleRef?.min ?? 0;
+    // 风格样例仅 style_ref（styleRef.max>0）；其它模板忽略入参，防误传
+    const styleAllowed = !!(tpl.styleRef && Number(tpl.styleRef.max) > 0);
+    const styleRefObjectKeys = styleAllowed
+      ? this.normalizeStyleRefs(user, input.styleRefObjectKeys)
+      : [];
+    const styleStrength = styleAllowed
+      ? this.normalizeStyleStrength(input.styleStrength)
+      : this.normalizeStyleStrength(undefined);
+    const styleRefMin = styleAllowed ? (tpl.styleRef?.min ?? 0) : 0;
     if (styleRefMin > 0 && styleRefObjectKeys.length < styleRefMin) {
       throw new BadRequestException(`「${tpl.name}」至少上传 ${styleRefMin} 张风格样例`);
     }
@@ -392,7 +398,7 @@ export class PromoService implements OnModuleInit {
       colors: tpl.id === 'multi_color' ? colorsIn : (input.colors || []),
       count,
       sizeId: input.sizeId || tpl.defaultSize,
-      // 风格样例整组共用（含 multi_color）；空数组不写也等价现网
+      // 风格样例仅 style_ref 模板写入；其它模板为空
       styleRefObjectKeys,
       styleStrength: styleRefObjectKeys.length ? styleStrength : undefined,
       styleKeywords: input.styleKeywords || undefined,
@@ -1059,10 +1065,18 @@ export class PromoService implements OnModuleInit {
       throw new Error(`该模板需选择 ${tpl.reference.min}-${tpl.reference.max} 张参考图`);
     }
     {
-      const styleMin = tpl.styleRef?.min ?? 0;
-      const styleKeysEarly = this.normalizeStyleRefs(user, input.styleRefObjectKeys);
+      const styleAllowedEarly = !!(tpl.styleRef && Number(tpl.styleRef.max) > 0) || tpl.id === 'style_ref';
+      const styleMin = styleAllowedEarly ? (tpl.styleRef?.min ?? 0) : 0;
+      const styleKeysEarly = styleAllowedEarly
+        ? this.normalizeStyleRefs(user, input.styleRefObjectKeys)
+        : [];
       if (styleMin > 0 && styleKeysEarly.length < styleMin) {
         throw new Error(`「${tpl.name}」至少需要 ${styleMin} 张风格样例`);
+      }
+      if (!styleAllowedEarly) {
+        // 安全：其它模板执行期丢弃风格样例入参
+        (input as any).styleRefObjectKeys = [];
+        (input as any).styleStrength = undefined;
       }
     }
     const byId = new Map(assets.map((a) => [a.id, a]));
@@ -1318,9 +1332,14 @@ export class PromoService implements OnModuleInit {
       it.promptZh = promptZhBase;
     }
 
-    // 风格样例：整组共用；ensureLocal 失败则降级去掉该张并记 warn
-    const styleKeysRaw = this.normalizeStyleRefs(user, input.styleRefObjectKeys);
-    const styleStrength = this.normalizeStyleStrength(input.styleStrength);
+    // 风格样例：仅 style_ref；其它模板强制忽略（即便 params 残留）
+    const styleAllowedExec = !!(tpl.styleRef && Number(tpl.styleRef.max) > 0) || tpl.id === 'style_ref';
+    const styleKeysRaw = styleAllowedExec
+      ? this.normalizeStyleRefs(user, input.styleRefObjectKeys)
+      : [];
+    const styleStrength = this.normalizeStyleStrength(
+      styleAllowedExec ? input.styleStrength : undefined,
+    );
     const stylePaths: string[] = [];
     const styleWarns: string[] = [];
     for (const k of styleKeysRaw) {

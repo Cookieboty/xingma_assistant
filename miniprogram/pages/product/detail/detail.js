@@ -139,9 +139,12 @@ Page({
   },
   onShow() {
     if (this.data.isStaff && this.data.id) {
-      this.loadPromoSets(this.data.id);
-      this.loadProductJobs(this.data.id);
+      this.refreshOwnerTasks(this.data.id);
     }
+  },
+  async refreshOwnerTasks(productId) {
+    await this.loadPromoSets(productId);
+    await this.loadProductJobs(productId);
   },
   async load(id, shareEventId, boundCustomerId) {
     try {
@@ -155,8 +158,7 @@ Page({
       const canDownload = isStaff || !!product.allowCustomerDownload;
       this.setData({ product, canDownload });
       if (isStaff) {
-        this.loadPromoSets(id);
-        this.loadProductJobs(id);
+        this.refreshOwnerTasks(id);
         // 预创建 share，避免右上角/按钮同步 path 落到无 shareId 的 landing
         this.prefetchShare();
       } else {
@@ -183,24 +185,58 @@ Page({
       /* 列表失败不挡详情 */
     }
   },
+  /**
+   * 业主「本商品任务」：进行中/失败的 promo_set（生图/视频）+ 发品 job。
+   * 不把框架层并行/重生 job 当独立任务列出；成功素材已在「宣传素材」。
+   */
   async loadProductJobs(productId) {
     if (!productId) return;
     this.setData({ productJobsLoading: true });
     try {
-      // 只展示需关注的任务（排队/执行/失败）；成功结果已在「宣传素材」
-      const res = await request({ url: `/api/jobs?productId=${productId}&limit=30` });
-      const raw = ((res && res.items) || []).filter((j) => {
-        const st = j && j.status;
-        return st === 'queued' || st === 'running' || st === 'failed';
+      const tasks = [];
+      // 1) 素材任务 = promo_sets 中需关注项
+      const sets = this.data.promoSets || [];
+      sets.forEach((s) => {
+        const busy = s.statusClass === 'run';
+        const failed = s.statusClass === 'err' || s.statusLabel === '失败';
+        if (!busy && !failed) return;
+        tasks.push({
+          id: s.id,
+          kind: 'set',
+          setId: s.id,
+          productId,
+          title: s.title || '宣传素材',
+          statusLabel: s.statusLabel || (busy ? '生成中' : '失败'),
+          tone: busy ? 'run' : 'err',
+          hint: s.metaText || '',
+        });
       });
-      const items = raw.map(mapProductJob);
-      this.setData({ productJobs: items, productJobsLoading: false });
+      // 2) 非素材类框架任务（发品等）；promo_* 有 set 的已在上方
+      const res = await request({ url: `/api/jobs?productId=${productId}&limit=30` });
+      ((res && res.items) || []).forEach((j) => {
+        const st = j && j.status;
+        if (st !== 'queued' && st !== 'running' && st !== 'failed') return;
+        const isPromo = j.type === 'promo_image' || j.type === 'promo_video' || j.type === 'cover_reselect';
+        if (isPromo) return; // 已由 set 表达
+        tasks.push(Object.assign(mapProductJob(j), { kind: 'job' }));
+      });
+      this.setData({ productJobs: tasks, productJobsLoading: false });
     } catch (e) {
       this.setData({ productJobsLoading: false });
     }
   },
   goJobDetail(e) {
-    const id = e.currentTarget.dataset.id;
+    const ds = e.currentTarget.dataset || {};
+    const kind = ds.kind || '';
+    const setId = ds.setId || '';
+    const id = ds.id || '';
+    if (kind === 'set' || setId) {
+      const sid = setId || id;
+      wx.navigateTo({
+        url: `/pages/product/promo-gallery/promo-gallery?id=${this.data.id}&setId=${sid}`,
+      });
+      return;
+    }
     if (!id) return;
     wx.navigateTo({ url: `/pages/jobs/detail/detail?id=${id}` });
   },
