@@ -312,8 +312,10 @@ Page({
   onFeature(e) { this.setData({ feature: e.detail.value, featureDirty: true }); },
   onSellingPoint(e) { this.setData({ sellingPoint: e.detail.value }); },
   onScript(e) { this.setData({ script: e.detail.value, scriptDirty: true }); },
-  async draftVideoScript() {
+  /** mode: heuristic（默认即时）| polish（可选润色，慢） */
+  async draftVideoScript(opts) {
     if (this.data.scriptLoading) return;
+    const mode = (opts && opts.mode === 'polish') ? 'polish' : 'heuristic';
     this.setData({ scriptLoading: true });
     try {
       const r = await request({
@@ -324,9 +326,9 @@ Page({
           sellingPoint: this.data.sellingPoint || undefined,
           referenceAssetIds: (this.data.sel && this.data.sel.refs) || [],
           seconds: this.data.scriptSeconds || 10,
+          mode,
         },
       });
-      // beats 仍可能由后端返回供日志，UI 只展示可编辑 script
       this.setData({
         script: r.script || '',
         scriptSeconds: r.seconds || 10,
@@ -339,7 +341,10 @@ Page({
       wx.showToast({ title: (e && e.message) || '脚本生成失败', icon: 'none' });
     }
   },
-  refreshScript() { this.setData({ scriptDirty: false }); this.draftVideoScript(); },
+  /** 规则草稿：进入脚本步默认调用，即时 */
+  refreshScript() { this.setData({ scriptDirty: false }); this.draftVideoScript({ mode: 'heuristic' }); },
+  /** 可选润色：调 VISION LLM */
+  polishScript() { this.setData({ scriptDirty: false }); this.draftVideoScript({ mode: 'polish' }); },
   pickModel(e) {
     const id = e.currentTarget.dataset.id;
     this.setData({ 'sel.modelId': this.data.sel.modelId === id && this.data.tpl.model !== 'required' ? '' : id });
@@ -641,6 +646,16 @@ Page({
         url: `/api/products/${id}/promo/generate`, method: 'POST',
         data: payload,
       });
+      // 视频：建单即回素材列表/进度，不等 LKB；图仍可在向导结果页看槽位
+      if (this.data.mediaKind === 'video') {
+        const setId = (job && (job.setId || (job.payload && job.payload.setId))) || '';
+        const q = setId
+          ? `/pages/product/promo-gallery/promo-gallery?id=${id}&setId=${setId}`
+          : `/pages/product/promo-gallery/promo-gallery?id=${id}`;
+        wx.showToast({ title: '已提交，后台生成中', icon: 'none' });
+        wx.redirectTo({ url: q });
+        return;
+      }
       this.setData({
         job: Object.assign({}, job, {
           items: (job.items || []).map((it) => Object.assign({}, it, { albumSelected: false })),

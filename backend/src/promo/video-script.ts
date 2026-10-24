@@ -1,6 +1,7 @@
 /**
  * 档口宣传视频：短分镜脚本（中文，≤15s 单段）。
- * 吸收 beat 流思路；不克隆 novel-* 全链路。优先 VISION chat；失败启发式。
+ * 吸收 beat 流思路；不克隆 novel-* 全链路。
+ * 默认规则草稿（即时）；mode=polish 才走 VISION LLM。
  */
 import { Logger } from '@nestjs/common';
 import { VisionClient } from '../vision/vision.client';
@@ -135,11 +136,18 @@ async function llmDraft(
 
 export async function draftVideoBeatScript(
   vision: VisionClient | null | undefined,
-  opts: { feature?: string; sellingPoint?: string; seconds?: number },
+  opts: {
+    feature?: string;
+    sellingPoint?: string;
+    seconds?: number;
+    /** heuristic（默认，即时）| polish（可选润色，调 VISION） */
+    mode?: 'heuristic' | 'polish';
+  },
 ): Promise<VideoScriptDraft> {
   const seconds = clampDuration(Number(opts.seconds) || 10);
   const base = { feature: opts.feature, sellingPoint: opts.sellingPoint, seconds };
-  if (vision?.configured()) {
+  const mode = opts.mode === 'polish' ? 'polish' : 'heuristic';
+  if (mode === 'polish' && vision?.configured()) {
     const llm = await llmDraft(vision, base);
     if (llm) return llm;
   }

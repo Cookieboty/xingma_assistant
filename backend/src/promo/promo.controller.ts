@@ -53,6 +53,8 @@ export class PromoController {
       sellingPoint?: string;
       referenceAssetIds?: string[];
       seconds?: number;
+      mode?: 'heuristic' | 'polish';
+      polish?: boolean;
     },
   ) {
     return this.promo.draftVideoScript(u, id, body || {});

@@ -25,7 +25,7 @@
   </scroll-view>
 
   <view class="card muted" wx:if="{{loading && !list.length}}">加载中…</view>
-  <view class="card muted empty" wx:elif="{{!list.length}}">暂无进行中或失败的任务（已完成素材请看商品「宣传素材」）</view>
+  <view class="card muted empty" wx:elif="{{!list.length}}">暂无宣传生图/生视频任务</view>
 
   <view class="card job" wx:for="{{list}}" wx:key="id">
     <view class="job-row">

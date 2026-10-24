@@ -57,6 +57,7 @@ function enrichSet(s, prev) {
   const kind = s.kind || s.type || 'image';
   const isVideo = kind === 'video' || kind === 'promo_video';
   const videoUrl = isVideo ? ((items.find((i) => i && i.url) || {}).url || '') : '';
+  const thumbUrls = withUrl.slice(0, 4).map((i) => i.url);
   return Object.assign({}, s, {
     items,
     done,
@@ -64,6 +65,7 @@ function enrichSet(s, prev) {
     busy,
     isVideo,
     videoUrl,
+    thumbUrls,
     albumSelectedCount,
     albumAllSelected,
     albumSaveLabel: albumSelectedCount
@@ -84,10 +86,19 @@ function enrichSet(s, prev) {
   });
 }
 
+
+function syncDetailFromSets(sets, focusSetId, viewMode) {
+  if (viewMode !== 'detail' || !focusSetId) return { sets, detailSet: null };
+  const detailSet = (sets || []).find((s) => s.id === focusSetId) || null;
+  return { sets, detailSet, viewMode: detailSet ? 'detail' : 'list', focusSetId: detailSet ? focusSetId : '' };
+}
+
 Page({
   data: {
     id: '',
     focusSetId: '',
+    viewMode: 'list', // list | detail
+    detailSet: null,
     product: null,
     sets: [],
     loading: true,
@@ -96,7 +107,12 @@ Page({
   },
 
   onLoad(q) {
-    this.setData({ id: q.id || '', focusSetId: q.setId || '' });
+    const setId = q.setId || '';
+    this.setData({
+      id: q.id || '',
+      focusSetId: setId,
+      viewMode: setId ? 'detail' : 'list',
+    });
   },
   onShow() {
     if (this.data.id) this.load();
@@ -129,25 +145,23 @@ Page({
         setsRaw = both[1];
       }
       const list = Array.isArray(setsRaw) ? setsRaw : setsRaw.items || [];
+      const sets = list.map((s) => enrichSet(s, prevMap[s.id]));
       const focusSetId = this.data.focusSetId;
-      const sets = list.map((s) => {
-        const enriched = enrichSet(s, prevMap[s.id]);
-        if (focusSetId && s.id === focusSetId) {
-          enriched.expanded = true;
+      let viewMode = this.data.viewMode || 'list';
+      let detailSet = null;
+      if (viewMode === 'detail' && focusSetId) {
+        detailSet = sets.find((s) => s.id === focusSetId) || null;
+        if (!detailSet) {
+          // set 已删或不存在 → 回列表
+          viewMode = 'list';
         }
-        return enriched;
-      });
-      const anyBusy = sets.some((s) => s.busy);
-      this.setData({ product, sets, loading: false });
-      if (focusSetId) {
-        // 仅首次从详情深链进来时锁定展开；之后刷新保留用户操作
-        this.setData({ focusSetId: '' });
-        setTimeout(() => {
-          wx.pageScrollTo({ selector: `#set-${focusSetId}`, duration: 300 });
-        }, 200);
+      } else if (viewMode === 'detail' && this.data.detailSet) {
+        detailSet = sets.find((s) => s.id === this.data.detailSet.id) || null;
+        if (!detailSet) viewMode = 'list';
       }
+      const anyBusy = sets.some((s) => s.busy);
+      this.setData({ product, sets, loading: false, viewMode, detailSet, focusSetId: focusSetId || (detailSet && detailSet.id) || '' });
       if (anyBusy) {
-        // 安静轮询：只刷进度，沿用已展示图的签名 URL，避免闪烁
         this.timer = setTimeout(() => this.load({ silent: true }), 4000);
       }
     } catch (e) {
@@ -168,12 +182,18 @@ Page({
       },
     });
   },
-  toggleExpand(e) {
+  /** 列表点某一组 → 进入该组详情（下载/预览） */
+  openSetDetail(e) {
     const id = e.currentTarget.dataset.id;
-    const sets = this.data.sets.map((s) => (
-      s.id === id ? Object.assign({}, s, { expanded: !s.expanded }) : s
-    ));
-    this.setData({ sets });
+    if (!id) return;
+    const detailSet = (this.data.sets || []).find((s) => s.id === id) || null;
+    if (!detailSet) return;
+    this.setData({ viewMode: 'detail', focusSetId: id, detailSet });
+    try { wx.setNavigationBarTitle({ title: detailSet.templateName || '素材详情' }); } catch (err) { /* */ }
+  },
+  backToList() {
+    this.setData({ viewMode: 'list', focusSetId: '', detailSet: null });
+    try { wx.setNavigationBarTitle({ title: '宣传素材' }); } catch (err) { /* */ }
   },
 
   playVideo(e) {
@@ -242,7 +262,8 @@ Page({
       items[idx] = Object.assign({}, it, { albumSelected: !it.albumSelected });
       return enrichSet(Object.assign({}, s, { items, expanded: s.expanded }), null);
     });
-    this.setData({ sets });
+    const sync = syncDetailFromSets(sets, this.data.focusSetId, this.data.viewMode);
+    this.setData(Object.assign({ sets }, sync));
   },
 
   toggleSelectAllAlbum(e) {
@@ -255,7 +276,8 @@ Page({
         : it));
       return enrichSet(Object.assign({}, s, { items, expanded: s.expanded }), null);
     });
-    this.setData({ sets });
+    const sync = syncDetailFromSets(sets, this.data.focusSetId, this.data.viewMode);
+    this.setData(Object.assign({ sets }, sync));
   },
 
   async saveToAlbum(e) {
@@ -326,6 +348,10 @@ Page({
         method: 'DELETE',
       });
       wx.showToast({ title: '已删除', icon: 'none' });
+      if (this.data.viewMode === 'detail') {
+        this.setData({ viewMode: 'list', focusSetId: '', detailSet: null });
+        try { wx.setNavigationBarTitle({ title: '宣传素材' }); } catch (err) { /* */ }
+      }
       this.load();
     } catch (err) {
       wx.showToast({ title: err.message || '删除失败', icon: 'none' });
@@ -386,7 +412,8 @@ Page({
         percent: 5,
       }), null);
     });
-    this.setData({ actingId: setId, sets: optimistic, focusSetId: setId });
+    const sync = syncDetailFromSets(optimistic, setId, this.data.viewMode === 'detail' ? 'detail' : 'detail');
+    this.setData(Object.assign({ actingId: setId, sets: optimistic, focusSetId: setId, viewMode: 'detail' }, sync));
     wx.showLoading({ title: '提交中…', mask: true });
     try {
       await request({

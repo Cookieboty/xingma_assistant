@@ -160,12 +160,9 @@ Page({
       if (this.data.status) qs.push(`status=${this.data.status}`);
       if (this.data.type) qs.push(`type=${this.data.type}`);
       const res = await request({ url: `/api/jobs?${qs.join('&')}` });
-      // 业主任务：生图/视频成功结果已在「宣传素材」，默认不单列 succeeded（除非筛了「完成」）
-      // 仅 user-facing 类型；成功素材默认不单列（除非筛了「完成」）
-      let raw = (res.items || []).filter((j) => isUserVisibleJobType(j.type));
-      if (!this.data.status) {
-        raw = raw.filter((j) => j.status !== 'succeeded');
-      }
+      // 仅 user-facing（promo_image/promo_video）；「全部」含排队/在做/失败/最近完成，不藏 succeeded
+      // 系统 job（发品/分析图等）由后端 + 前端白名单共同隐藏
+      const raw = (res.items || []).filter((j) => isUserVisibleJobType(j.type));
       const items = raw.map(enrich);
       this.setData({ list: items, total: res.total || items.length, loading: false });
       const busy = items.some((j) => j.status === 'queued' || j.status === 'running');

@@ -562,6 +562,9 @@ export class PromoService implements OnModuleInit {
       sellingPoint?: string;
       referenceAssetIds?: string[];
       seconds?: number;
+      /** heuristic（默认）| polish（润色，调 LLM） */
+      mode?: 'heuristic' | 'polish';
+      polish?: boolean;
     },
   ) {
     const { product } = await this.productAssets(user, productId);
@@ -573,7 +576,9 @@ export class PromoService implements OnModuleInit {
     const seconds = clampDuration(
       Number(body?.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
     );
-    const draft = await draftVideoBeatScript(this.vision, { feature, sellingPoint, seconds });
+    const mode =
+      body?.mode === 'polish' || body?.polish === true ? 'polish' : 'heuristic';
+    const draft = await draftVideoBeatScript(this.vision, { feature, sellingPoint, seconds, mode });
     return {
       ...draft,
       feature,
