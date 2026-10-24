@@ -63,6 +63,8 @@
       <view class="pc-act-div"></view>
       <view class="pc-act" catchtap="goDetail" data-id="{{item.id}}">分享</view>
       <view class="pc-act-div"></view>
+      <view class="pc-act" catchtap="goMaterials" data-id="{{item.id}}">素材</view>
+      <view class="pc-act-div"></view>
       <view class="pc-act" catchtap="toggleSale" data-id="{{item.id}}" data-status="{{item.status}}">
         {{item.status==='on_sale'?'下架':'上架'}}
       </view>

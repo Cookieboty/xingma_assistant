@@ -48,58 +48,8 @@
     </view>
 
     <view class="card">
-      <view class="section-title">宣传素材</view>
-      <view class="muted small" wx:if="{{promoSetsLoading && !promoSets.length}}">加载素材组…</view>
-      <view class="muted small" wx:elif="{{!promoSets.length}}">暂无素材组，点下方进入素材列表新建</view>
-      <view class="set-list" wx:if="{{promoSets.length}}">
-        <view
-          class="set-card"
-          wx:for="{{promoSets}}"
-          wx:key="id"
-          data-id="{{item.id}}"
-          bindtap="goPromoSet"
-        >
-          <view class="set-thumb-wrap">
-            <block wx:if="{{item.isVideo}}">
-              <image wx:if="{{item.thumbUrl}}" src="{{item.thumbUrl}}" mode="aspectFill" class="set-thumb" />
-              <view wx:else class="set-thumb set-thumb-ph">{{item.typeShort}}</view>
-              <view class="video-badge">▶</view>
-            </block>
-            <block wx:elif="{{item.thumbCount >= 2}}">
-              <view class="collage collage-{{item.thumbCount}}">
-                <image
-                  wx:for="{{item.thumbUrls}}"
-                  wx:for-item="tu"
-                  wx:for-index="ti"
-                  wx:key="ti"
-                  src="{{tu}}"
-                  mode="aspectFill"
-                  class="collage-cell"
-                />
-              </view>
-            </block>
-            <block wx:else>
-              <image wx:if="{{item.thumbUrl}}" src="{{item.thumbUrl}}" mode="aspectFill" class="set-thumb" />
-              <view wx:else class="set-thumb set-thumb-ph">{{item.typeShort}}</view>
-            </block>
-            <view class="set-type">{{item.typeLabel}}</view>
-          </view>
-          <view class="set-body">
-            <view class="set-title">{{item.title}}</view>
-            <view class="set-meta muted small">
-              <text class="st {{item.statusClass}}">{{item.statusLabel}}</text>
-              <text wx:if="{{item.metaText}}"> · {{item.metaText}}</text>
-            </view>
-          </view>
-          <view class="set-arrow muted">›</view>
-        </view>
-      </view>
-      <view class="btn-ghost" style="margin-top:20rpx;" bindtap="goPromoMaterials">新建素材</view>
-    </view>
-
-    <view class="card">
       <view class="section-title">本商品任务</view>
-      <view class="muted small">进行中 / 失败的生图·生视频·发品；点开看该次任务。已完成素材见上方「宣传素材」</view>
+      <view class="muted small">进行中 / 失败的生图·生视频·发品；点开看该次任务。已完成素材请从商品列表「素材」进入</view>
       <view class="muted small" wx:if="{{productJobsLoading && !productJobs.length}}">加载任务…</view>
       <view class="muted small" wx:elif="{{!productJobs.length}}">暂无进行中或失败任务</view>
       <view class="job-mini" wx:for="{{productJobs}}" wx:key="id" data-id="{{item.id}}" data-kind="{{item.kind}}" data-set-id="{{item.setId}}" bindtap="goJobDetail">

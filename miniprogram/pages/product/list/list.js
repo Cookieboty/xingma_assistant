@@ -316,6 +316,12 @@ Page({
   goDetail(e) {
     wx.navigateTo({ url: `/pages/product/detail/detail?id=${e.currentTarget.dataset.id}` });
   },
+  /** 宣传素材（下载/保存）：与分享解耦，直达素材库 */
+  goMaterials(e) {
+    const id = e.currentTarget.dataset.id;
+    if (!id) return;
+    wx.navigateTo({ url: `/pages/product/promo-gallery/promo-gallery?id=${id}` });
+  },
   goEdit(e) {
     const id = e.currentTarget.dataset.id;
     wx.navigateTo({

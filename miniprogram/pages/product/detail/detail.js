@@ -187,7 +187,7 @@ Page({
   },
   /**
    * 业主「本商品任务」：进行中/失败的 promo_set（生图/视频）+ 发品 job。
-   * 不把框架层并行/重生 job 当独立任务列出；成功素材已在「宣传素材」。
+   * 不把框架层并行/重生 job 当独立任务列出；成功素材在列表「素材」→ 宣传素材页。
    */
   async loadProductJobs(productId) {
     if (!productId) return;
@@ -293,29 +293,6 @@ Page({
       wx.hideLoading();
       wx.showToast({ title: (e && e.message) || '保存失败', icon: 'none' });
     }
-  },
-  /** 点某组 → 素材列表并展开该组详情 */
-  goPromoSet(e) {
-    const setId = e.currentTarget.dataset.id;
-    if (!setId) return;
-    wx.navigateTo({
-      url: `/pages/product/promo-gallery/promo-gallery?id=${this.data.id}&setId=${setId}`,
-    });
-  },
-  /** 新建素材：先选图片/视频，再直达对应新建页（绕过素材列表中间页） */
-  goPromoMaterials() {
-    const id = this.data.id;
-    if (!id) return;
-    wx.showActionSheet({
-      itemList: ['新建图片', '新建视频'],
-      success: (res) => {
-        if (res.tapIndex === 0) {
-          wx.navigateTo({ url: `/pages/product/promo/promo?id=${id}&type=image` });
-        } else if (res.tapIndex === 1) {
-          wx.navigateTo({ url: `/pages/product/promo/promo?id=${id}&type=video` });
-        }
-      },
-    });
   },
   goEdit() {
     wx.navigateTo({ url: `/pages/product/edit/edit?id=${this.data.id}` });
