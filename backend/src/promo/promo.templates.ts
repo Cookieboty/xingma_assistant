@@ -4,7 +4,7 @@
  */
 
 export type Platform = 'moments' | 'xiaohongshu';
-export type PromoStep = 'reference' | 'feature' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count';
+export type PromoStep = 'reference' | 'feature' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count' | 'style_keywords';
 
 export interface Option {
   id: string;
@@ -48,6 +48,8 @@ export interface PromptContext {
   poseText?: string;
   /** 用户自由描述的场景/背景（优先于 scene.prompt） */
   sceneText?: string;
+  /** 风格参考模板：用户编辑后的中文软关键词（不画进图） */
+  styleKeywordsText?: string;
   colors?: string[];
   index: number;
   total: number;
@@ -71,6 +73,13 @@ export interface PromoTemplate {
   buildPrompt: (c: PromptContext) => string;
   /** image（默认）| video：前端与 generate 分流 */
   mediaKind?: 'image' | 'video';
+  /**
+   * 覆盖默认 STYLE_REF_RULE（如风格参考模板要求必传样例）。
+   * 缺省则用全局 STYLE_REF_RULE（min:0 可选）。
+   */
+  styleRef?: { min: number; max: number; hint: string };
+  /** style_ref 模板：风格图为硬参考（构图光影），仍低于服装 KEEP */
+  styleRefPrimary?: boolean;
 }
 
 export const SIZES: Record<string, SizeOption> = {
@@ -117,22 +126,30 @@ export function buildStyleRefPrompt(opts: {
   garmentRefCount: number;
   styleRefCount: number;
   strength?: StyleStrength | string | null;
+  /** 风格参考专用模板：样例为构图/光影硬参考，但仍低于 KEEP */
+  primary?: boolean;
 }): string {
   const n = Math.max(0, Number(opts.styleRefCount) || 0);
   if (!n) return '';
   const g = Math.max(1, Number(opts.garmentRefCount) || 1);
-  const raw = String(opts.strength || 'medium');
+  const raw = String(opts.strength || (opts.primary ? 'strong' : 'medium'));
   const strength: StyleStrength =
     raw === 'weak' || raw === 'strong' ? raw : 'medium';
-  return [
+  const primary = !!opts.primary;
+  const lines = [
     `Additional style reference image(s) are provided AFTER the first ${g} garment reference image(s) (${n} style-only image(s)).`,
-    'Use style references ONLY for lighting, color grading, camera angle, framing, depth of field and lifestyle mood.',
-    'Do NOT copy clothing, garment cut, knit patterns, faces or person identity, brand logos, trademarks, watermarks or text from the style references.',
+    primary
+      ? 'These style images are the PRIMARY hard references for composition, camera framing, lighting, color grading, depth of field and lifestyle mood — match them closely.'
+      : 'Use style references ONLY for lighting, color grading, camera angle, framing, depth of field and lifestyle mood.',
+    'Do NOT copy clothing, garment cut, knit patterns, yarn color, faces or person identity, brand logos, trademarks, watermarks or text from the style references.',
     'If a preset model was selected, keep that model identity; never clone faces from style samples.',
-    'Priority when conflicting: garment KEEP > template / pose / scene text > style samples.',
+    primary
+      ? 'Priority when conflicting: garment KEEP (product refs) > soft keyword text > style sample composition/lighting. Never let style samples override garment identity.'
+      : 'Priority when conflicting: garment KEEP > template / pose / scene text > style samples.',
     STYLE_STRENGTH_LINE[strength],
     'The knit garment must still match the garment reference exactly (KEEP).',
-  ].join(' ');
+  ];
+  return lines.join(' ');
 }
 
 /** 下发给前端的风格样例规则（所有模板共用；非独立步骤） */
@@ -345,6 +362,46 @@ export const TEMPLATES: PromoTemplate[] = [
   },
 
   {
+    id: 'style_ref',
+    name: '风格参考',
+    desc: '照着你找的样例出图：风格样例必传；衣服仍以商品图为准；可改自动提取的关键词',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'portrait',
+    sizes: ['portrait', 'square'],
+    model: 'optional',
+    poses: [],
+    scenes: [],
+    sceneLabel: '氛围',
+    reference: { prefer: ['main', 'detail'], min: 1, max: 2, hint: '选 1-2 张商品主图/细节图（衣服保真）' },
+    count: { min: 1, max: 4, default: 2 },
+    steps: ['reference', 'style_keywords', 'model', 'count'],
+    styleRef: {
+      min: 1,
+      max: 4,
+      hint: '必传：上传你要照着出的成片样例（1-4 张）；衣服仍以商品图为准，不抄样例人脸/品牌',
+    },
+    styleRefPrimary: true,
+    buildPrompt: (c) => {
+      const hasModel = !!c.model;
+      const kw = String(c.styleKeywordsText || '').trim();
+      return [
+        'Fashion e-commerce photograph matching the style reference image(s) for composition, lighting, color grading, framing and mood.',
+        hasModel
+          ? `${c.model!.prompt} wears the exact knit garment from the garment reference image(s).`
+          : 'Feature the exact knit garment from the garment reference image(s); include a person only if the style samples clearly show one and soft keywords require it.',
+        kw
+          ? `Soft merchant style keywords (Chinese, follow intent for scene/mood/shot, do not render as text): ${kw}.`
+          : 'Infer scene, shot type and mood primarily from the style reference image(s).',
+        'Pair with simple neutral bottoms that do not distract when a model is present.',
+        c.total > 1
+          ? `Variation ${c.index + 1} of ${c.total}: keep the same style language; add natural micro-variation so shots are not clones.`
+          : '',
+        FEATURE(c.feature), KEEP, PHOTOREAL, NO_TEXT,
+      ].filter(Boolean).join(' ');
+    },
+  },
+
+  {
     id: 'product_showcase_video',
     name: '商品竖版短视频',
     desc: '约 15 秒竖屏短视频：商品参考图驱动镜头运动与展示（一期纯跑通，暂不上模特出镜）',
@@ -425,10 +482,14 @@ export function listTemplatesByKind(kind: 'image' | 'video' | 'all' = 'image') {
 /** 给前端的纯数据（去掉函数） */
 export function templateDto(t: PromoTemplate) {
   const { buildPrompt, ...rest } = t;
+  const styleRef = t.styleRef
+    ? { min: t.styleRef.min, max: t.styleRef.max, hint: t.styleRef.hint }
+    : STYLE_REF_RULE;
   return {
     ...rest,
     mediaKind: t.mediaKind || (isVideoTemplate(t) ? 'video' : 'image'),
     sizeOptions: t.sizes.map((s) => SIZES[s]).filter(Boolean),
-    styleRef: STYLE_REF_RULE,
+    styleRef,
+    styleRefPrimary: !!t.styleRefPrimary,
   };
 }

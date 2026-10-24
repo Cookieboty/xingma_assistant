@@ -10,6 +10,7 @@ import { ProductsService } from '../products/products.service';
 import { ImageGenClient } from './image-gen.client';
 import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind } from './promo.templates';
 import { enrichPoseSceneText } from './pose-scene-enrich';
+import { analyzeStyleRefs, styleKeywordsToPromptZh, StyleKeywordsZh } from './style-ref-analyze';
 import { prepareRefsForCategory, buildPromptZh } from './garment-ref-prepare';
 import type { ProductRefAnalysis, GarmentRefKind } from './garment-ref-prepare';
 import { VisionClient } from '../vision/vision.client';
@@ -50,6 +51,13 @@ export interface GenerateInput {
   styleRefObjectKeys?: string[];
   /** 风格强弱：weak / medium / strong；默认 medium；无风格图时忽略 */
   styleStrength?: StyleStrength;
+  /**
+   * 风格参考模板：用户编辑后的关键词（中文结构或扁平）。
+   * 留痕进 params；软提示进 promptZh / buildPrompt。
+   */
+  styleKeywords?: Partial<StyleKeywordsZh> | null;
+  /** 风格关键词自由文本（覆盖结构化字段拼句） */
+  styleKeywordsText?: string;
   /** 视频时长秒数（约 15）；仅 mediaKind=video */
   seconds?: number;
 }
@@ -299,6 +307,33 @@ export class PromoService implements OnModuleInit {
     });
   }
 
+  /**
+   * 风格样例识图 → 可编辑中文关键词。失败返回空结构（仍可生图）。
+   * body.styleRefObjectKeys 须已上传。
+   */
+  async analyzeStyleRefsApi(
+    user: AuthContext,
+    productId: string,
+    body: { styleRefObjectKeys?: string[] },
+  ) {
+    await this.products.getDetail(user, productId);
+    const keys = this.normalizeStyleRefs(user, body?.styleRefObjectKeys);
+    if (!keys.length) {
+      throw new BadRequestException('请先上传至少 1 张风格样例');
+    }
+    const locals: string[] = [];
+    for (const k of keys) {
+      const local = await this.ensureLocal(k);
+      if (local) locals.push(local);
+    }
+    const result = await analyzeStyleRefs(this.vision, locals);
+    return {
+      ...result,
+      styleRefObjectKeys: keys,
+      analyzed: result.via === 'llm',
+    };
+  }
+
   async generate(user: AuthContext, productId: string, input: GenerateInput) {
     const tpl = findTemplate(input?.templateId);
     if (!tpl) throw new BadRequestException('未知模板');
@@ -335,6 +370,14 @@ export class PromoService implements OnModuleInit {
     }
     const styleRefObjectKeys = this.normalizeStyleRefs(user, input.styleRefObjectKeys);
     const styleStrength = this.normalizeStyleStrength(input.styleStrength);
+    const styleRefMin = tpl.styleRef?.min ?? 0;
+    if (styleRefMin > 0 && styleRefObjectKeys.length < styleRefMin) {
+      throw new BadRequestException(`「${tpl.name}」至少上传 ${styleRefMin} 张风格样例`);
+    }
+    const styleKeywordsText = styleKeywordsToPromptZh(
+      input.styleKeywords,
+      input.styleKeywordsText,
+    );
     const caption = this.captionFor(product, { ...input, colors: colorsIn.length ? colorsIn : input.colors, count }, tpl.id);
     const params = {
       templateId: tpl.id,
@@ -352,6 +395,8 @@ export class PromoService implements OnModuleInit {
       // 风格样例整组共用（含 multi_color）；空数组不写也等价现网
       styleRefObjectKeys,
       styleStrength: styleRefObjectKeys.length ? styleStrength : undefined,
+      styleKeywords: input.styleKeywords || undefined,
+      styleKeywordsText: styleKeywordsText || undefined,
     };
 
     const isPartialRegen = Array.isArray(input.regenIndexes) && input.regenIndexes.length > 0;
@@ -1013,6 +1058,13 @@ export class PromoService implements OnModuleInit {
     if (refIds.length < tpl.reference.min || refIds.length > tpl.reference.max) {
       throw new Error(`该模板需选择 ${tpl.reference.min}-${tpl.reference.max} 张参考图`);
     }
+    {
+      const styleMin = tpl.styleRef?.min ?? 0;
+      const styleKeysEarly = this.normalizeStyleRefs(user, input.styleRefObjectKeys);
+      if (styleMin > 0 && styleKeysEarly.length < styleMin) {
+        throw new Error(`「${tpl.name}」至少需要 ${styleMin} 张风格样例`);
+      }
+    }
     const byId = new Map(assets.map((a) => [a.id, a]));
     const refs = refIds.map((id) => byId.get(id));
     if (refs.some((r) => !r)) throw new Error('参考图不属于该商品');
@@ -1127,6 +1179,10 @@ export class PromoService implements OnModuleInit {
       const colorsForPrompt = isMultiColor
         ? [colorsAll[i]].filter(Boolean)
         : colorsAll;
+      const styleKwText = styleKeywordsToPromptZh(
+        (input as any).styleKeywords,
+        String((input as any).styleKeywordsText || '').trim() || undefined,
+      );
       items.push({
         index: i,
         status: 'pending',
@@ -1139,6 +1195,7 @@ export class PromoService implements OnModuleInit {
           scene,
           poseText: poseText || undefined,
           sceneText: sceneText || undefined,
+          styleKeywordsText: styleKwText || undefined,
           colors: colorsForPrompt,
           index: i,
           total: count,
@@ -1236,13 +1293,22 @@ export class PromoService implements OnModuleInit {
     });
 
     // 将硬约束 + 参考图角色写入每张待生图 prompt；中文原话成对留痕
-    const promptZhBase = buildPromptZh({
-      feature,
-      poseText: poseTextZh,
-      sceneText: sceneTextZh,
-      garmentDescZh: garmentPrep.garmentDescZh,
-      refRolesPromptZh: garmentPrep.refRolesPromptZh,
-    });
+    const styleKwZhForTrace = styleKeywordsToPromptZh(
+      (input as any).styleKeywords,
+      String((input as any).styleKeywordsText || '').trim() || undefined,
+    );
+    const promptZhBase = [
+      buildPromptZh({
+        feature,
+        poseText: poseTextZh,
+        sceneText: sceneTextZh,
+        garmentDescZh: garmentPrep.garmentDescZh,
+        refRolesPromptZh: garmentPrep.refRolesPromptZh,
+      }),
+      styleKwZhForTrace ? `风格关键词：${styleKwZhForTrace}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
     for (const it of items) {
       if (it.status === 'done' && it.objectKey) continue;
       const enrichedPrompt = [it.prompt, garmentPrep.garmentConstraintEn, garmentPrep.refRolesPromptEn]
@@ -1310,6 +1376,7 @@ export class PromoService implements OnModuleInit {
             garmentRefCount: garmentRefs.length,
             styleRefCount: stylePaths.length,
             strength: styleStrength,
+            primary: !!tpl.styleRefPrimary || tpl.id === 'style_ref',
           });
           const prompt = styleBlock ? `${it.prompt} ${styleBlock}` : it.prompt;
           if (styleBlock) it.prompt = prompt;
@@ -1433,9 +1500,24 @@ export class PromoService implements OnModuleInit {
           ? garmentKeysForExt
           : refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
       const garmentUrls = keys.map((k) => this.oss.publicUrl(k)).filter((u) => /^https?:\/\//i.test(u));
-      const instruction = [poseTextZh, sceneTextZh, feature].filter(Boolean).join('；').slice(0, 800);
+      const styleUrls = styleKeysRaw
+        .map((k) => this.oss.publicUrl(k))
+        .filter((u) => /^https?:\/\//i.test(u));
+      // 外部 Agent 仅 garmentImages：成衣在前、风格样例在后（合计 ≤9），instruction 写明角色
+      const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
+      const styleKwZh = styleKeywordsToPromptZh(
+        (input as any).styleKeywords,
+        String((input as any).styleKeywordsText || '').trim() || undefined,
+      );
+      const styleNote = styleUrls.length
+        ? `前 ${Math.min(garmentUrls.length, combinedImages.length)} 张是成衣参考（保真），后 ${Math.min(styleUrls.length, Math.max(0, combinedImages.length - garmentUrls.length))} 张是风格样例（只学构图光影氛围，禁止抄样例衣服/人脸/品牌logo）`
+        : '';
+      const instruction = [poseTextZh, sceneTextZh, feature, styleKwZh, styleNote]
+        .filter(Boolean)
+        .join('；')
+        .slice(0, 800);
       const ext = await this.externalOutfit.invoke({
-        garmentImages: garmentUrls,
+        garmentImages: combinedImages.length ? combinedImages : garmentUrls,
         instruction: instruction || undefined,
       });
       await opts?.appendEvent?.('external_outfit', ext.ok ? '外部 Agent 成功' : '外部 Agent 失败', {

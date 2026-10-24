@@ -42,6 +42,16 @@ export class PromoController {
     return this.promo.generate(u, id, body);
   }
 
+  /** 风格样例识图 → 可编辑中文关键词（风格参考模板） */
+  @Post('products/:id/promo/analyze-style-refs')
+  analyzeStyleRefs(
+    @AuthUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body() body: { styleRefObjectKeys?: string[] },
+  ) {
+    return this.promo.analyzeStyleRefsApi(u, id, body || {});
+  }
+
   /** 宣传图组列表（UI 主入口） */
   @Get('products/:id/promo/sets')
   sets(@AuthUser() u: AuthContext, @Param('id') id: string) {

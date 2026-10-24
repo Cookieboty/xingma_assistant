@@ -38,10 +38,10 @@
       </view>
       <view class="muted small">点选切换勾选（可多张）· 长按预览</view>
 
-      <!-- 风格样例（可选）：卡片内次级区，非独立步骤；视频一期不做 -->
+      <!-- 风格样例：多数模板可选；风格参考模板必传。视频一期不做 -->
       <view class="style-ref-block" wx:if="{{mediaKind !== 'video'}}">
-        <view class="sub-label">风格样例（可选）</view>
-        <view class="section-hint">{{tpl.styleRef.hint || '上传你喜欢的成片风格，系统尽量学构图和氛围；衣服仍以商品图为准'}} · {{styleRefs.length}}/{{styleRefMax}}</view>
+        <view class="sub-label">{{tpl.styleRef.min > 0 ? '风格样例（必传）' : '风格样例（可选）}}</view>
+        <view class="section-hint">{{tpl.styleRef.hint || '上传你喜欢的成片风格，系统尽量学构图和氛围；衣服仍以商品图为准'}} · {{styleRefs.length}}/{{tpl.styleRef.max || styleRefMax}}</view>
         <view class="grid">
           <view class="cell style-cell" wx:for="{{styleRefs}}" wx:key="index" data-index="{{index}}">
             <image src="{{item.url}}" mode="aspectFill" lazy-load data-url="{{item.url}}" bindtap="previewStyleRef" />
@@ -159,6 +159,31 @@
           >{{voiceListening && voiceTarget==='scene' ? '松手' : '按住说话'}}</view>
         </view>
       </block>
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'style_keywords'}}">
+      <view class="section-title">风格关键词</view>
+      <view class="section-hint">根据风格样例自动提取，可改可删；分析失败可留空，仍按样例图生成</view>
+      <view class="muted small" wx:if="{{styleAnalyzing}}">正在分析风格样例…</view>
+      <view class="chips" wx:if="{{styleKeywordChips.length}}">
+        <text
+          class="chip"
+          wx:for="{{styleKeywordChips}}"
+          wx:key="*this"
+          data-name="{{item}}"
+          bindtap="toggleStyleChip"
+        >{{item}}</text>
+      </view>
+      <textarea
+        class="textarea"
+        style="height:220rpx;margin-top:16rpx;"
+        maxlength="500"
+        placeholder="场景 / 有无模特 / 景别 / 氛围 / 背景…可自由改"
+        value="{{styleKeywordsText}}"
+        bindinput="onStyleKeywordsText"
+      />
+      <view class="link" style="margin-top:12rpx;" bindtap="reAnalyzeStyle">重新分析样例</view>
+      <view class="muted small" style="margin-top:8rpx;">衣服始终以商品参考图为准；不会抄样例人脸或品牌 logo。</view>
     </view>
 
     <view class="card" wx:if="{{stepKey === 'count'}}">

@@ -279,6 +279,14 @@ tenants/{tenantId}/products/{styleNo}/promo/{legacyJobId|setJobId}/01.png
 
 ---
 
+## 13. 专用模板「风格参考」`style_ref`（2026-10）
+
+与本文「全模板可选风格样例」并存，不替换：
+
+- 模板 id `style_ref`：`styleRef.min=1` 必传样例；步骤含 `style_keywords`；`styleRefPrimary` 加强构图硬约束。
+- `POST /api/products/:id/promo/analyze-style-refs` 轻量 vision → 可编辑中文关键词；失败空结果仍可生成。
+- 其它五模板行为不变（风格样例仍可选）。
+
 ## 实现备注（研发）
 
 - 空 `styleRefObjectKeys` / 省略字段：generate 路径与改动前等价。  

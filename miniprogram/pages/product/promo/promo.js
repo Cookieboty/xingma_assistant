@@ -13,7 +13,8 @@ const STYLE_STRENGTH_OPTS = [
 
 const STEP_NAMES = {
   reference: '选参考图', colors: '选颜色', feature: '商品特征', model: '选模特',
-  pose: '动作 / 呈现', scene: '场景 / 背景', pose_scene: '姿势与场景', count: '张数与尺寸',
+  pose: '动作 / 呈现', scene: '场景 / 背景', pose_scene: '姿势与场景',
+  style_keywords: '风格关键词', count: '张数与尺寸',
 };
 
 function matchPreset(options, text) {
@@ -38,6 +39,10 @@ Page({
     styleStrengthOpts: STYLE_STRENGTH_OPTS,
     styleRefMax: STYLE_REF_MAX,
     styleUploading: false,
+    styleKeywords: { scene: '', hasPerson: null, personVibe: '', shotType: '', mood: '', background: '', keywords: [], promptZh: '', suggestedModelId: null },
+    styleKeywordsText: '',
+    styleAnalyzing: false,
+    styleKeywordChips: [],
     job: null, submitting: false, saving: false, singlePoseScene: false,
     voiceTarget: '', voiceListening: false, voiceHint: '按住说话',
     savingAlbum: false, albumSelectedCount: 0, albumAllSelected: false, albumSaveLabel: '保存到相册',
@@ -103,6 +108,10 @@ Page({
       styleRefs: [],
       styleStrength: 'medium',
       styleUploading: false,
+      styleKeywords: { scene: '', hasPerson: null, personVibe: '', shotType: '', mood: '', background: '', keywords: [], promptZh: '', suggestedModelId: null },
+      styleKeywordsText: '',
+      styleAnalyzing: false,
+      styleKeywordChips: [],
       assets: this.data.assets.map((a) => Object.assign(a, { checked: false })),
       colors: this.data.colors.map((c) => Object.assign(c, { checked: false })),
     });
@@ -125,14 +134,31 @@ Page({
         this.setData({ featureDirty: false });
       } catch (e) { wx.showToast({ title: '特征保存失败', icon: 'none' }); }
     }
+    const leavingRef = this.data.stepKey === 'reference';
+    const tpl = this.data.tpl || {};
+    const needAnalyze = leavingRef && (tpl.id === 'style_ref' || (tpl.styleRef && tpl.styleRef.min > 0));
     if (this.data.stepIdx >= this.data.steps.length - 1) return this.submit();
     const i = this.data.stepIdx + 1;
-    this.setData({ stepIdx: i, stepKey: this.data.steps[i] });
+    const nextKey = this.data.steps[i];
+    this.setData({ stepIdx: i, stepKey: nextKey });
+    if (needAnalyze && nextKey === 'style_keywords') {
+      this.analyzeStyleRefs();
+    }
   },
   validate(k) {
     const { tpl, sel } = this.data;
     if (k === 'reference' && (sel.refs.length < tpl.reference.min || sel.refs.length > tpl.reference.max)) {
       return `请选择 ${tpl.reference.min}-${tpl.reference.max} 张参考图`;
+    }
+    if (k === 'reference') {
+      const styleMin = (tpl.styleRef && tpl.styleRef.min) || 0;
+      const styleReady = (this.data.styleRefs || []).filter((x) => x && x.objectKey && !x.uploading);
+      if (styleMin > 0 && styleReady.length < styleMin) {
+        return `请至少上传 ${styleMin} 张风格样例`;
+      }
+      if (this.data.styleUploading || (this.data.styleRefs || []).some((x) => x.uploading)) {
+        return '风格样例上传中…';
+      }
     }
     if (k === 'colors') {
       if (tpl.id === 'multi_color') {
@@ -177,11 +203,12 @@ Page({
   /** 风格样例：选图并上传（不进 coverMediaIds / 商品轮播） */
   addStyleRef() {
     if (this.data.styleUploading) return;
+    const max = ((this.data.tpl && this.data.tpl.styleRef && this.data.tpl.styleRef.max) || STYLE_REF_MAX);
     const have = (this.data.styleRefs || []).length;
-    if (have >= STYLE_REF_MAX) {
-      return wx.showToast({ title: `最多 ${STYLE_REF_MAX} 张`, icon: 'none' });
+    if (have >= max) {
+      return wx.showToast({ title: `最多 ${max} 张`, icon: 'none' });
     }
-    const remain = STYLE_REF_MAX - have;
+    const remain = max - have;
     wx.chooseMedia({
       count: remain,
       mediaType: ['image'],
@@ -204,10 +231,10 @@ Page({
           accepted.push(f);
         }
         if (!accepted.length) return;
-        const room = STYLE_REF_MAX - (this.data.styleRefs || []).length;
+        const room = max - (this.data.styleRefs || []).length;
         const batch = accepted.slice(0, room);
         if (accepted.length > room) {
-          wx.showToast({ title: `最多 ${STYLE_REF_MAX} 张`, icon: 'none' });
+          wx.showToast({ title: `最多 ${max} 张`, icon: 'none' });
         }
         this.setData({ styleUploading: true });
         try {
@@ -389,6 +416,76 @@ Page({
   countPlus() { if (this.data.sel.count < this.data.tpl.count.max) this.setData({ 'sel.count': this.data.sel.count + 1 }); },
   pickSize(e) { this.setData({ 'sel.sizeId': e.currentTarget.dataset.id }); },
 
+  async analyzeStyleRefs() {
+    const keys = (this.data.styleRefs || []).map((x) => x && x.objectKey).filter(Boolean);
+    if (!keys.length) {
+      this.setData({
+        styleKeywordsText: '',
+        styleKeywordChips: [],
+        styleAnalyzing: false,
+      });
+      return;
+    }
+    this.setData({ styleAnalyzing: true });
+    try {
+      const r = await request({
+        url: `/api/products/${this.data.id}/promo/analyze-style-refs`,
+        method: 'POST',
+        data: { styleRefObjectKeys: keys },
+      });
+      const chips = [];
+      if (r.scene) chips.push(r.scene);
+      if (r.hasPerson === true) chips.push('有模特');
+      if (r.hasPerson === false) chips.push('无人');
+      if (r.personVibe) chips.push(r.personVibe);
+      if (r.shotType) chips.push(r.shotType);
+      if (r.mood) chips.push(r.mood);
+      if (r.background) chips.push(r.background);
+      (r.keywords || []).forEach((k) => { if (k && chips.indexOf(k) < 0) chips.push(k); });
+      const patch = {
+        styleKeywords: {
+          scene: r.scene || '',
+          hasPerson: r.hasPerson == null ? null : !!r.hasPerson,
+          personVibe: r.personVibe || '',
+          shotType: r.shotType || '',
+          mood: r.mood || '',
+          background: r.background || '',
+          keywords: r.keywords || [],
+          promptZh: r.promptZh || '',
+          suggestedModelId: r.suggestedModelId || null,
+        },
+        styleKeywordsText: r.promptZh || chips.join('；'),
+        styleKeywordChips: chips,
+        styleAnalyzing: false,
+      };
+      // 若分析认为有人且未选手模，预填建议模特（可改）
+      if (r.suggestedModelId && !(this.data.sel && this.data.sel.modelId)) {
+        patch['sel.modelId'] = r.suggestedModelId;
+      }
+      this.setData(patch);
+      if (!(r.analyzed || r.via === 'llm')) {
+        wx.showToast({ title: '未识别出关键词，可手填或直接生成', icon: 'none' });
+      }
+    } catch (e) {
+      this.setData({ styleAnalyzing: false });
+      wx.showToast({ title: (e && e.message) || '分析失败，可手填关键词', icon: 'none' });
+    }
+  },
+  onStyleKeywordsText(e) {
+    this.setData({ styleKeywordsText: e.detail.value });
+  },
+  toggleStyleChip(e) {
+    const name = e.currentTarget.dataset.name;
+    if (!name) return;
+    let text = String(this.data.styleKeywordsText || '');
+    const parts = text.split(/[；;、,，]/).map((s) => s.trim()).filter(Boolean);
+    const i = parts.indexOf(name);
+    if (i >= 0) parts.splice(i, 1);
+    else parts.push(name);
+    this.setData({ styleKeywordsText: parts.join('；') });
+  },
+  reAnalyzeStyle() { this.analyzeStyleRefs(); },
+
   // ---- 提交与进度 ----
   /** 合并轮询结果时保留相册勾选状态 */
   mergeJobAlbumSel(job) {
@@ -478,7 +575,26 @@ Page({
       };
       if (this.data.mediaKind !== 'video' && styleRefObjectKeys.length) {
         payload.styleRefObjectKeys = styleRefObjectKeys;
-        payload.styleStrength = this.data.styleStrength || 'medium';
+        payload.styleStrength = this.data.styleStrength || (tpl.id === 'style_ref' ? 'strong' : 'medium');
+      }
+      if (tpl.id === 'style_ref' || (tpl.styleRef && tpl.styleRef.min > 0)) {
+        if (!styleRefObjectKeys.length) {
+          wx.showToast({ title: '请上传风格样例', icon: 'none' });
+          return;
+        }
+        const sk = this.data.styleKeywords || {};
+        payload.styleKeywords = {
+          scene: sk.scene || '',
+          hasPerson: sk.hasPerson,
+          personVibe: sk.personVibe || '',
+          shotType: sk.shotType || '',
+          mood: sk.mood || '',
+          background: sk.background || '',
+          keywords: sk.keywords || [],
+          promptZh: this.data.styleKeywordsText || sk.promptZh || '',
+          suggestedModelId: sk.suggestedModelId || null,
+        };
+        payload.styleKeywordsText = this.data.styleKeywordsText || '';
       }
       const job = await request({
         url: `/api/products/${id}/promo/generate`, method: 'POST',

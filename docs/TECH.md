@@ -191,7 +191,7 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 详情页缩略：`GET …/promo/sets` 取 thumb 展示，点击带 setId 进 gallery。
 
-风格样例（已实现）：向导「选参考图」卡内可选上传 0～4 张 + 强弱弱/中/强；API `styleRefObjectKeys` / `styleStrength`；见 [PROMO_REF_IMAGE_DESIGN.md](./PROMO_REF_IMAGE_DESIGN.md)。
+风格样例（已实现）：向导「选参考图」卡内可选上传 0～4 张 + 强弱弱/中/强；API `styleRefObjectKeys` / `styleStrength`；见 [PROMO_REF_IMAGE_DESIGN.md](./PROMO_REF_IMAGE_DESIGN.md)。 另有专用模板 `style_ref`（风格样例必传 + 关键词识图）；见 [生图模板设计.md](./生图模板设计.md)。
 
 ### 4.3 限制分享 / 公开分享
 
@@ -229,7 +229,7 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 | MySQL | `DB_ENABLED` `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` `DB_NAME` |
 | Redis（预留） | `REDIS_HOST` `REDIS_PORT` `REDIS_PASSWORD` |
 | JWT | `JWT_SECRET` `JWT_EXPIRES_IN` |
-| OSS | `OSS_PROVIDER` `OSS_REGION` `OSS_ENDPOINT` `OSS_BUCKET` `OSS_PREFIX` `OSS_ACCESS_KEY_ID` `OSS_ACCESS_KEY_SECRET`；签名过期 `OSS_SIGNED_URL_EXPIRES`（默认 3600，兼容 `OSS_SIGNED_TTL`）；对象 ACL `OSS_OBJECT_ACL=private`；可选 `MEDIA_PUBLIC_BASE` `MEDIA_SERVE_LOCAL` `OSS_PUBLIC_READ`；兼容别名 `ALIYUN_*` |
+| OSS | `OSS_PROVIDER` `OSS_REGION` `OSS_ENDPOINT` `OSS_BUCKET` `OSS_PREFIX` `OSS_ACCESS_KEY_ID` `OSS_ACCESS_KEY_SECRET`；签名过期 `OSS_SIGNED_URL_EXPIRES`（默认 3600，兼容 `OSS_SIGNED_TTL`）；对象 ACL `OSS_OBJECT_ACL=public-read`（当前）；`OSS_PUBLIC_READ=1` 返回永久公网 URL；可选 `MEDIA_PUBLIC_BASE` `MEDIA_SERVE_LOCAL`；兼容别名 `ALIYUN_*` |
 | 生图 | `IMAGE_GEN_BASE_URL` `IMAGE_GEN_API_KEY` `IMAGE_GEN_MODEL` `IMAGE_GEN_REF_MODE` `IMAGE_GEN_CONCURRENCY` `IMAGE_GEN_TIMEOUT_MS` |
 | 视觉 | `VISION_BASE_URL` `VISION_API_KEY` `VISION_MODEL` `VISION_TIMEOUT_MS` `VISION_MAX_CANDIDATES` `VISION_OCR_CONCURRENCY` `ENABLE_MAC_VISION_OCR` |
 | 宣传视频 | `VIDEO_GEN_BASE_URL`(默认 VISION) `VIDEO_GEN_API_KEY`(默认 VISION) `VIDEO_GEN_MODEL` `VIDEO_GEN_SECONDS` `VIDEO_GEN_SIZE` `VIDEO_GEN_TIMEOUT_MS` `VIDEO_GEN_POLL_MS` |
@@ -251,12 +251,13 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 合法域名（mp 后台）：request = `xingma.visitworld.me`；uploadFile / **downloadFile** 均需配置 `chathub.oss-cn-hangzhou.aliyuncs.com`（存相册走 `wx.downloadFile`）。
 
-### 私有 OSS 读链接
+### OSS 读链接（当前：公开读）
 
-- Bucket `chathub` 私有读：`OssClient.publicUrl` / `signGetUrl` 对 aliyun 一律返回短时签名 GET（默认约 1h，`OSS_SIGNED_URL_EXPIRES`）。
-- 商品/促销/分享/任务缩略图等 API 已通过 `oss.publicUrl(objectKey)` 出链，小程序一般无需改。
-- 直传 PostObject / 服务端 put 使用 `OSS_OBJECT_ACL=private`；写权限仍靠 PostObject policy / AK，与私有读无关。
-- 临时调试公开桶可读可设 `OSS_PUBLIC_READ=1`（不推荐生产）。
+- 当前生产：`OSS_PUBLIC_READ=1` + `OSS_OBJECT_ACL=public-read`。`OssClient.publicUrl` 返回 `https://{bucket}.{endpoint}/{OSS_PREFIX}/{objectKey}`（**无** `Signature` 查询参数）。
+- 请在阿里云控制台确认 Bucket（及历史对象）为 **公共读 / public-read**；仅改 `.env` 不会自动改桶 ACL。
+- 新上传（服务端 put / PostObject）带 `x-oss-object-acl: public-read`。
+- 若改回私有桶：设 `OSS_PUBLIC_READ=0`、`OSS_OBJECT_ACL=private`，读链接恢复短时签名 GET（`OSS_SIGNED_URL_EXPIRES`，默认 1h）。
+- `MEDIA_SERVE_LOCAL=1` 时可强制回退同域 `/media/`（微信未配 OSS 域名时）。
 
 ---
 
@@ -289,6 +290,14 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 - 事件：`external_outfit`（job_events）。
 
 环境变量：`OUTFIT_AGENT_ENABLED` `OUTFIT_AGENT_BASE_URL` `OUTFIT_AGENT_API_KEY` `OUTFIT_AGENT_API_KEY_FILE` `OUTFIT_AGENT_CODE` `OUTFIT_AGENT_TIMEOUT_MS` `OUTFIT_ENGINE`。
+
+### 6.4 商品图异步分析落库（生图复用）
+
+- Job：`media_analyze`（payload 可选 `productId` / `styleNo` / `force`；缺省扫租户全部商品）。
+- 落库：`media_assets.meta`（kind/roleZh/roleEn/sortHint/via/analyzedAt）；`products.ref_analysis`（整款读衣摘要 + assets[]）；并按 sortHint 重排 `cover_media_ids`。
+- 生图：`prepareRefsForCategory` 在参考图均有落库 kind 时 `reuseCached`，跳过重复识图分类，硬约束取 `ref_analysis`。
+- 迁移：`015_media_asset_meta.sql`。
+
 
 ## 7. 部署注意（只动 wool-api）
 
