@@ -83,28 +83,20 @@ Page({
   },
   async load(id) {
     try {
-      const customer = await request({ url: `/api/customers/${id}` });
-      let inquiries = [];
-      try {
-        inquiries = (await request({ url: `/api/inquiries?customerId=${encodeURIComponent(id)}` })) || [];
-      } catch (e2) {
-        inquiries = [];
-      }
-      let viewedProducts = [];
-      try {
-        const vp = await request({ url: `/api/customers/${id}/viewed-products` });
-        viewedProducts = (vp && vp.items) || [];
-      } catch (e4) {
-        viewedProducts = [];
-      }
-      try {
-        await request({
-          url: '/api/inquiries/mark-read',
-          method: 'POST',
-          data: { customerId: id },
-        });
-        refreshCustomerTabBadge();
-      } catch (e3) { /* ignore */ }
+      const [customerRes, inquiriesRes, viewedRes] = await Promise.all([
+        request({ url: `/api/customers/${id}` }),
+        request({ url: `/api/inquiries?customerId=${encodeURIComponent(id)}` }).catch(() => []),
+        request({ url: `/api/customers/${id}/viewed-products` }).catch(() => ({ items: [] })),
+      ]);
+      const customer = customerRes;
+      const inquiries = inquiriesRes || [];
+      const viewedProducts = (viewedRes && viewedRes.items) || [];
+      // mark-read 不挡首屏
+      request({
+        url: '/api/inquiries/mark-read',
+        method: 'POST',
+        data: { customerId: id },
+      }).then(() => refreshCustomerTabBadge()).catch(() => {});
 
       const contact = buildContact(customer);
       this.setData({

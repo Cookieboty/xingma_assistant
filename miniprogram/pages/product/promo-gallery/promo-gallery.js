@@ -401,7 +401,7 @@ Page({
         status: 'generating',
         busy: true,
         expanded: true,
-        progressText: whole ? '整组重新生成中…' : `重新生成 ${indexes.length} 张…`,
+        progressText: whole ? '重新生成中…' : `重新生成 ${indexes.length} 张…`,
         percent: 5,
       }), null);
     });
@@ -415,7 +415,7 @@ Page({
         data: whole ? {} : { indexes },
       });
       wx.hideLoading();
-      wx.showToast({ title: whole ? '已开始整组重生' : '已开始重新生成', icon: 'none' });
+      wx.showToast({ title: whole ? '已开始重新生成' : `已开始重新生成 ${indexes.length} 张`, icon: 'none' });
       await this.load({ silent: true });
     } catch (err) {
       wx.hideLoading();

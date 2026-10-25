@@ -18,18 +18,22 @@
   font-size: 24rpx;
   color: #8a8178;
 }
+/* 2-col grid; avoid global .card (padding) which broke half-width */
 .grid {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  row-gap: 20rpx;
 }
-.card {
-  width: calc(50% - 10rpx);
-  margin-bottom: 20rpx;
+.cat-card {
+  width: 345rpx;
+  box-sizing: border-box;
   background: #fff;
   border-radius: 20rpx;
   overflow: hidden;
   box-shadow: 0 6rpx 20rpx rgba(40, 28, 18, 0.05);
+  padding: 0;
+  margin: 0;
 }
 .cover-wrap {
   width: 100%;
@@ -53,10 +57,10 @@
   font-size: 24rpx;
 }
 .body {
-  padding: 18rpx 18rpx 22rpx;
+  padding: 16rpx 18rpx 20rpx;
 }
 .style {
-  font-size: 26rpx;
+  font-size: 24rpx;
   font-weight: 560;
   color: #2a2420;
   line-height: 1.35;
@@ -65,22 +69,34 @@
   white-space: nowrap;
 }
 .price {
-  margin-top: 10rpx;
-  font-size: 32rpx;
+  margin-top: 8rpx;
+  font-size: 30rpx;
   font-weight: 700;
   color: #c45c26;
   letter-spacing: 0.4rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .price.muted {
   color: #8a8178;
-  font-size: 26rpx;
+  font-size: 24rpx;
   font-weight: 500;
 }
 .empty {
   margin-top: 160rpx;
   text-align: center;
+  padding: 0 40rpx;
+}
+.empty-title {
   color: #8a8178;
   font-size: 28rpx;
+}
+.empty-sub {
+  margin-top: 10rpx;
+  color: #b5aea8;
+  font-size: 24rpx;
+  line-height: 1.4;
 }
 .footer {
   text-align: center;

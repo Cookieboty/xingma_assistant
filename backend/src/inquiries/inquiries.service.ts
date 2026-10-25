@@ -49,8 +49,11 @@ export type CreateInquiryBody = {
 export type CustomerInquiryStat = {
   customerId: string;
   inquiryCount: number;
+  /** open|pending|in_progress only — list badge must ignore handled */
+  pendingInquiryCount: number;
   unreadCount: number;
   hasUnreadInquiry: boolean;
+  hasPendingInquiry: boolean;
 };
 
 export type UnreadSummary = {
@@ -293,6 +296,10 @@ export class InquiriesService {
         .select('i.customer_id', 'customerId')
         .addSelect('COUNT(*)', 'inquiryCount')
         .addSelect(
+          `SUM(CASE WHEN i.status IN ('open', 'pending', 'in_progress') THEN 1 ELSE 0 END)`,
+          'pendingInquiryCount',
+        )
+        .addSelect(
           `SUM(CASE WHEN i.status NOT IN ('handled', 'closed', 'replied')
             AND (i.staff_read_at IS NULL OR i.status IN ('open', 'pending', 'in_progress'))
             THEN 1 ELSE 0 END)`,
@@ -300,15 +307,18 @@ export class InquiriesService {
         )
         .where('i.tenant_id = :tenantId', { tenantId: user.tenantId })
         .groupBy('i.customer_id')
-        .getRawMany<{ customerId: string; inquiryCount: string; unreadCount: string }>();
+        .getRawMany<{ customerId: string; inquiryCount: string; pendingInquiryCount: string; unreadCount: string }>();
       const customers: CustomerInquiryStat[] = rows.map((r) => {
         const inquiryCount = Number(r.inquiryCount) || 0;
+        const pendingInquiryCount = Number(r.pendingInquiryCount) || 0;
         const unreadCount = Number(r.unreadCount) || 0;
         return {
           customerId: r.customerId,
           inquiryCount,
+          pendingInquiryCount,
           unreadCount,
           hasUnreadInquiry: unreadCount > 0,
+          hasPendingInquiry: pendingInquiryCount > 0,
         };
       });
       const unreadInquiryCount = customers.reduce((s, c) => s + c.unreadCount, 0);
@@ -320,16 +330,20 @@ export class InquiriesService {
       const cur = map.get(i.customerId) || {
         customerId: i.customerId,
         inquiryCount: 0,
+        pendingInquiryCount: 0,
         unreadCount: 0,
         hasUnreadInquiry: false,
+        hasPendingInquiry: false,
       };
       cur.inquiryCount += 1;
       const st = String(i.status || 'open');
       const isOpen = st === 'open' || st === 'pending' || st === 'in_progress';
       const isDone = st === 'handled' || st === 'closed' || st === 'replied';
+      if (isOpen) cur.pendingInquiryCount += 1;
       // 红点：待沟通/正在沟通 或 未读；已处理不再计入
       if (!isDone && (i.staffReadAt == null || isOpen)) cur.unreadCount += 1;
       cur.hasUnreadInquiry = cur.unreadCount > 0;
+      cur.hasPendingInquiry = cur.pendingInquiryCount > 0;
       map.set(i.customerId, cur);
     }
     const customers = [...map.values()];
@@ -434,9 +448,13 @@ export class InquiriesService {
       if (e.status === 'handled' || e.status === 'closed' || e.status === 'replied') {
         throw new BadRequestException('该询价已处理完成');
       }
-      // 尚未认领时允许直接完成（顺带记处理人），正常路径应先 claim
+      // 尚未认领或姓名缺失时记/补处理人（旧数据可能只有 status=handled）
       if (!e.assigneeMemberId && !e.assigneeOpenid) {
         this.applyHandler(e, handler);
+      } else if (!(e.assigneeName || '').trim()) {
+        e.assigneeName = handler.name;
+        if (!e.assigneeOpenid) e.assigneeOpenid = handler.openid;
+        if (!e.assigneeMemberId) e.assigneeMemberId = handler.memberId;
       }
       e.status = 'handled';
       e.handledNote = note;
@@ -457,6 +475,10 @@ export class InquiriesService {
     }
     if (!rec.assigneeMemberId && !rec.assigneeOpenid) {
       this.applyHandler(rec, handler);
+    } else if (!(rec.assigneeName || '').trim()) {
+      rec.assigneeName = handler.name;
+      if (!rec.assigneeOpenid) rec.assigneeOpenid = handler.openid;
+      if (!rec.assigneeMemberId) rec.assigneeMemberId = handler.memberId;
     }
     rec.status = 'handled';
     rec.handledNote = note;

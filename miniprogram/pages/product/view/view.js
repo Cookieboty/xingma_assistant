@@ -82,8 +82,10 @@ Page({
       this.setData({ error: (e && e.message) || '鉴权失败' });
       return;
     }
-    await this.load(id, shareEventId, boundCustomerId);
-    await this.loadProfileForInquiry();
+    await Promise.all([
+      this.load(id, shareEventId, boundCustomerId),
+      this.loadProfileForInquiry(),
+    ]);
     try {
       wx.hideShareMenu({ menus: ['shareAppMessage', 'shareTimeline'] });
     } catch (e) {

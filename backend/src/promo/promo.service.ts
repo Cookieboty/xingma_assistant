@@ -118,6 +118,8 @@ export class PromoService implements OnModuleInit {
   private readonly logger = new Logger('Promo');
   private running = 0;
   private waiters: Array<() => void> = [];
+  /** productIds already scanned for pj_ legacy migrate this process */
+  private readonly legacyMigratedProducts = new Set<string>();
 
   constructor(
     private readonly products: ProductsService,
@@ -2359,7 +2361,8 @@ export class PromoService implements OnModuleInit {
   }
 
   async listSets(user: AuthContext, productId: string) {
-    await this.products.getDetail(user, productId);
+    // Light ACL — avoid full getDetail (images/signing) on every gallery poll
+    await this.products.assertProductReadable(user, productId);
     await this.migrateLegacyJobsToSets(user, productId);
     let rows = await this.setsRepo().find({
       where: { tenantId: user.tenantId, productId },
@@ -2370,8 +2373,10 @@ export class PromoService implements OnModuleInit {
     // 附带尚未落库完成的排队中任务（仅 payload.setId 已有）
     const dtos = rows.map((r) => this.setDto(r));
     try {
-      const imageJobs = await this.jobs.list(user, { type: 'promo_image', limit: 30 });
-      const videoJobs = await this.jobs.list(user, { type: 'promo_video', limit: 30 });
+      const [imageJobs, videoJobs] = await Promise.all([
+        this.jobs.list(user, { type: 'promo_image', limit: 30 }),
+        this.jobs.list(user, { type: 'promo_video', limit: 30 }),
+      ]);
       const items = [...(imageJobs.items || []), ...(videoJobs.items || [])];
       for (const j of items) {
         if ((j.payload as any)?.productId !== productId) continue;
@@ -2561,10 +2566,20 @@ export class PromoService implements OnModuleInit {
   /** 把旧 pj_* 文件一次性迁入 promo_sets（幂等） */
   private async migrateLegacyJobsToSets(user: AuthContext, productId: string) {
     if (!(this.dataSource && process.env.DB_ENABLED === 'true')) return;
-    const dir = this.stateDir(user.tenantId, productId);
-    if (!fs.existsSync(dir)) return;
+    const memoKey = `${user.tenantId}:${productId}`;
+    if (this.legacyMigratedProducts.has(memoKey)) return;
+    // Peek without mkdir (stateDir always creates)
+    const dir = path.join(process.cwd(), 'data', 'promo', user.tenantId, productId);
+    if (!fs.existsSync(dir)) {
+      this.legacyMigratedProducts.add(memoKey);
+      return;
+    }
     const repo = this.setsRepo();
     const files = fs.readdirSync(dir).filter((f) => f.startsWith('pj_') && f.endsWith('.json'));
+    if (!files.length) {
+      this.legacyMigratedProducts.add(memoKey);
+      return;
+    }
     for (const f of files) {
       try {
         const job: PromoJob = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -2616,6 +2631,7 @@ export class PromoService implements OnModuleInit {
         this.logger.warn(`migrate legacy ${f}: ${e.message || e}`);
       }
     }
+    this.legacyMigratedProducts.add(memoKey);
   }
 
   /**

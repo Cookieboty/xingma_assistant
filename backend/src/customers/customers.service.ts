@@ -72,8 +72,10 @@ export class CustomersService {
         return {
           ...rest,
           inquiryCount: st?.inquiryCount ?? 0,
+          pendingInquiryCount: st?.pendingInquiryCount ?? 0,
           unreadInquiryCount: st?.unreadCount ?? 0,
           hasUnreadInquiry: st?.hasUnreadInquiry ?? false,
+          hasPendingInquiry: st?.hasPendingInquiry ?? false,
         };
       });
     } catch {

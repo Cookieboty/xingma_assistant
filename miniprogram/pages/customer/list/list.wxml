@@ -2,7 +2,7 @@
 <view class="container">
   <view class="card head">
     <view class="section-title">客户</view>
-    <view class="muted">分享打开后自动建档；有询价时行上会显示红点，点进详情可复制联系方式</view>
+    <view class="muted">分享打开后自动建档；有待处理询价时行上会显示红点；已处理不再提示</view>
   </view>
 
   <view class="card search-bar">
@@ -39,7 +39,7 @@
       <view class="name-line">
         <text class="name">{{item.displayName}}</text>
         <text wx:if="{{item.hasUnreadInquiry}}" class="badge-unread">新询价</text>
-        <text wx:elif="{{item.inquiryCount}}" class="badge-inq">询价 {{item.inquiryCount}}</text>
+        <text wx:elif="{{item.showInquiryBadge}}" class="badge-inq">待处理 {{item.pendingInquiryCount || ''}}</text>
       </view>
       <view class="muted small">{{item.contactLine}}</view>
     </view>

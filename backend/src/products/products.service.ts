@@ -80,22 +80,52 @@ export class ProductsService {
     return uniq.filter((id) => ok.has(id));
   }
 
-    private async firstCoverUrl(tenantId: string, p: ProductRec): Promise<string> {
-    if (!(this.dataSource && process.env.DB_ENABLED === 'true')) return '';
+  private async firstCoverUrl(tenantId: string, p: ProductRec): Promise<string> {
+    const map = await this.batchFirstCoverUrls(tenantId, [p]);
+    return map.get(p.id) || '';
+  }
+
+  /** Batch cover URLs for list endpoints — one media query instead of N findOne loops */
+  private async batchFirstCoverUrls(tenantId: string, products: ProductRec[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!(this.dataSource && process.env.DB_ENABLED === 'true') || !products.length) return out;
     const repo = this.dataSource.getRepository(MediaAsset);
-    const coverIds = p.coverMediaIds || [];
-    for (const coverId of coverIds) {
-      const row = await repo.findOne({ where: { tenantId, id: coverId, status: 'active' } });
-      if (row && !this.isPromoAsset(row)) return this.publicUrl(row.objectKey);
+    const coverIds = [...new Set(products.flatMap((p) => p.coverMediaIds || []).filter(Boolean))];
+    const productIds = products.map((p) => p.id);
+    const [byCover, byProduct] = await Promise.all([
+      coverIds.length
+        ? repo.find({ where: { tenantId, id: In(coverIds), status: 'active' } })
+        : Promise.resolve([] as MediaAsset[]),
+      repo.find({
+        where: { tenantId, productId: In(productIds), status: 'active', type: 'image' },
+        order: { createdAt: 'ASC' },
+        take: Math.min(products.length * 20, 400),
+      }),
+    ]);
+    const coverMap = new Map(byCover.map((r) => [r.id, r]));
+    const productMedia = new Map<string, MediaAsset[]>();
+    for (const r of byProduct) {
+      if (!r.productId) continue;
+      const list = productMedia.get(r.productId) || [];
+      list.push(r);
+      productMedia.set(r.productId, list);
     }
-    // 兜底：商品图里第一张非宣传图
-    const rows = await repo.find({
-      where: { tenantId, productId: p.id, status: 'active', type: 'image' },
-      order: { createdAt: 'ASC' },
-      take: 20,
-    });
-    const hit = rows.find((r) => !this.isPromoAsset(r));
-    return hit ? this.publicUrl(hit.objectKey) : '';
+    for (const p of products) {
+      let url = '';
+      for (const cid of p.coverMediaIds || []) {
+        const row = coverMap.get(cid);
+        if (row && !this.isPromoAsset(row)) {
+          url = this.publicUrl(row.objectKey);
+          break;
+        }
+      }
+      if (!url) {
+        const hit = (productMedia.get(p.id) || []).find((r) => !this.isPromoAsset(r));
+        if (hit) url = this.publicUrl(hit.objectKey);
+      }
+      if (url) out.set(p.id, url);
+    }
+    return out;
   }
 
   private storageRoot() {
@@ -154,16 +184,16 @@ export class ProductsService {
     return { suggestion };
   }
 
-    /** 员工列表（可筛选） */
+  /** 员工列表（可筛选） */
   async listForStaff(tenantId: string, query?: ProductListQuery) {
     const { items, total } = await this.repo.list(tenantId, query);
-    const withMeta = await Promise.all(
-      items.map(async (p) => {
-        const skus = await this.repo.listSkus(tenantId, p.id);
-        const coverUrl = await this.firstCoverUrl(tenantId, p);
-        return { ...this.toStaffDto(p, skus), coverUrl };
-      }),
-    );
+    if (!items.length) return { items: [], total };
+    const coverMap = await this.batchFirstCoverUrls(tenantId, items);
+    const skuLists = await Promise.all(items.map((p) => this.repo.listSkus(tenantId, p.id)));
+    const withMeta = items.map((p, i) => ({
+      ...this.toStaffDto(p, skuLists[i] || []),
+      coverUrl: coverMap.get(p.id) || '',
+    }));
     return { items: withMeta, total };
   }
 
@@ -185,11 +215,27 @@ export class ProductsService {
       opts?.boundCustomerIds,
       opts?.boundCustomerId,
     );
-    const out = [];
+    const levelCache = new Map<string, { policy: SharePolicy; minRank: number }>();
+    const resolveLevel = async (p: ProductRec) => {
+      const key = `${p.levelId || ''}|${p.sharePolicy || ''}`;
+      if (levelCache.has(key)) return levelCache.get(key)!;
+      let policy: SharePolicy = (p.sharePolicy as SharePolicy) || 'designated_only';
+      let minRank = 0;
+      try {
+        const level = await this.levels.getProductLevel(user.tenantId, p.levelId);
+        if (!p.sharePolicy) policy = (level.defaultSharePolicy as SharePolicy) || 'designated_only';
+        minRank = level.minCustomerRank ?? 0;
+      } catch {
+        /* keep defaults */
+      }
+      const rec = { policy, minRank };
+      levelCache.set(key, rec);
+      return rec;
+    };
+    const visible: ProductRec[] = [];
     for (const p of items) {
-      const policy = await this.resolveSharePolicy(user.tenantId, p);
+      const { policy, minRank } = await resolveLevel(p);
       if (opts?.publicOnly && policy !== 'open') continue;
-      const minRank = await this.resolveMinRank(user.tenantId, p);
       const verdict = this.access.canView(user, {
         productId: p.id,
         sharePolicy: policy,
@@ -199,11 +245,45 @@ export class ProductsService {
         boundCustomerIds: boundIds,
       });
       if (!verdict.ok) continue;
-      const skus = await this.repo.listSkus(user.tenantId, p.id);
-      const coverUrl = await this.firstCoverUrl(user.tenantId, p);
-      out.push({ ...this.toPublicDto(p, skus, true), coverUrl });
+      visible.push(p);
     }
+    if (!visible.length) return { items: [], total: 0 };
+    const coverMap = await this.batchFirstCoverUrls(user.tenantId, visible);
+    const skuLists = await Promise.all(visible.map((p) => this.repo.listSkus(user.tenantId, p.id)));
+    const out = visible.map((p, i) => ({
+      ...this.toPublicDto(p, skuLists[i] || [], true),
+      coverUrl: coverMap.get(p.id) || '',
+    }));
     return { items: out, total: out.length };
+  }
+
+  /** Light existence+ACL check without resolving images (listSets / promo polls). */
+  async assertProductReadable(
+    user: AuthContext,
+    productId: string,
+    opts?: { shareEventId?: string; boundCustomerId?: string; boundCustomerIds?: string[] },
+  ) {
+    const p = await this.repo.findById(user.tenantId, productId);
+    if (!p) throw new NotFoundException('商品不存在');
+    if (user.role === 'owner' || user.role === 'staff') return p;
+    const policy = await this.resolveSharePolicy(user.tenantId, p);
+    const minRank = await this.resolveMinRank(user.tenantId, p);
+    const boundIds = await this.resolveShareBoundIds(
+      user.tenantId,
+      opts?.shareEventId,
+      opts?.boundCustomerIds,
+      opts?.boundCustomerId,
+    );
+    const verdict = this.access.canView(user, {
+      productId: p.id,
+      sharePolicy: policy,
+      minCustomerRank: minRank,
+      viaShareEventId: opts?.shareEventId,
+      boundCustomerId: opts?.boundCustomerId,
+      boundCustomerIds: boundIds,
+    });
+    if (!verdict.ok) throw new ForbiddenException(`无权查看该商品: ${verdict.reason}`);
+    return p;
   }
 
   async getDetail(
