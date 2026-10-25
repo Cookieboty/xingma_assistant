@@ -17,13 +17,11 @@ function statusLabel(s) {
 }
 
 function enrichInquiry(i) {
-  const contactSnap = [i.contactName, i.phone].filter(Boolean).join(' · ') || '';
   return Object.assign({}, i, {
     timeText: fmtTime(i.createdAt),
     statusLabel: statusLabel(i.status),
     isHandled: i.status === 'handled',
     productTitle: i.productName || i.productId || '商品',
-    contactSnap,
     remarkText: i.remark || '',
     contentText: i.content || '',
   });
@@ -177,6 +175,7 @@ Page({
       delete drafts[id];
       this.setData({ handleDrafts: drafts });
       await this.load(this.data.id);
+      // load 内也会 mark-read + refresh；再刷一次确保列表返回前 Tab 红点已清
       try { await refreshCustomerTabBadge(); } catch (e2) { /* */ }
       wx.showToast({ title: '已标记处理' });
     } catch (err) {

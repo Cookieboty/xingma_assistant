@@ -1,4 +1,4 @@
-/** 客户 Tab 红点：有未读询价时 showTabBarRedDot，否则 hide */
+/** 客户 Tab 红点：有未处理/未读询价时 showTabBarRedDot，否则 hide */
 const { request } = require('./request');
 
 const CUSTOMER_TAB_INDEX = 1; // app.json tabBar: 商品0 / 客户1 / 任务2
@@ -21,6 +21,7 @@ async function refreshCustomerTabBadge() {
     }
     return summary || { unreadInquiryCount: 0, customers: [] };
   } catch (e) {
+    try { wx.hideTabBarRedDot({ index: CUSTOMER_TAB_INDEX }); } catch (e2) { /* */ }
     return { unreadInquiryCount: 0, customers: [] };
   }
 }

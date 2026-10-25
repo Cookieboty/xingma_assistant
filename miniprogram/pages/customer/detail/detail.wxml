@@ -4,7 +4,7 @@
     <view class="section-title">联系方式</view>
     <view class="contact-name">{{contact.name}}</view>
     <view class="contact-phone">{{contact.phone}}</view>
-    <view class="muted tip" wx:if="{{!contact.hasContact}}">客户尚未留下姓名或手机；可看下方询价记录里的快照</view>
+    <view class="muted tip" wx:if="{{!contact.hasContact}}">客户尚未留下称呼或手机号</view>
     <view class="btn-primary copy-btn" bindtap="copyContact" wx:if="{{contact.hasContact}}">一键复制联系方式</view>
     <view class="btn-ghost copy-btn disabled" wx:else>暂无可复制联系方式</view>
   </view>
@@ -20,7 +20,6 @@
         <text class="inq-status {{item.isHandled ? 'done' : 'open'}}">{{item.statusLabel}}</text>
       </view>
       <view class="muted small">{{item.timeText}}</view>
-      <view class="inq-contact" wx:if="{{item.contactSnap}}">联系快照：{{item.contactSnap}}</view>
       <view class="inq-body" wx:if="{{item.remarkText}}">备注：{{item.remarkText}}</view>
       <view class="inq-body muted" wx:elif="{{item.contentText}}">{{item.contentText}}</view>
       <view class="inq-handled" wx:if="{{item.isHandled && item.handledNote}}">处理说明：{{item.handledNote}}</view>

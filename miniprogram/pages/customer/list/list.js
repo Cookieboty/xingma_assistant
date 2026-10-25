@@ -25,7 +25,7 @@ function enrich(c) {
   const hasUnreadInquiry = !!c.hasUnreadInquiry;
   const pendingInquiryCount = Number(c.pendingInquiryCount || c.openInquiryCount || 0);
   const hasPendingInquiry = !!c.hasPendingInquiry || pendingInquiryCount > 0 || hasUnreadInquiry;
-  // 行红点：仅未读询价（已读/已处理后应消失）
+  // 行红点：未处理或未读（已处理且已读后应消失；见 unread-summary）
   const showDot = hasUnreadInquiry;
   return Object.assign({}, c, {
     displayName,

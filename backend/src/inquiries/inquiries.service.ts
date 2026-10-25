@@ -241,7 +241,7 @@ export class InquiriesService {
     return rec;
   }
 
-  /** 未读摘要：Tab 红点总计 + 按客户统计（列表行红点） */
+  /** 红点摘要：未处理(open/pending)或未读；已处理/关闭不计（列表行+Tab） */
   async unreadSummary(user: AuthContext): Promise<UnreadSummary> {
     this.assertStaff(user);
     if (this.db) {
@@ -250,7 +250,12 @@ export class InquiriesService {
         .createQueryBuilder('i')
         .select('i.customer_id', 'customerId')
         .addSelect('COUNT(*)', 'inquiryCount')
-        .addSelect('SUM(CASE WHEN i.staff_read_at IS NULL THEN 1 ELSE 0 END)', 'unreadCount')
+        .addSelect(
+          `SUM(CASE WHEN i.status NOT IN ('handled', 'closed', 'replied')
+            AND (i.staff_read_at IS NULL OR i.status IN ('open', 'pending'))
+            THEN 1 ELSE 0 END)`,
+          'unreadCount',
+        )
         .where('i.tenant_id = :tenantId', { tenantId: user.tenantId })
         .groupBy('i.customer_id')
         .getRawMany<{ customerId: string; inquiryCount: string; unreadCount: string }>();
@@ -277,7 +282,11 @@ export class InquiriesService {
         hasUnreadInquiry: false,
       };
       cur.inquiryCount += 1;
-      if (i.staffReadAt == null) cur.unreadCount += 1;
+      const st = String(i.status || 'open');
+      const isOpen = st === 'open' || st === 'pending';
+      const isDone = st === 'handled' || st === 'closed' || st === 'replied';
+      // 红点：未处理(open) 或 未读；已处理不再计入
+      if (!isDone && (i.staffReadAt == null || isOpen)) cur.unreadCount += 1;
       cur.hasUnreadInquiry = cur.unreadCount > 0;
       map.set(i.customerId, cur);
     }
@@ -334,7 +343,8 @@ export class InquiriesService {
       if (!e) throw new NotFoundException('询价不存在');
       e.status = 'handled';
       e.handledNote = note || e.handledNote || null;
-      if (e.staffReadAt == null) e.staffReadAt = now;
+      // 已处理必须同时已读，否则 unread-summary 红点不消
+      e.staffReadAt = now;
       const saved = await repo.save(e);
       let productName: string | null = null;
       const p = await this.db.getRepository(Product).findOne({
@@ -348,10 +358,8 @@ export class InquiriesService {
     if (!rec) throw new NotFoundException('询价不存在');
     rec.status = 'handled';
     rec.handledNote = note || rec.handledNote || null;
-    if (rec.staffReadAt == null) {
-      rec.staffReadAt = now;
-      rec.unread = false;
-    }
+    rec.staffReadAt = now;
+    rec.unread = false;
     return { ...rec };
   }
 }
