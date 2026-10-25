@@ -42,6 +42,8 @@ Page({
     id: '',
     shareEventId: '',
     boundCustomerId: '',
+    groupId: '',
+    showCatalogCta: false,
     contactQrUrl: '',
     error: '',
     hasPrice: false,
@@ -105,9 +107,12 @@ Page({
       const product = await request({ url });
       const skuState = this.buildSkuState(product);
       const safe = Object.assign({}, product, { tags: publicTags(product.tags) });
+      const groupId = product.groupId || '';
       this.setData({
         product: safe,
         canDownload: !!product.allowCustomerDownload,
+        groupId,
+        showCatalogCta: !!groupId,
         error: '',
         ...skuState,
       });
@@ -247,5 +252,17 @@ Page({
     } finally {
       this._submittingInquiry = false;
     }
+  },
+
+  goCatalog() {
+    const groupId = this.data.groupId || (this.data.product && this.data.product.groupId) || '';
+    if (!groupId) {
+      wx.showToast({ title: '暂无分组目录', icon: 'none' });
+      return;
+    }
+    const qs = [`groupId=${encodeURIComponent(groupId)}`];
+    if (this.data.shareEventId) qs.push(`shareEventId=${this.data.shareEventId}`);
+    if (this.data.boundCustomerId) qs.push(`boundCustomerId=${this.data.boundCustomerId}`);
+    wx.navigateTo({ url: `/pages/product/catalog/catalog?${qs.join('&')}` });
   },
 });

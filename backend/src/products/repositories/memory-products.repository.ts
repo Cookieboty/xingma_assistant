@@ -58,14 +58,18 @@ export class MemoryProductsRepository implements IProductsRepository {
     if (query.q) {
       const q = query.q.toLowerCase();
       items = items.filter(
-        (p) => p.styleNo.toLowerCase().includes(q) || p.name.toLowerCase().includes(q),
+        (p) => p.styleNo.toLowerCase().includes(q),
       );
     }
     if (query.levelId) items = items.filter((p) => p.levelId === query.levelId);
     if (query.groupId) items = items.filter((p) => p.groupId === query.groupId);
     if (query.status) items = items.filter((p) => p.status === query.status);
     if (query.tag) items = items.filter((p) => (p.tags || []).includes(query.tag!));
-    items.sort((a, b) => b.sortOrder - a.sortOrder || b.createdAt.getTime() - a.createdAt.getTime());
+    const rank = (s: string) => (s === 'on_sale' ? 0 : s === 'off_sale' ? 1 : 2);
+    items.sort(
+      (a, b) =>
+        rank(a.status) - rank(b.status) || b.createdAt.getTime() - a.createdAt.getTime(),
+    );
     const total = items.length;
     const page = Math.max(1, query.page || 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize || 50));
@@ -103,7 +107,7 @@ export class MemoryProductsRepository implements IProductsRepository {
       allowCustomerDownload: input.allowCustomerDownload ?? false,
       coverMediaIds: input.coverMediaIds ?? [],
       tags: input.tags ?? [],
-      status: input.status || 'draft',
+      status: input.status || 'on_sale',
       sortOrder: input.sortOrder ?? 0,
       createdAt: now,
       updatedAt: now,
@@ -172,7 +176,7 @@ export class MemoryProductsRepository implements IProductsRepository {
       allowCustomerDownload: false,
       coverMediaIds: src.coverMediaIds ? [...src.coverMediaIds] : [],
       tags: src.tags ? [...src.tags] : [],
-      status: 'draft',
+      status: 'off_sale',
       sortOrder: src.sortOrder,
       skus: skus.map((s) => ({
         skuCode: `${s.skuCode}-COPY`,
@@ -238,7 +242,33 @@ export class MemoryProductsRepository implements IProductsRepository {
   async removeSku(tenantId: string, skuId: string) {
     const s = this.skus.get(skuId);
     if (!s || s.tenantId !== tenantId) return false;
+    const base = String(s.skuCode || 'sku').slice(0, 40);
+    s.skuCode = `${base}__del__${String(s.id).slice(0, 8)}`;
     s.status = 'deleted';
+    s.updatedAt = new Date();
     return true;
+  }
+
+  async reviveSkuByCode(
+    tenantId: string,
+    productId: string,
+    skuCode: string,
+    input: CreateSkuInput,
+  ) {
+    for (const s of this.skus.values()) {
+      if (s.tenantId !== tenantId || s.productId !== productId || s.status !== 'deleted') continue;
+      if (s.skuCode === skuCode || String(s.skuCode || '').startsWith(`${skuCode}__del__`)) {
+        s.skuCode = skuCode;
+        s.color = input.color ?? null;
+        s.size = input.size ?? null;
+        s.price = input.price != null ? String(input.price) : null;
+        s.stock = input.stock ?? 0;
+        s.status = input.status || 'active';
+        s.updatedAt = new Date();
+        this.skus.set(s.id, s);
+        return { ...s };
+      }
+    }
+    return null;
   }
 }

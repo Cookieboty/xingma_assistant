@@ -81,11 +81,11 @@ Page({
     list: [],
     isStaff: false,
     q: '',
-    status: '',
+    status: 'on_sale',
     groupId: '',
     groups: [],
     currentGroupName: '本季款式',
-    statusLabel: { on_sale: '在售', off_sale: '下架', draft: '草稿' },
+    statusLabel: { on_sale: '在售', off_sale: '下架' },
     page: 1,
     total: 0,
     hasMore: true,
@@ -118,7 +118,9 @@ Page({
   onSearchInput(e) { this.setData({ q: e.detail.value }); },
   onSearch() { this.reload(); },
   onStatusFilter(e) {
-    this.setData({ status: e.currentTarget.dataset.status || '' });
+    const s = e.currentTarget.dataset.status;
+    if (s !== 'on_sale' && s !== 'off_sale') return;
+    this.setData({ status: s });
     this.reload();
   },
   onGroupFilter(e) {
@@ -421,21 +423,5 @@ Page({
   goPublish() {
     wx.navigateTo({ url: '/pages/product/publish/publish' });
   },
-  goSettings() {
-    wx.switchTab({ url: '/pages/settings/index/index' });
-  },
-  async toggleSale(e) {
-    const { id, status } = e.currentTarget.dataset;
-    const next = status === 'on_sale' ? 'off_sale' : 'on_sale';
-    try {
-      await request({
-        url: '/api/products/batch-status',
-        method: 'POST',
-        data: { ids: [id], status: next },
-      });
-      this.reload();
-    } catch (err) {
-      wx.showToast({ title: err.message || '失败', icon: 'none' });
-    }
-  },
 });
+);

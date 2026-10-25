@@ -44,7 +44,7 @@ export class TypeOrmProductsRepository implements IProductsRepository {
       allowCustomerDownload: !!p.allowCustomerDownload,
       coverMediaIds: p.coverMediaIds,
       tags: p.tags ?? null,
-      status: (p.status as ProductStatus) || 'draft',
+      status: (p.status as ProductStatus) || 'on_sale',
       sortOrder: p.sortOrder,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
@@ -70,7 +70,7 @@ export class TypeOrmProductsRepository implements IProductsRepository {
   async list(tenantId: string, query: ProductListQuery = {}) {
     const qb = this.products.createQueryBuilder('p').where('p.tenant_id = :tenantId', { tenantId });
     if (query.q) {
-      qb.andWhere('(p.style_no LIKE :q OR p.name LIKE :q)', { q: `%${query.q}%` });
+      qb.andWhere('p.style_no LIKE :q', { q: `%${query.q}%` });
     }
     if (query.levelId) qb.andWhere('p.level_id = :levelId', { levelId: query.levelId });
     if (query.status) qb.andWhere('p.status = :status', { status: query.status });
@@ -78,7 +78,10 @@ export class TypeOrmProductsRepository implements IProductsRepository {
     if (query.tag) {
       qb.andWhere('JSON_CONTAINS(p.tags, :tagJson)', { tagJson: JSON.stringify(query.tag) });
     }
-    qb.orderBy('p.sort_order', 'DESC').addOrderBy('p.created_at', 'DESC');
+    qb.orderBy(
+      "CASE WHEN p.status = 'on_sale' THEN 0 WHEN p.status = 'off_sale' THEN 1 ELSE 2 END",
+      'ASC',
+    ).addOrderBy('p.created_at', 'DESC');
     const page = Math.max(1, query.page || 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize || 50));
     const total = await qb.getCount();
@@ -110,7 +113,7 @@ export class TypeOrmProductsRepository implements IProductsRepository {
       allowCustomerDownload: input.allowCustomerDownload ?? false,
       coverMediaIds: input.coverMediaIds ?? [],
       tags: input.tags ?? [],
-      status: input.status || 'draft',
+      status: input.status || 'on_sale',
       sortOrder: input.sortOrder ?? 0,
     });
     const saved = await this.products.save(entity);
@@ -173,7 +176,7 @@ export class TypeOrmProductsRepository implements IProductsRepository {
       allowCustomerDownload: false,
       coverMediaIds: src.coverMediaIds ? [...src.coverMediaIds] : [],
       tags: src.tags ? [...src.tags] : [],
-      status: 'draft',
+      status: 'off_sale',
       sortOrder: src.sortOrder,
       skus: skus.map((s) => ({
         skuCode: `${s.skuCode}-COPY`,
@@ -232,8 +235,36 @@ export class TypeOrmProductsRepository implements IProductsRepository {
   async removeSku(tenantId: string, skuId: string) {
     const s = await this.skus.findOne({ where: { id: skuId, tenantId } });
     if (!s) return false;
+    // Soft-delete must free uk_sku (tenantId, productId, skuCode) so recreate/upsert can reuse codes.
+    const base = String(s.skuCode || 'sku').slice(0, 40);
+    s.skuCode = `${base}__del__${String(s.id).slice(0, 8)}`;
     s.status = 'deleted';
     await this.skus.save(s);
     return true;
+  }
+
+  /** Revive a soft-deleted SKU with the same product+skuCode, or null if none. */
+  async reviveSkuByCode(
+    tenantId: string,
+    productId: string,
+    skuCode: string,
+    input: CreateSkuInput,
+  ) {
+    const rows = await this.skus.find({ where: { tenantId, productId } });
+    const hit = rows.find((r) => r.status === 'deleted' && r.skuCode === skuCode)
+      || rows.find(
+          (r) =>
+            r.status === 'deleted' &&
+            (r.skuCode || '').startsWith(`${skuCode}__del__`),
+        );
+    if (!hit) return null;
+    hit.skuCode = skuCode;
+    hit.color = input.color ?? null;
+    hit.size = input.size ?? null;
+    hit.price = input.price != null ? String(input.price) : null;
+    hit.stock = input.stock ?? 0;
+    hit.status = input.status || 'active';
+    const saved = await this.skus.save(hit);
+    return this.toSku(saved);
   }
 }

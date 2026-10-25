@@ -48,6 +48,7 @@ Page({
     skus: [{ color: '', price: '' }],
     productLevels: [],
     levelIndex: 0,
+    levelRadios: [],
     groups: [],
     groupId: '',
     groupIndex: 0,
@@ -78,16 +79,33 @@ Page({
     try {
       const productLevels = await request({ url: '/api/levels/product' });
       const list = Array.isArray(productLevels) ? productLevels : (productLevels && productLevels.items) || [];
-      const open = list.find((l) => {
+      const pick = (pred) => list.find(pred);
+      const open = pick((l) => {
         const code = String((l && l.code) || '').toLowerCase();
         const id = String((l && l.id) || '');
-        return code === 'open' || id === 'pl_open';
-      }) || list[0];
-      const levelId = this.data.levelId || (open && open.id) || '';
+        const name = String((l && l.name) || '');
+        return code === 'open' || id === 'pl_open' || name === '公开款';
+      });
+      const directed = pick((l) => {
+        const code = String((l && l.code) || '').toLowerCase();
+        const id = String((l && l.id) || '');
+        const name = String((l && l.name) || '');
+        return code === 'directed' || code === 'designated' || id === 'pl_directed' || name === '定向款';
+      });
+      // 编辑页仅展示「公开款 / 定向款」单选；其它等级保留在 productLevels 兜底
+      const levelRadios = [];
+      if (open) levelRadios.push({ id: open.id, name: open.name || '公开款' });
+      if (directed) levelRadios.push({ id: directed.id, name: directed.name || '定向款' });
+      if (!levelRadios.length) {
+        list.slice(0, 2).forEach((l) => levelRadios.push({ id: l.id, name: l.name || l.id }));
+      }
+      const fallback = open || levelRadios[0] || list[0];
+      const levelId = this.data.levelId || (fallback && fallback.id) || '';
       let levelIndex = list.findIndex((l) => l.id === levelId);
       if (levelIndex < 0) levelIndex = 0;
       this.setData({
         productLevels: list,
+        levelRadios,
         levelId: levelId || (list[0] && list[0].id) || '',
         levelIndex,
       });
@@ -137,7 +155,7 @@ Page({
         groupId,
         groupIndex: Math.max(0, groupIndex),
         priceDisplay: p.priceDisplay || 'show',
-        status: p.status || 'draft',
+        status: (p.status === 'on_sale' || p.status === 'off_sale') ? p.status : 'on_sale',
         skus: (p.skus && p.skus.length)
           ? p.skus.map((s) => ({
               id: s.id,
@@ -333,12 +351,24 @@ Page({
   onMaterial(e) { this.setData({ material: e.detail.value }); },
   onDesc(e) { this.setData({ description: e.detail.value }); },
   onSizeText(e) { this.setData({ sizeText: e.detail.value }); },
-  onStatusTap(e) { this.setData({ status: e.currentTarget.dataset.v }); },
+  onStatusTap(e) {
+    const v = e.currentTarget.dataset.v;
+    if (v !== 'on_sale' && v !== 'off_sale') return;
+    this.setData({ status: v });
+  },
   onPriceDisplayTap(e) { this.setData({ priceDisplay: e.currentTarget.dataset.v }); },
   onLevelChange(e) {
     const idx = Number(e.detail.value);
     const level = this.data.productLevels[idx];
     this.setData({ levelIndex: idx, levelId: level ? level.id : '' });
+  },
+  onLevelTap(e) {
+    const id = e.currentTarget.dataset.id || '';
+    if (!id) return;
+    const list = this.data.productLevels || [];
+    let levelIndex = list.findIndex((l) => l.id === id);
+    if (levelIndex < 0) levelIndex = 0;
+    this.setData({ levelId: id, levelIndex });
   },
   onGroupChange(e) {
     const idx = Number(e.detail.value);
@@ -459,20 +489,12 @@ Page({
         const { skus, ...rest } = payload;
         rest.coverMediaIds = (this.data.images || []).map((im) => im.id).filter(Boolean);
         await request({ url: `/api/products/${this.data.id}`, method: 'PATCH', data: rest });
-        const detail = await request({ url: `/api/products/${this.data.id}` });
-        for (const s of detail.skus || []) {
-          await request({
-            url: `/api/products/${this.data.id}/skus/${s.id}`,
-            method: 'DELETE',
-          }).catch(() => {});
-        }
-        for (const s of skus) {
-          await request({
-            url: `/api/products/${this.data.id}/skus`,
-            method: 'POST',
-            data: s,
-          });
-        }
+        // 整体 upsert，勿 DELETE+POST（软删占 uk_sku 会 Duplicate entry）
+        await request({
+          url: `/api/products/${this.data.id}/skus`,
+          method: 'PUT',
+          data: { skus },
+        });
       } else {
         await request({ url: '/api/products', method: 'POST', data: payload });
       }

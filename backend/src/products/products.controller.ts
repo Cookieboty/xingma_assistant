@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFiles,
   UseGuards,
@@ -38,6 +39,7 @@ export class ProductsController {
     @Query('pageSize') pageSize?: string,
     @Query('shareEventId') shareEventId?: string,
     @Query('boundCustomerId') boundCustomerId?: string,
+    @Query('publicOnly') publicOnly?: string,
   ) {
     const query = {
       q,
@@ -55,6 +57,7 @@ export class ProductsController {
       ...query,
       shareEventId,
       boundCustomerId,
+      publicOnly: publicOnly === '1' || publicOnly === 'true',
     });
   }
 
@@ -75,7 +78,7 @@ export class ProductsController {
   @Roles('owner', 'staff')
   batchStatus(
     @AuthUser() user: AuthContext,
-    @Body() body: { ids: string[]; status: 'on_sale' | 'off_sale' | 'draft' },
+    @Body() body: { ids: string[]; status: 'on_sale' | 'off_sale' },
   ) {
     return this.productsService.batchStatus(user, body.ids, body.status);
   }
@@ -154,6 +157,17 @@ export class ProductsController {
   @Roles('owner', 'staff')
   remove(@AuthUser() user: AuthContext, @Param('id') id: string) {
     return this.productsService.remove(user, id);
+  }
+
+  /** 整体对齐颜色 SKU（编辑页保存）；upsert，避免删再建撞 uk_sku */
+  @Put(':id/skus')
+  @Roles('owner', 'staff')
+  replaceSkus(
+    @AuthUser() user: AuthContext,
+    @Param('id') id: string,
+    @Body() body: { skus?: Array<{ color: string; price?: string | null }> },
+  ) {
+    return this.productsService.replaceColorSkus(user, id, body?.skus || []);
   }
 
   @Post(':id/skus')

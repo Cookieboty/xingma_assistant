@@ -1,0 +1,25 @@
+<view class="page">
+  <view class="hint" wx:if="{{groupName}}">{{groupName}} · 可公开展示的款式</view>
+
+  <view class="grid" wx:if="{{list.length}}">
+    <view
+      class="card"
+      wx:for="{{list}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="goProduct"
+    >
+      <image class="cover" src="{{item.coverUrl || ''}}" mode="aspectFill" />
+      <view class="body">
+        <view class="name">{{item.name || '未命名'}}</view>
+        <view class="meta" wx:if="{{item.styleNo}}">款号 {{item.styleNo}}</view>
+        <view class="price">{{item.priceText || '询价'}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="empty" wx:if="{{!loading && !list.length}}">暂无商品</view>
+  <view class="footer" wx:if="{{loading}}">加载中…</view>
+  <view class="footer" wx:elif="{{loadingMore}}">加载更多…</view>
+  <view class="footer" wx:elif="{{list.length && !hasMore}}">没有更多了</view>
+</view>

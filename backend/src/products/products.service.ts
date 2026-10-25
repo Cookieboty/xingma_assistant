@@ -173,7 +173,7 @@ export class ProductsService {
    */
   async listForCustomer(
     user: AuthContext,
-    opts?: { shareEventId?: string; boundCustomerId?: string; boundCustomerIds?: string[] } & ProductListQuery,
+    opts?: { shareEventId?: string; boundCustomerId?: string; boundCustomerIds?: string[]; publicOnly?: boolean } & ProductListQuery,
   ) {
     const { items } = await this.repo.list(user.tenantId, {
       ...opts,
@@ -188,6 +188,7 @@ export class ProductsService {
     const out = [];
     for (const p of items) {
       const policy = await this.resolveSharePolicy(user.tenantId, p);
+      if (opts?.publicOnly && policy !== 'open') continue;
       const minRank = await this.resolveMinRank(user.tenantId, p);
       const verdict = this.access.canView(user, {
         productId: p.id,
@@ -379,6 +380,7 @@ export class ProductsService {
     ];
     return {
       styleNo: p.styleNo,
+      sellerSku: p.styleNo,
       name: p.name,
       material: p.material,
       colors,
@@ -406,6 +408,9 @@ export class ProductsService {
 
   async update(user: AuthContext, id: string, input: UpdateProductInput) {
     this.assertStaff(user);
+    if (!(input as any).styleNo && (input as any).sellerSku) {
+      (input as any).styleNo = String((input as any).sellerSku).trim();
+    }
     if (input.styleNo) {
       const clash = await this.repo.findByStyleNo(user.tenantId, input.styleNo.trim());
       if (clash && clash.id !== id) throw new ConflictException('款号在本租户内已存在');
@@ -426,8 +431,9 @@ export class ProductsService {
   }
 
   /**
-   * 发品异步任务：按颜色列表整体替换 SKU（一色一价，size=null）。
-   * 先 update 商品字段再调本方法，保证 skuCode 用新款号。
+   * 按颜色列表整体替换/对齐 SKU（一色一价，size=null）。
+   * 同色更新 in-place；缺的新增（优先 revive 软删行）；多余的软删并释放 uk_sku。
+   * 避免「全删再插」撞 product_skus.uk_sku。
    */
   async replaceColorSkus(
     user: AuthContext,
@@ -443,24 +449,52 @@ export class ProductsService {
       throw new BadRequestException('颜色名不能重复');
     }
     const existing = await this.repo.listSkus(user.tenantId, productId);
+    const byColor = new Map<string, (typeof existing)[number]>();
     for (const s of existing) {
-      await this.repo.removeSku(user.tenantId, s.id);
+      const c = (s.color || '').trim();
+      if (c && !byColor.has(c)) byColor.set(c, s);
     }
-    const created = [];
+    const kept: Awaited<ReturnType<IProductsRepository['addSku']>>[] = [];
+    const usedIds = new Set<string>();
     for (const s of skus) {
       const color = s.color.trim();
-      created.push(
-        await this.repo.addSku(user.tenantId, productId, {
-          color,
-          size: null,
-          price: s.price != null && String(s.price).trim() !== '' ? String(s.price).trim() : null,
-          stock: 0,
-          status: 'active',
-          skuCode: `${p.styleNo}-${color}`,
-        }),
+      const price =
+        s.price != null && String(s.price).trim() !== '' ? String(s.price).trim() : null;
+      const skuCode = `${p.styleNo}-${color}`;
+      const payload = {
+        color,
+        size: null as string | null,
+        price,
+        stock: 0,
+        status: 'active' as const,
+        skuCode,
+      };
+      const old = byColor.get(color);
+      if (old) {
+        const updated = await this.repo.updateSku(user.tenantId, old.id, payload);
+        if (updated) kept.push(updated);
+        usedIds.add(old.id);
+        continue;
+      }
+      const revived = await this.repo.reviveSkuByCode(
+        user.tenantId,
+        productId,
+        skuCode,
+        payload,
       );
+      if (revived) {
+        kept.push(revived);
+        usedIds.add(revived.id);
+        continue;
+      }
+      kept.push(await this.repo.addSku(user.tenantId, productId, payload));
     }
-    return created;
+    for (const s of existing) {
+      if (!usedIds.has(s.id)) {
+        await this.repo.removeSku(user.tenantId, s.id);
+      }
+    }
+    return kept;
   }
 
   /** 删除=下架 */
@@ -471,9 +505,12 @@ export class ProductsService {
     return { ok: true, id, status: updated.status };
   }
 
-  async batchStatus(user: AuthContext, ids: string[], status: 'on_sale' | 'off_sale' | 'draft') {
+  async batchStatus(user: AuthContext, ids: string[], status: 'on_sale' | 'off_sale') {
     this.assertStaff(user);
     if (!ids?.length) throw new BadRequestException('ids 不能为空');
+    if (status !== 'on_sale' && status !== 'off_sale') {
+      throw new BadRequestException('status 仅支持 on_sale / off_sale');
+    }
     const n = await this.repo.batchSetStatus(user.tenantId, ids, status);
     return { ok: true, affected: n, status };
   }
@@ -601,7 +638,9 @@ export class ProductsService {
   }
 
   private validateProductInput(input: CreateProductInput) {
-    if (!input.styleNo?.trim()) throw new BadRequestException('款号必填');
+    const styleNo = (input.styleNo || (input as any).sellerSku || '').trim();
+    if (!styleNo) throw new BadRequestException('款号必填');
+    input.styleNo = styleNo;
     if (!input.name?.trim()) throw new BadRequestException('名称必填');
     if (!input.levelId) throw new BadRequestException('商品等级必填');
   }
@@ -700,6 +739,7 @@ export class ProductsService {
     return {
       id: p.id,
       styleNo: p.styleNo,
+      sellerSku: p.styleNo,
       name: p.name,
       description: p.description,
       material: p.material,
@@ -738,6 +778,7 @@ export class ProductsService {
     return {
       id: p.id,
       styleNo: p.styleNo,
+      sellerSku: p.styleNo,
       name: p.name,
       description: p.description,
       material: p.material,

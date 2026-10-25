@@ -6,14 +6,13 @@
       <view class="muted tiny">共 {{total}} 款</view>
     </view>
     <view class="toolbar-actions">
-      <view class="btn-ghost tool-btn" bindtap="goSettings">设置</view>
       <view class="btn-ghost tool-btn" bindtap="goEdit">手工录入</view>
       <view class="btn-primary tool-btn" bindtap="goPublish">选图发品</view>
     </view>
   </view>
 
   <view class="card search-bar">
-    <input class="input" placeholder="搜索款号 / 名称" value="{{q}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="onSearch" />
+    <input class="input" placeholder="搜索款号" value="{{q}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="onSearch" />
     <view class="search-btn" bindtap="onSearch">搜索</view>
   </view>
 
@@ -31,10 +30,8 @@
   </scroll-view>
 
   <view class="filters">
-    <text class="chip {{status===''?'active':''}}" data-status="" bindtap="onStatusFilter">全部</text>
     <text class="chip {{status==='on_sale'?'active':''}}" data-status="on_sale" bindtap="onStatusFilter">在售</text>
     <text class="chip {{status==='off_sale'?'active':''}}" data-status="off_sale" bindtap="onStatusFilter">下架</text>
-    <text class="chip {{status==='draft'?'active':''}}" data-status="draft" bindtap="onStatusFilter">草稿</text>
   </view>
 
   <view class="product-card card" wx:for="{{list}}" wx:key="id">
@@ -64,10 +61,6 @@
       <view class="pc-act" catchtap="openShareSheet" data-id="{{item.id}}" data-name="{{item.name}}" data-style="{{item.styleNo}}" data-cover="{{item.coverUrl}}">转发</view>
       <view class="pc-act-div"></view>
       <view class="pc-act" catchtap="goMaterials" data-id="{{item.id}}">素材</view>
-      <view class="pc-act-div"></view>
-      <view class="pc-act" catchtap="toggleSale" data-id="{{item.id}}" data-status="{{item.status}}">
-        {{item.status==='on_sale'?'下架':'上架'}}
-      </view>
     </view>
   </view>
 
