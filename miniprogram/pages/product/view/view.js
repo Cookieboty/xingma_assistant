@@ -11,6 +11,7 @@ const {
   isProfilePrompted,
   markProfilePrompted,
   saveProfileWithAvatarUpload,
+  stableMediaUrl,
 } = require('../../../utils/profile');
 
 function skuHasPrice(s) {
@@ -70,6 +71,7 @@ Page({
   },
   async onLoad(q) {
     this._layoutHomeFab();
+    this._hideNativeHome();
     const shareEventId = q.shareEventId || '';
     const boundCustomerId = q.boundCustomerId || '';
     const id = q.id || '';
@@ -126,7 +128,8 @@ Page({
         product: safe,
         canDownload: !!product.allowCustomerDownload,
         groupId,
-        showCatalogCta: !!groupId,
+        // 客户分享落地页：房子/「更多」始终进公开目录，不依赖 groupId
+        showCatalogCta: true,
         error: '',
         ...skuState,
       });
@@ -139,7 +142,7 @@ Page({
   async loadContactQr() {
     try {
       const tenant = await request({ url: '/api/tenants/current' });
-      this.setData({ contactQrUrl: (tenant && tenant.contactQrUrl) || '' });
+      this.setData({ contactQrUrl: stableMediaUrl((tenant && tenant.contactQrUrl) || '') || '' });
     } catch (e) {
       /* ignore */
     }
@@ -372,7 +375,18 @@ Page({
     }
   },
 
-  /** t336: 房子按钮贴在导航栏下方左侧（对齐胶囊高度） */
+  onShow() {
+    this._hideNativeHome();
+  },
+
+  /** 分享单页模式下系统左上角房子会进首页/管理端 Tab；隐藏之，只用自定义 FAB→catalog */
+  _hideNativeHome() {
+    try {
+      if (typeof wx.hideHomeButton === 'function') wx.hideHomeButton();
+    } catch (e) { /* ignore */ }
+  },
+
+  /** t336: 房子在导航栏下方左侧（原生 nav 不可覆盖；系统 home 已 hide） */
   _layoutHomeFab() {
     try {
       const sys = wx.getSystemInfoSync() || {};
@@ -389,15 +403,16 @@ Page({
     } catch (e) { /* keep defaults */ }
   },
 
+  /** 房子 FAB 与「更多」共用：客户上下文永远进公开 catalog，绝不进管理端 list */
   goCatalog() {
     const groupId = this.data.groupId || (this.data.product && this.data.product.groupId) || '';
-    if (!groupId) {
-      wx.showToast({ title: '暂无分组目录', icon: 'none' });
-      return;
-    }
-    const qs = [`groupId=${encodeURIComponent(groupId)}`];
-    if (this.data.shareEventId) qs.push(`shareEventId=${this.data.shareEventId}`);
-    if (this.data.boundCustomerId) qs.push(`boundCustomerId=${this.data.boundCustomerId}`);
-    wx.navigateTo({ url: `/pages/product/catalog/catalog?${qs.join('&')}` });
+    const qs = [];
+    if (groupId) qs.push(`groupId=${encodeURIComponent(groupId)}`);
+    if (this.data.shareEventId) qs.push(`shareEventId=${encodeURIComponent(this.data.shareEventId)}`);
+    if (this.data.boundCustomerId) qs.push(`boundCustomerId=${encodeURIComponent(this.data.boundCustomerId)}`);
+    const url = qs.length
+      ? `/pages/product/catalog/catalog?${qs.join('&')}`
+      : '/pages/product/catalog/catalog';
+    wx.navigateTo({ url });
   },
 });

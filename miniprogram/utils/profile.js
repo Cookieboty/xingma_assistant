@@ -3,6 +3,26 @@ const { request } = require('./request');
 const CONTACT_PROMPTED_KEY = 'contact_prompted_v1';
 const PROFILE_PROMPTED_KEY = 'profile_complete_prompted_v1';
 
+/** 剥掉 OSS 签名 query，避免公网读切换后头像/二维码 403 空白 */
+function stableMediaUrl(url) {
+  if (url == null) return '';
+  const raw = String(url).trim();
+  if (!raw) return '';
+  if (
+    /^wxfile:/i.test(raw) ||
+    /^file:/i.test(raw) ||
+    /^http:\/\/(tmp|usr)\//i.test(raw) ||
+    /^\/(tmp|usr)\//i.test(raw)
+  ) {
+    return '';
+  }
+  if (/[?&](OSSAccessKeyId|Signature|Expires|security-token|x-oss-signature)=/i.test(raw)) {
+    const q = raw.indexOf('?');
+    return q >= 0 ? raw.slice(0, q) : raw;
+  }
+  return raw;
+}
+
 function currentRoute() {
   try {
     const pages = getCurrentPages();
@@ -89,7 +109,8 @@ function uploadAvatar(filePath) {
         try {
           const data = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
           if (r.statusCode >= 200 && r.statusCode < 300) {
-            const url = (data && (data.url || data.publicUrl || data.avatarUrl)) || '';
+            const url = stableMediaUrl((data && (data.url || data.publicUrl || data.avatarUrl)) || '')
+              || ((data && (data.url || data.publicUrl || data.avatarUrl)) || '');
             if (!url) reject(new Error('上传未返回地址'));
             else resolve(url);
           } else {
@@ -225,6 +246,7 @@ module.exports = {
   saveProfileWithAvatarUpload,
   uploadAvatar,
   isTempAvatarPath,
+  stableMediaUrl,
   hasContactInfo,
   isContactPrompted,
   markContactPrompted,
