@@ -84,9 +84,12 @@ Page({
       } else if (!s.configured) {
         wx.showToast({ title: '服务端未配置生图密钥', icon: 'none' });
       }
-      // 生图默认短路径：自动选「平铺/挂拍」模板（可换）；assets 显式传入避免 setData 未落地
+      // 生图默认短路径：自动选「模特上身·场景图」（可换）；style_ref 仍走完整路径
       if (mediaKind !== 'video') {
-        const prefer = uniq.find((t) => t.id === 'flatlay') || uniq.find((t) => t.id === 'detail_closeup') || uniq[0];
+        const prefer = uniq.find((t) => t.id === 'model_scene')
+          || uniq.find((t) => t.id === 'flatlay')
+          || uniq.find((t) => t.id === 'detail_closeup')
+          || uniq[0];
         if (prefer) {
           this.pickTemplate({
             currentTarget: { dataset: { id: prefer.id } },
@@ -113,7 +116,7 @@ Page({
     if (tpl.styleRef && tpl.styleRef.min > 0) return false;
     return true;
   },
-  /** 自动勾选封面/前几张商品图作为参考 */
+  /** 自动勾选商品图作为参考：静物/挂拍勾选封面+细节（至 max）；其余模板勾选至 min */
   _autoPickRefs(tpl, assets) {
     const list = (assets || []).filter((a) => a && a.id && !a.isPromo);
     if (!list.length) return { refs: [], assets: assets || [] };
@@ -126,7 +129,9 @@ Page({
     pool.forEach((a) => { if (!seen[a.id]) { seen[a.id] = 1; ordered.push(a); } });
     const max = Math.min(tpl.reference.max || 1, ordered.length);
     const min = Math.min(tpl.reference.min || 1, max);
-    const n = Math.max(min, Math.min(max, min));
+    // 平铺/挂拍静物、细节特写：尽量勾满（封面+细节），不要只勾 1 张封面
+    const stillIds = { flatlay: 1, detail_closeup: 1 };
+    const n = stillIds[tpl.id] ? max : Math.max(min, Math.min(max, min));
     const refs = ordered.slice(0, n).map((a) => a.id);
     const assetsOut = (assets || []).map((a) => Object.assign({}, a, {
       checked: refs.indexOf(a.id) >= 0,

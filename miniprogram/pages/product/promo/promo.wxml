@@ -27,7 +27,7 @@
         </view>
         <view class="btn-ghost mini tpl-switch" bindtap="backToTemplates">换模板</view>
       </view>
-      <view class="muted small" wx:if="{{quickMode}}" style="margin-top:8rpx;">默认挂拍静物 · 风格参考 / 模特 / 多色请点「换模板」</view>
+      <view class="muted small" wx:if="{{quickMode}}" style="margin-top:8rpx;">默认模特上身场景 · 风格参考 / 平铺挂拍 / 多色请点「换模板」</view>
       <view class="progress">
         <text wx:for="{{steps}}" wx:key="*this" class="dot {{index <= stepIdx ? 'on' : ''}}">{{stepNames[item]}}</text>
       </view>

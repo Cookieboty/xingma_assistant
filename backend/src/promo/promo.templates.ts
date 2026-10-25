@@ -227,7 +227,7 @@ export const TEMPLATES: PromoTemplate[] = [
       { id: 'autumn', name: '秋冬氛围', prompt: 'with autumn leaves, pine cones and a warm scarf as props' },
       { id: 'wood', name: '原木地板', prompt: 'on light wooden floorboards with soft daylight' },
     ],
-    reference: { prefer: ['main'], min: 1, max: 1, hint: '选 1 张能看到整件衣服的主图' },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张挂拍/平铺/静物主图与细节（短路径会尽量全选）' },
     count: { min: 1, max: 4, default: 1 },
     steps: ['reference', 'feature', 'pose_scene', 'count'],
     buildPrompt: (c) =>
