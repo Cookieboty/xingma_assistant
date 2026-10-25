@@ -10,6 +10,7 @@ import {
 import { DataSource } from 'typeorm';
 import { Inquiry } from '../common/entities/inquiry.entity';
 import { Product } from '../common/entities/product.entity';
+import { TenantMember } from '../common/entities/tenant-member.entity';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { CustomersService } from '../customers/customers.service';
 
@@ -23,6 +24,9 @@ export interface InquiryRec {
   contactName: string | null;
   remark: string | null;
   status: string;
+  assigneeMemberId: string | null;
+  assigneeOpenid: string | null;
+  assigneeName: string | null;
   staffReadAt: Date | null;
   handledNote: string | null;
   unread: boolean;
@@ -88,12 +92,45 @@ export class InquiriesService {
       contactName: e.contactName ?? null,
       remark: e.remark ?? null,
       status: e.status,
+      assigneeMemberId: e.assigneeMemberId ?? null,
+      assigneeOpenid: e.assigneeOpenid ?? null,
+      assigneeName: e.assigneeName ?? null,
       staffReadAt,
       handledNote: e.handledNote ?? null,
       unread: staffReadAt == null,
       productName: productName ?? null,
       createdAt: e.createdAt,
     };
+  }
+
+  private async resolveHandler(user: AuthContext): Promise<{
+    memberId: string | null;
+    openid: string;
+    name: string;
+  }> {
+    const openid = user.openid;
+    let name = '';
+    if (this.db) {
+      const m = await this.db.getRepository(TenantMember).findOne({
+        where: { tenantId: user.tenantId, openid },
+      });
+      if (m?.nickname) name = String(m.nickname).trim();
+    }
+    if (!name) name = openid ? `员工${openid.slice(-4)}` : '员工';
+    return {
+      memberId: user.memberId || null,
+      openid,
+      name: name.slice(0, 64),
+    };
+  }
+
+  private applyHandler(
+    target: { assigneeMemberId: string | null; assigneeOpenid?: string | null; assigneeName?: string | null },
+    handler: { memberId: string | null; openid: string; name: string },
+  ) {
+    target.assigneeMemberId = handler.memberId;
+    target.assigneeOpenid = handler.openid;
+    target.assigneeName = handler.name;
   }
 
   async create(user: AuthContext, body: CreateInquiryBody) {
@@ -142,6 +179,8 @@ export class InquiriesService {
           remark: remark || null,
           status: 'open',
           assigneeMemberId: null,
+          assigneeOpenid: null,
+          assigneeName: null,
           staffReadAt: null,
           handledNote: null,
         }),
@@ -158,6 +197,9 @@ export class InquiriesService {
       contactName: contactName || null,
       remark: remark || null,
       status: 'open',
+      assigneeMemberId: null,
+      assigneeOpenid: null,
+      assigneeName: null,
       staffReadAt: null,
       handledNote: null,
       unread: true,
@@ -252,7 +294,7 @@ export class InquiriesService {
         .addSelect('COUNT(*)', 'inquiryCount')
         .addSelect(
           `SUM(CASE WHEN i.status NOT IN ('handled', 'closed', 'replied')
-            AND (i.staff_read_at IS NULL OR i.status IN ('open', 'pending'))
+            AND (i.staff_read_at IS NULL OR i.status IN ('open', 'pending', 'in_progress'))
             THEN 1 ELSE 0 END)`,
           'unreadCount',
         )
@@ -283,9 +325,9 @@ export class InquiriesService {
       };
       cur.inquiryCount += 1;
       const st = String(i.status || 'open');
-      const isOpen = st === 'open' || st === 'pending';
+      const isOpen = st === 'open' || st === 'pending' || st === 'in_progress';
       const isDone = st === 'handled' || st === 'closed' || st === 'replied';
-      // 红点：未处理(open) 或 未读；已处理不再计入
+      // 红点：待沟通/正在沟通 或 未读；已处理不再计入
       if (!isDone && (i.staffReadAt == null || isOpen)) cur.unreadCount += 1;
       cur.hasUnreadInquiry = cur.unreadCount > 0;
       map.set(i.customerId, cur);
@@ -326,7 +368,53 @@ export class InquiriesService {
     return { ok: true, affected };
   }
 
-  /** 员工将单条询价标为已处理，可附处理说明 */
+  /** 待沟通 → 我来沟通：记处理人，状态变为正在沟通 */
+  async claim(
+    user: AuthContext,
+    id: string,
+  ) {
+    this.assertStaff(user);
+    const handler = await this.resolveHandler(user);
+    const now = new Date();
+    if (this.db) {
+      const repo = this.db.getRepository(Inquiry);
+      const e = await repo.findOne({ where: { id, tenantId: user.tenantId } });
+      if (!e) throw new NotFoundException('询价不存在');
+      if (e.status === 'handled' || e.status === 'closed' || e.status === 'replied') {
+        throw new BadRequestException('该询价已处理完成');
+      }
+      // 已在沟通中：保留原处理人，不抢单；本人可再次点确认
+      if (e.status === 'in_progress' && e.assigneeMemberId && e.assigneeMemberId !== handler.memberId) {
+        throw new BadRequestException(`已由 ${e.assigneeName || '同事'} 沟通中`);
+      }
+      e.status = 'in_progress';
+      this.applyHandler(e, handler);
+      if (!e.staffReadAt) e.staffReadAt = now;
+      const saved = await repo.save(e);
+      let productName: string | null = null;
+      const p = await this.db.getRepository(Product).findOne({
+        where: { id: saved.productId, tenantId: user.tenantId },
+        select: ['id', 'name'],
+      });
+      productName = p?.name ?? null;
+      return this.toRec(saved, productName);
+    }
+    const rec = this.listStore.find((i) => i.id === id && i.tenantId === user.tenantId);
+    if (!rec) throw new NotFoundException('询价不存在');
+    if (rec.status === 'handled' || rec.status === 'closed' || rec.status === 'replied') {
+      throw new BadRequestException('该询价已处理完成');
+    }
+    if (rec.status === 'in_progress' && rec.assigneeMemberId && rec.assigneeMemberId !== handler.memberId) {
+      throw new BadRequestException(`已由 ${rec.assigneeName || '同事'} 沟通中`);
+    }
+    rec.status = 'in_progress';
+    this.applyHandler(rec, handler);
+    if (!rec.staffReadAt) rec.staffReadAt = now;
+    rec.unread = false;
+    return { ...rec };
+  }
+
+  /** 正在沟通 → 沟通完成：填写沟通内容，保留处理人 */
   async markHandled(
     user: AuthContext,
     id: string,
@@ -336,14 +424,22 @@ export class InquiriesService {
     const note = String(body?.handledNote ?? body?.handleResult ?? '')
       .trim()
       .slice(0, 512);
+    if (!note) throw new BadRequestException('请填写沟通内容');
+    const handler = await this.resolveHandler(user);
     const now = new Date();
     if (this.db) {
       const repo = this.db.getRepository(Inquiry);
       const e = await repo.findOne({ where: { id, tenantId: user.tenantId } });
       if (!e) throw new NotFoundException('询价不存在');
+      if (e.status === 'handled' || e.status === 'closed' || e.status === 'replied') {
+        throw new BadRequestException('该询价已处理完成');
+      }
+      // 尚未认领时允许直接完成（顺带记处理人），正常路径应先 claim
+      if (!e.assigneeMemberId && !e.assigneeOpenid) {
+        this.applyHandler(e, handler);
+      }
       e.status = 'handled';
-      e.handledNote = note || e.handledNote || null;
-      // 已处理必须同时已读，否则 unread-summary 红点不消
+      e.handledNote = note;
       e.staffReadAt = now;
       const saved = await repo.save(e);
       let productName: string | null = null;
@@ -356,8 +452,14 @@ export class InquiriesService {
     }
     const rec = this.listStore.find((i) => i.id === id && i.tenantId === user.tenantId);
     if (!rec) throw new NotFoundException('询价不存在');
+    if (rec.status === 'handled' || rec.status === 'closed' || rec.status === 'replied') {
+      throw new BadRequestException('该询价已处理完成');
+    }
+    if (!rec.assigneeMemberId && !rec.assigneeOpenid) {
+      this.applyHandler(rec, handler);
+    }
     rec.status = 'handled';
-    rec.handledNote = note || rec.handledNote || null;
+    rec.handledNote = note;
     rec.staffReadAt = now;
     rec.unread = false;
     return { ...rec };

@@ -2,17 +2,19 @@ const { request } = require('../../../utils/request');
 
 function statusLabel(s) {
   if (s === 'handled') return '已处理';
+  if (s === 'in_progress') return '正在沟通';
   if (s === 'replied') return '已回复';
   if (s === 'closed') return '已关闭';
-  return '待处理';
+  return '待沟通';
 }
 
 Page({
   data: {
     list: [],
-    status: 'open', // 默认待处理
+    status: 'open', // 默认待沟通
     statusChips: [
-      { id: 'open', name: '待处理' },
+      { id: 'open', name: '待沟通' },
+      { id: 'in_progress', name: '正在沟通' },
       { id: '', name: '全部' },
       { id: 'handled', name: '已处理' },
     ],
@@ -30,6 +32,7 @@ Page({
       const list = (raw || []).map((i) => Object.assign({}, i, {
         statusLabel: statusLabel(i.status),
         title: i.productName || i.productId || '询价',
+        handlerText: (i.assigneeName || '').trim() || '未认领',
       }));
       this.setData({ list });
     } catch (e) {

@@ -39,7 +39,14 @@ export class InquiriesController {
     return this.inquiriesService.list(user, { productId, customerId, status });
   }
 
-  /** 单条询价标为已处理（可附处理说明） */
+  /** 待沟通 → 我来沟通（记处理人，状态 in_progress） */
+  @Post(':id/claim')
+  @Roles('owner', 'staff')
+  claim(@AuthUser() user: AuthContext, @Param('id') id: string) {
+    return this.inquiriesService.claim(user, id);
+  }
+
+  /** 正在沟通 → 沟通完成（填沟通内容，保留处理人） */
   @Post(':id/handled')
   @Roles('owner', 'staff')
   markHandled(

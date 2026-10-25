@@ -1,7 +1,7 @@
 <view class="container">
   <view class="card head">
     <view class="section-title">询价</view>
-    <view class="muted">员工与客户同权：待处理可先筛出来跟进</view>
+    <view class="muted">待沟通 → 我来沟通 → 沟通完成；列表显示处理人</view>
   </view>
   <scroll-view scroll-x class="chips-row" enable-flex>
     <text
@@ -15,11 +15,12 @@
   <view class="card" wx:for="{{list}}" wx:key="id" bindtap="goDetail" data-id="{{item.id}}">
     <view>{{item.title}}</view>
     <view class="muted" wx:if="{{item.contactName || item.phone}}">{{item.contactName || ''}} {{item.phone || ''}}</view>
+    <view class="muted">处理人：{{item.handlerText}}</view>
     <view class="muted">{{item.statusLabel}} · {{item.content}}</view>
-    <view class="muted" wx:if="{{item.handledNote}}">处理：{{item.handledNote}}</view>
+    <view class="muted" wx:if="{{item.handledNote}}">沟通：{{item.handledNote}}</view>
   </view>
   <view class="card muted empty" wx:if="{{!list.length}}">
-    <view wx:if="{{status==='open'}}">暂无待处理询价</view>
+    <view wx:if="{{status==='open'}}">暂无待沟通询价</view>
     <view wx:else>暂无询价</view>
   </view>
 </view>

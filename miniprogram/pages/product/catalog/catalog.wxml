@@ -1,5 +1,8 @@
 <view class="page">
-  <view class="hint" wx:if="{{groupName}}">{{groupName}} · 可公开展示的款式</view>
+  <view class="head" wx:if="{{groupName}}">
+    <view class="head-title">{{groupName}}</view>
+    <view class="head-sub">可公开展示的款式</view>
+  </view>
 
   <view class="grid" wx:if="{{list.length}}">
     <view
@@ -9,11 +12,19 @@
       data-id="{{item.id}}"
       bindtap="goProduct"
     >
-      <image class="cover" src="{{item.coverUrl || ''}}" mode="aspectFill" />
+      <view class="cover-wrap">
+        <image
+          wx:if="{{item.coverUrl}}"
+          class="cover"
+          src="{{item.coverUrl}}"
+          mode="aspectFill"
+          lazy-load
+        />
+        <view wx:else class="cover cover-ph">暂无图</view>
+      </view>
       <view class="body">
-        <view class="name">{{item.name || '未命名'}}</view>
-        <view class="meta" wx:if="{{item.styleNo}}">款号 {{item.styleNo}}</view>
-        <view class="price">{{item.priceText || '询价'}}</view>
+        <view class="style">{{item.styleNo ? '款号 ' + item.styleNo : '未填款号'}}</view>
+        <view class="price {{item.priceMuted ? 'muted' : ''}}">{{item.priceText || '询价'}}</view>
       </view>
     </view>
   </view>
@@ -22,4 +33,5 @@
   <view class="footer" wx:if="{{loading}}">加载中…</view>
   <view class="footer" wx:elif="{{loadingMore}}">加载更多…</view>
   <view class="footer" wx:elif="{{list.length && !hasMore}}">没有更多了</view>
+  <view class="footer" wx:elif="{{list.length && hasMore}}">上拉加载更多</view>
 </view>

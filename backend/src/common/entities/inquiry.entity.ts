@@ -24,11 +24,17 @@ export class Inquiry extends TenantScopedEntity {
   @Column({ type: 'varchar', length: 255, nullable: true, comment: '可选备注' })
   remark!: string | null;
 
-  @Column({ type: 'varchar', length: 16, default: 'open', comment: 'open|handled|replied|closed' })
+  @Column({ type: 'varchar', length: 16, default: 'open', comment: 'open|in_progress|handled|replied|closed' })
   status!: string;
 
   @Column({ type: 'varchar', length: 36, nullable: true, name: 'assignee_member_id' })
   assigneeMemberId!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, name: 'assignee_openid', comment: '处理人 openid' })
+  assigneeOpenid!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, name: 'assignee_name', comment: '处理人昵称快照' })
+  assigneeName!: string | null;
 
   /** 员工已读时间；NULL=未读（客户新提交默认未读） */
   @Column({ type: 'datetime', precision: 6, nullable: true, name: 'staff_read_at' })

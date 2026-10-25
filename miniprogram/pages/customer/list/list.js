@@ -93,7 +93,7 @@ Page({
           const pendingIds = {};
           (inqs || []).forEach((i) => {
             const st = String((i && i.status) || 'open');
-            if (st === 'open' || st === 'pending' || (!i.status && i.unread)) {
+            if (st === 'open' || st === 'pending' || st === 'in_progress' || (!i.status && i.unread)) {
               if (i.customerId) pendingIds[i.customerId] = true;
             }
           });

@@ -7,9 +7,12 @@ const { request, ensureSilentSession } = require('../../../utils/request');
 const PAGE_SIZE = 20;
 
 function normalize(p) {
+  const priceText = p.priceText || '询价';
+  const priceMuted = priceText === '未标价' || priceText === '询价' || priceText === '价格请询价';
   return Object.assign({}, p, {
     coverUrl: p.coverUrl || (p.images && p.images[0] && p.images[0].url) || '',
-    priceText: p.priceText || '询价',
+    priceText,
+    priceMuted,
   });
 }
 
