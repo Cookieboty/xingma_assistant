@@ -103,7 +103,6 @@
     <view class="share-sheet card" catchtap="noop">
       <view class="share-sheet-title">转发给微信好友</view>
       <view class="muted small" wx:if="{{shareSheetProduct.name}}">{{shareSheetProduct.name}} · {{shareSheetProduct.styleNo}}</view>
-      <view class="muted small" style="margin-top:8rpx;">素材下载请点「素材」，与转发分开</view>
       <button
         class="btn-primary share-sheet-btn"
         open-type="share"
@@ -111,11 +110,11 @@
         catchtap="onShareSheetTap"
       >公开转发</button>
       <button
-        class="btn-ghost share-sheet-btn"
+        class="btn-primary share-sheet-btn"
         open-type="share"
         data-policy="limited"
         catchtap="onShareSheetTap"
-      >限量转发（前几位打开可看）</button>
+      >限量转发</button>
       <view class="share-sheet-cancel" bindtap="closeShareSheet">取消</view>
     </view>
   </view>
