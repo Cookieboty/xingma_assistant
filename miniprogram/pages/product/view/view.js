@@ -7,6 +7,10 @@ const {
   hasContactInfo,
   isContactPrompted,
   markContactPrompted,
+  isProfileComplete,
+  isProfilePrompted,
+  markProfilePrompted,
+  saveProfileWithAvatarUpload,
 } = require('../../../utils/profile');
 
 function skuHasPrice(s) {
@@ -51,11 +55,16 @@ Page({
     skuRows: [],
     showSoftTip: false,
     showInquirySheet: false,
+    showProfileSheet: false,
     contactPhone: '',
     contactName: '',
     contactRemark: '',
     profilePhone: '',
     profileName: '',
+    profileAvatarUrl: '',
+    profileDraftNick: '',
+    profileDraftPhone: '',
+    profileSaving: false,
   },
   async onLoad(q) {
     const shareEventId = q.shareEventId || '';
@@ -147,25 +156,127 @@ Page({
     });
   },
 
-  /** 预填联系方式；无联系方式时轻提示一次（不强制弹填表） */
+  /** 预填联系方式；首次打开软提示完善资料（头像+昵称+手机，可跳过） */
   async loadProfileForInquiry() {
     try {
       const me = await request({ url: '/api/auth/me' });
       const phone = (me && me.phone) || '';
       const name = (me && me.nickname) || '';
+      const avatar = (me && me.avatarUrl) || '';
       this.setData({
         profilePhone: phone,
         profileName: name,
+        profileAvatarUrl: avatar,
         contactPhone: phone,
         contactName: name,
+        profileDraftNick: name,
+        profileDraftPhone: phone,
       });
-      if (!hasContactInfo(me) && !isContactPrompted()) {
+      // 首次客户打开：软弹完善资料（不挡看货；可跳过）
+      if (!isProfilePrompted() && !isProfileComplete(me)) {
+        this.setData({ showProfileSheet: true, showSoftTip: false });
+      } else if (!hasContactInfo(me) && !isContactPrompted()) {
         this.setData({ showSoftTip: true });
       } else if (hasContactInfo(me)) {
         markContactPrompted();
       }
+      if (isProfileComplete(me)) markProfilePrompted();
     } catch (e) {
       /* 不阻断看货 */
+    }
+  },
+  skipProfileSheet() {
+    markProfilePrompted();
+    this.setData({ showProfileSheet: false });
+    // 仍无联系方式时给询价轻提示
+    if (!hasContactInfo({
+      phone: this.data.profilePhone || this.data.profileDraftPhone,
+      nickname: this.data.profileName || this.data.profileDraftNick,
+    }) && !isContactPrompted()) {
+      this.setData({ showSoftTip: true });
+    }
+  },
+  onProfileChooseAvatar(e) {
+    const url = (e.detail && e.detail.avatarUrl) || '';
+    if (url) this.setData({ profileAvatarUrl: url });
+  },
+  onProfileNick(e) {
+    this.setData({ profileDraftNick: e.detail.value });
+  },
+  onProfilePhone(e) {
+    this.setData({ profileDraftPhone: e.detail.value });
+  },
+  async onProfileGetPhone(e) {
+    const detail = (e && e.detail) || {};
+    if (detail.errno === 1400001) {
+      wx.showToast({ title: '手机号额度不足', icon: 'none' });
+      return;
+    }
+    if (!detail.code) {
+      const denied = (detail.errMsg || '').indexOf('deny') >= 0;
+      wx.showToast({ title: denied ? '已取消授权' : '无法获取微信手机号', icon: 'none' });
+      return;
+    }
+    try {
+      const me = await request({
+        url: '/api/auth/me/phone',
+        method: 'POST',
+        data: { code: detail.code },
+      });
+      const phone = (me && me.phone) || '';
+      if (phone) {
+        this.setData({
+          profileDraftPhone: phone,
+          profilePhone: phone,
+          contactPhone: phone,
+        });
+        wx.showToast({ title: '已填入手机号', icon: 'success' });
+      }
+    } catch (err) {
+      wx.showToast({ title: (err && err.message) || '微信手机号不可用', icon: 'none' });
+    }
+  },
+  async saveProfileSheet() {
+    if (this.data.profileSaving) return;
+    const nickname = (this.data.profileDraftNick || '').trim();
+    const phone = (this.data.profileDraftPhone || '').trim();
+    const avatarUrl = (this.data.profileAvatarUrl || '').trim();
+    if (!nickname && !phone && !avatarUrl) {
+      wx.showToast({ title: '可先填一项，或点跳过', icon: 'none' });
+      return;
+    }
+    if (phone && !/^1\d{10}$/.test(phone) && !/^\+?\d{6,20}$/.test(phone)) {
+      wx.showToast({ title: '手机号格式不太对', icon: 'none' });
+      return;
+    }
+    this.setData({ profileSaving: true });
+    try {
+      const saved = await saveProfileWithAvatarUpload({
+        nickname: nickname || undefined,
+        phone: phone || undefined,
+        avatarUrl: avatarUrl || undefined,
+        uploadAvatarIfTemp: true,
+      });
+      markProfilePrompted();
+      markContactPrompted();
+      const nextNick = (saved && saved.nickname) || nickname;
+      const nextPhone = (saved && saved.phone) || phone;
+      const nextAvatar = (saved && saved.avatarUrl) || avatarUrl;
+      this.setData({
+        showProfileSheet: false,
+        profileSaving: false,
+        profileName: nextNick,
+        profilePhone: nextPhone,
+        profileAvatarUrl: nextAvatar,
+        profileDraftNick: nextNick,
+        profileDraftPhone: nextPhone,
+        contactName: nextNick,
+        contactPhone: nextPhone,
+      });
+      wx.showToast({ title: '已保存', icon: 'success' });
+    } catch (err) {
+      this.setData({ profileSaving: false });
+      wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' });
     }
   },
   dismissSoftTip() {
@@ -183,6 +294,7 @@ Page({
         contactName: name,
         contactRemark: '',
         showInquirySheet: true,
+        showProfileSheet: false,
         showSoftTip: false,
         profilePhone: phone,
         profileName: name,
@@ -190,6 +302,7 @@ Page({
     } catch (e) {
       this.setData({
         showInquirySheet: true,
+        showProfileSheet: false,
         showSoftTip: false,
         contactPhone: this.data.profilePhone || '',
         contactName: this.data.profileName || '',

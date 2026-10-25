@@ -69,6 +69,55 @@
     <view class="inquire-btn" bindtap="openInquirySheet">询价</view>
   </view>
 
+
+  <!-- 首次打开软提示完善资料（可跳过，不挡看货） -->
+  <view class="contact-mask" wx:if="{{showProfileSheet}}" catchtouchmove="noop">
+    <view class="contact-sheet profile-sheet" catchtap="noop">
+      <view class="contact-sheet-title">完善资料</view>
+      <view class="contact-sheet-desc">方便档口认出你；可不填，随时点跳过</view>
+      <view class="profile-sheet-row">
+        <button
+          class="profile-avatar-btn"
+          open-type="chooseAvatar"
+          bind:chooseavatar="onProfileChooseAvatar"
+        >
+          <image wx:if="{{profileAvatarUrl}}" src="{{profileAvatarUrl}}" class="profile-avatar-img" mode="aspectFill" />
+          <view wx:else class="profile-avatar-placeholder">头像</view>
+        </button>
+        <view class="profile-sheet-fields">
+          <input
+            class="contact-input"
+            type="nickname"
+            maxlength="32"
+            placeholder="昵称 / 怎么称呼"
+            value="{{profileDraftNick}}"
+            bindblur="onProfileNick"
+            bindinput="onProfileNick"
+          />
+          <view class="profile-phone-row">
+            <input
+              class="contact-input profile-phone-input"
+              type="number"
+              maxlength="20"
+              placeholder="手机号"
+              value="{{profileDraftPhone}}"
+              bindinput="onProfilePhone"
+            />
+            <button
+              class="profile-phone-wx"
+              open-type="getPhoneNumber"
+              bindgetphonenumber="onProfileGetPhone"
+            >微信获取</button>
+          </view>
+        </view>
+      </view>
+      <view class="contact-sheet-actions">
+        <view class="contact-btn ghost" bindtap="skipProfileSheet">跳过</view>
+        <view class="contact-btn primary" bindtap="saveProfileSheet">{{profileSaving ? '保存中…' : '保存'}}</view>
+      </view>
+    </view>
+  </view>
+
   <!-- 询价弹层：预填已有联系方式；提交写询价记录 + 档案 -->
   <view class="contact-mask" wx:if="{{showInquirySheet}}" catchtouchmove="noop">
     <view class="contact-sheet" catchtap="noop">

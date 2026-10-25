@@ -247,3 +247,75 @@
   color: #fff;
   font-weight: 500;
 }
+
+/* 完善资料软弹层：正方形头像 + 昵称/手机 */
+.profile-sheet-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 20rpx;
+  margin-top: 8rpx;
+}
+.profile-avatar-btn {
+  width: 112rpx !important;
+  height: 112rpx !important;
+  min-width: 112rpx !important;
+  max-width: 112rpx !important;
+  min-height: 112rpx !important;
+  max-height: 112rpx !important;
+  flex: 0 0 112rpx;
+  padding: 0 !important;
+  margin: 0;
+  border-radius: 12rpx;
+  overflow: hidden;
+  background: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  line-height: normal;
+  font-size: 0;
+}
+.profile-avatar-btn::after { border: none; }
+.profile-avatar-img {
+  width: 112rpx;
+  height: 112rpx;
+  display: block;
+}
+.profile-avatar-placeholder {
+  font-size: 24rpx;
+  color: #999;
+  line-height: 1.2;
+  text-align: center;
+  padding: 8rpx;
+}
+.profile-sheet-fields {
+  flex: 1;
+  min-width: 0;
+}
+.profile-sheet-fields .contact-input {
+  margin-bottom: 12rpx;
+}
+.profile-phone-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+}
+.profile-phone-input {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0 !important;
+}
+.profile-phone-wx {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 16rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  font-size: 24rpx;
+  color: #c45c26;
+  background: transparent;
+  border: none;
+}
+.profile-phone-wx::after { border: none; }

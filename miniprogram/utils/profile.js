@@ -1,6 +1,7 @@
 const { request } = require('./request');
 
 const CONTACT_PROMPTED_KEY = 'contact_prompted_v1';
+const PROFILE_PROMPTED_KEY = 'profile_complete_prompted_v1';
 
 function currentRoute() {
   try {
@@ -18,6 +19,30 @@ function hasContactInfo(me) {
   const phone = String(me.phone || '').trim();
   const name = String(me.nickname || '').trim();
   return !!(phone || name);
+}
+
+
+/** 头像+昵称+手机是否都齐（完善资料软提示用） */
+function isProfileComplete(me) {
+  if (!me) return false;
+  const phone = String(me.phone || '').trim();
+  const name = String(me.nickname || '').trim();
+  const avatar = String(me.avatarUrl || '').trim();
+  return !!(phone && name && avatar);
+}
+
+function isProfilePrompted() {
+  try {
+    return !!wx.getStorageSync(PROFILE_PROMPTED_KEY);
+  } catch (e) {
+    return false;
+  }
+}
+
+function markProfilePrompted() {
+  try {
+    wx.setStorageSync(PROFILE_PROMPTED_KEY, '1');
+  } catch (e) { /* ignore */ }
 }
 
 function isContactPrompted() {
@@ -204,5 +229,9 @@ module.exports = {
   isContactPrompted,
   markContactPrompted,
   CONTACT_PROMPTED_KEY,
+  isProfileComplete,
+  isProfilePrompted,
+  markProfilePrompted,
+  PROFILE_PROMPTED_KEY,
   requestJobSubscribe,
 };
