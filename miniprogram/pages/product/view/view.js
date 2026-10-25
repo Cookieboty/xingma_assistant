@@ -48,6 +48,8 @@ Page({
     boundCustomerId: '',
     groupId: '',
     showCatalogCta: false,
+    homeFabTop: 88,
+    homeFabSize: 32,
     contactQrUrl: '',
     error: '',
     hasPrice: false,
@@ -67,6 +69,7 @@ Page({
     profileSaving: false,
   },
   async onLoad(q) {
+    this._layoutHomeFab();
     const shareEventId = q.shareEventId || '';
     const boundCustomerId = q.boundCustomerId || '';
     const id = q.id || '';
@@ -365,6 +368,23 @@ Page({
     } finally {
       this._submittingInquiry = false;
     }
+  },
+
+  /** t336: 房子按钮贴在导航栏下方左侧（对齐胶囊高度） */
+  _layoutHomeFab() {
+    try {
+      const sys = wx.getSystemInfoSync() || {};
+      const menu = wx.getMenuButtonBoundingClientRect ? wx.getMenuButtonBoundingClientRect() : null;
+      if (menu && menu.height) {
+        this.setData({
+          homeFabTop: Math.round(menu.bottom + 8),
+          homeFabSize: Math.round(menu.height),
+        });
+        return;
+      }
+      const status = sys.statusBarHeight || 20;
+      this.setData({ homeFabTop: status + 48, homeFabSize: 32 });
+    } catch (e) { /* keep defaults */ }
   },
 
   goCatalog() {

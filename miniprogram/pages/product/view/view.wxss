@@ -319,3 +319,22 @@
   border: none;
 }
 .profile-phone-wx::after { border: none; }
+
+/* t336: 顶栏左侧房子 → 公开款式目录（对齐微信胶囊） */
+.home-fab {
+  position: fixed;
+  left: 16px;
+  z-index: 960;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.home-fab-icon {
+  width: 56%;
+  height: 56%;
+}

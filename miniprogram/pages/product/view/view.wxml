@@ -1,5 +1,17 @@
 <!-- 客户专用商品页（分享落地）。无编辑/分享/宣传等管理控件。 -->
 <view class="page" wx:if="{{product}}">
+  <!-- t336: 左上角回目录（全部可公开展示款式），同「更多」上下文 -->
+  <view
+    class="home-fab"
+    wx:if="{{showCatalogCta}}"
+    style="top: {{homeFabTop}}px; height: {{homeFabSize}}px; width: {{homeFabSize}}px;"
+    bindtap="goCatalog"
+    aria-role="button"
+    aria-label="全部款式"
+  >
+    <image class="home-fab-icon" src="/images/home.png" mode="aspectFit" />
+  </view>
+
   <!-- 1. 标题 + 款号/面料等 -->
   <view class="hero">
     <view class="title">{{product.name}}</view>

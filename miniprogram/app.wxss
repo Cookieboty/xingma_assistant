@@ -49,6 +49,7 @@ page {
   font-size: 30rpx;
 }
 .btn-primary.disabled { opacity: 0.5; }
+.btn-ghost.disabled { opacity: 0.5; }
 .btn-ghost {
   background: #fff;
   color: var(--color-primary);

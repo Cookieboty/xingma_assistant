@@ -2,10 +2,7 @@
   <!-- 详情：单组素材 -->
   <block wx:if="{{viewMode === 'detail' && detailSet}}">
     <view class="card head">
-      <view class="back-row" bindtap="backToList">
-        <text class="link">← 素材列表</text>
-      </view>
-      <view class="section-title" style="margin-top:12rpx;">
+      <view class="section-title">
         <text class="type-badge">{{detailSet.typeLabel}}</text>
         {{detailSet.templateName}}
       </view>
@@ -76,7 +73,7 @@
           bindtap="saveToAlbum"
         >{{savingAlbumId === detailSet.id ? '保存中…' : detailSet.albumSaveLabel}}</view>
         <view
-          class="btn-ghost media-btn"
+          class="btn-ghost media-btn {{(!detailSet.canRegen || actingId === detailSet.id) ? 'disabled' : ''}}"
           data-id="{{detailSet.id}}"
           bindtap="regenSelected"
           wx:if="{{!detailSet.isVideo}}"

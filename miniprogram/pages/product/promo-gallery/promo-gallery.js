@@ -71,11 +71,8 @@ function enrichSet(s, prev) {
     albumSaveLabel: albumSelectedCount
       ? (isVideo ? `保存视频(${albumSelectedCount})` : `下载到相册(${albumSelectedCount})`)
       : (isVideo ? '保存视频到相册' : '下载到相册'),
-    regenLabel: (!albumSelectedCount
-      ? '重新生成'
-      : (albumAllSelected
-        ? '重新生成整组'
-        : (albumSelectedCount === 1 ? '重新生成选中' : `重新生成(${albumSelectedCount})`))),
+    regenLabel: '重新生成',
+    canRegen: albumSelectedCount > 0,
     statusLabel: STATUS_LABEL[s.status] || s.status,
     templateName: s.displayTitle || s.templateName || (isVideo ? '宣传视频' : '宣传图'),
     typeLabel: isVideo ? '视频' : '图',
@@ -190,10 +187,6 @@ Page({
     if (!detailSet) return;
     this.setData({ viewMode: 'detail', focusSetId: id, detailSet });
     try { wx.setNavigationBarTitle({ title: detailSet.templateName || '素材详情' }); } catch (err) { /* */ }
-  },
-  backToList() {
-    this.setData({ viewMode: 'list', focusSetId: '', detailSet: null });
-    try { wx.setNavigationBarTitle({ title: '宣传素材' }); } catch (err) { /* */ }
   },
 
   playVideo(e) {
