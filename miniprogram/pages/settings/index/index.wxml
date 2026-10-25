@@ -50,6 +50,8 @@
       <view>
         <text>{{item.nickname || '未设昵称'}}</text>
         <text class="tag">员工</text>
+        <view class="muted small" wx:if="{{item.inviteCode}}" style="margin-top:4rpx;">来自邀请 {{item.inviteCode}}</view>
+        <view class="muted small" wx:else style="margin-top:4rpx;">无邀请码记录</view>
       </view>
       <view class="ops" wx:if="{{item.id !== myMemberId}}">
         <text class="link danger" data-id="{{item.id}}" data-name="{{item.nickname}}" bindtap="kickMember">踢除</text>
@@ -67,8 +69,16 @@
 
     <view wx:if="{{latestInvite}}" class="invite-box">
       <view class="invite-code" bindtap="copyInviteCode" data-code="{{latestInvite.code}}">{{latestInvite.code}}</view>
-      <view class="muted small">已用 {{latestInvite.useCount || 0}}/{{latestInvite.maxUses || 3}} · 长按二维码可转发给同事</view>
+      <view class="muted small">已用 {{latestInvite.useCount || 0}}/{{latestInvite.maxUses || 3}} · 点下方转发邀请同事扫码加入</view>
       <image wx:if="{{latestInvite.wxacodeUrl}}" src="{{latestInvite.wxacodeUrl}}" mode="aspectFit" class="qr-preview" show-menu-by-longpress="{{true}}" />
+      <button
+        class="btn-primary mini invite-share-btn"
+        open-type="share"
+        data-code="{{latestInvite.code}}"
+        data-url="{{latestInvite.wxacodeUrl}}"
+        style="margin-top:16rpx;"
+      >微信转发邀请</button>
+      <view class="muted small" style="margin-top:8rpx;">也可复制邀请码，同事在邀请页手动填写</view>
     </view>
 
     <view class="section" style="margin-top:24rpx;">邀请记录</view>
@@ -79,6 +89,13 @@
         <text class="muted" wx:if="{{item.useCount}}"> · 已用{{item.useCount}}/{{item.maxUses}}</text>
       </view>
       <view class="ops">
+        <button
+          class="link invite-share-link"
+          open-type="share"
+          data-code="{{item.code}}"
+          data-url="{{item.wxacodeUrl}}"
+          wx:if="{{item.status==='active'}}"
+        >转发</button>
         <text class="link" data-code="{{item.code}}" bindtap="copyInviteCode">复制</text>
         <text class="link danger" wx:if="{{item.status==='active'}}" data-id="{{item.id}}" bindtap="revokeInvite">撤销</text>
       </view>

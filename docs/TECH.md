@@ -348,7 +348,8 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 - 业主 **task** = 一次视频动作（`promo_sets.params.kind=video`）；底层 `promo_video` job 不单独暴露为业主任务。  
 - 流程：选商品图 → 可选卖点/特征 → `POST …/promo/video-script` 自动短分镜（可编辑）→ `POST …/promo/generate` → 一条 9:16、约 8–12s → OSS → gallery。  
-- 上游默认 **LKB** `sinan-video-generator`：`POST /api/invocations/rsync` + poll；`videoGeneration`：`FREE` 或 `FIRST_LAST_FRAME`（有商品图作 `first_frame`），`ratio=9:16`，`resolution=720p`，`generateAudio/watermark=false`。密钥：`backend/.secrets/lkb-video-agent.key`（或 `VIDEO_LKB_AGENT_KEY` / `LKB_AGENT_CALL_KEY`），**不入仓**。  
+- 上游默认 **LKB** `sinan-video-generator`：`POST /api/invocations/rsync` + poll；`videoGeneration`：`FREE` 或 `FIRST_LAST_FRAME`（有商品图作 `first_frame`），`ratio=9:16`，`resolution=720p`；`generateAudio` 由业主可选配乐预设驱动（`bgmId` 透传 params；上游暂仅布尔，具体曲目待支持）。密钥：`backend/.secrets/lkb-video-agent.key`（或 `VIDEO_LKB_AGENT_KEY` / `LKB_AGENT_CALL_KEY`），**不入仓**。  
+- 视频模板：挂拍静物 / 街头漫步 / 多色换装 / 咖啡馆生活感 / 织纹特写；参考图上限 9；街头/生活感/多色可选手模；分镜 beats 可编辑。  
 - 兜底：`VIDEO_ENGINE=xytoken` 走原 Seedance `/v1/videos`。  
 - 一期单段，不做多镜拼接。OUTFIT 仍走外部穿搭 Agent，与视频密钥分离。  
 

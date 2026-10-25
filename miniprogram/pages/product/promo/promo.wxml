@@ -5,7 +5,7 @@
   <block wx:if="{{!loading && !tpl}}">
     <view class="card">
       <view class="section-title">{{mediaKind === 'video' ? '选择视频模板' : '选择出图模板'}}</view>
-      <view class="muted">{{mediaKind === 'video' ? '竖版约 8～12 秒：选图 → 卖点 → 编辑分镜 → 生成一条' : '不同用途的出图方式、步骤和提示词都不同'}}</view>
+      <view class="muted">{{mediaKind === 'video' ? '竖版约 8～12 秒单段：多场景模板 · 可调分镜 · 可选模特/配乐' : '不同用途的出图方式、步骤和提示词都不同'}}</view>
     </view>
     <view class="card tpl" wx:for="{{templates}}" wx:key="id" data-id="{{item.id}}" bindtap="pickTemplate">
       <view class="tpl-head">
@@ -107,14 +107,42 @@
 
     <view class="card" wx:if="{{stepKey === 'script'}}">
       <view class="section-title">{{stepNames.script}}</view>
-      <view class="section-hint">约 {{scriptSeconds || 10}} 秒竖屏分镜草稿。改这里就会进成片；确认后再生成视频</view>
+      <view class="section-hint">约 {{scriptSeconds || 10}} 秒 · 下面每一段可改文案和秒数，也可增删/调序；改完会同步进成片脚本</view>
       <view class="muted small" wx:if="{{scriptLoading}}">处理中…</view>
-      <textarea class="textarea" style="height:420rpx;" maxlength="1200" placeholder="改这里就会进成片" value="{{script}}" bindinput="onScript" disabled="{{scriptLoading}}" />
+      <view class="beat-list" wx:if="{{!scriptLoading}}">
+        <view class="beat-card" wx:for="{{scriptBeats}}" wx:key="id">
+          <view class="beat-head">
+            <text class="beat-idx">第 {{index + 1}} 段</text>
+            <view class="beat-ops">
+              <text class="link" data-index="{{index}}" data-dir="up" bindtap="moveBeat">上移</text>
+              <text class="link" data-index="{{index}}" data-dir="down" bindtap="moveBeat">下移</text>
+              <text class="link danger" data-index="{{index}}" bindtap="removeBeat">删除</text>
+            </view>
+          </view>
+          <view class="beat-sec-row">
+            <text class="muted small">时长（秒）</text>
+            <input class="beat-sec-input" type="number" value="{{item.seconds}}" data-index="{{index}}" bindinput="onBeatSeconds" />
+          </view>
+          <textarea class="textarea beat-text" style="height:140rpx;" maxlength="200" placeholder="描述这一段画面/动作" value="{{item.text}}" data-index="{{index}}" bindinput="onBeatText" />
+        </view>
+        <view class="btn-ghost mini" style="margin-top:12rpx;" bindtap="addBeat">＋ 加一段</view>
+      </view>
+      <view class="section-title" style="margin-top:24rpx;">完整脚本（可再改）</view>
+      <textarea class="textarea" style="height:240rpx;" maxlength="1200" placeholder="由分镜同步，也可整段微调" value="{{script}}" bindinput="onScript" disabled="{{scriptLoading}}" />
       <view class="script-actions" style="margin-top:12rpx;display:flex;gap:24rpx;align-items:center;">
         <view class="link" bindtap="refreshScript">规则草稿</view>
         <view class="link" bindtap="polishScript">润色</view>
       </view>
       <view class="muted small" wx:if="{{scriptVia}}">来源：{{scriptVia === 'llm' ? '智能润色' : '规则草稿（即时）'}}</view>
+    </view>
+
+    <view class="card" wx:if="{{stepKey === 'bgm'}}">
+      <view class="section-title">{{stepNames.bgm}}（可选）</view>
+      <view class="section-hint">不选或选「无配乐」均可直接生成。具体曲目视上游是否支持；已写入任务参数</view>
+      <view class="opt {{bgmId === item.id ? 'on' : ''}}" wx:for="{{videoBgmPresets}}" wx:key="id" data-id="{{item.id}}" bindtap="pickBgm">
+        <text class="opt-name">{{item.name}}</text>
+        <text class="muted small">{{item.desc}}</text>
+      </view>
     </view>
 
     <view class="card" wx:if="{{stepKey === 'model'}}">
@@ -229,7 +257,7 @@
     </view>
 
     <view class="footer">
-      <view class="btn-weak half" bindtap="prev">{{quickMode && stepIdx === 0 ? '换模板' : '上一步'}}</view>
+      <view class="btn-ghost half" bindtap="prev">{{quickMode && stepIdx === 0 ? '换模板' : '上一步'}}</view>
       <view class="btn-primary half" bindtap="next">{{stepIdx >= steps.length - 1 ? (submitting ? '提交中…' : (styleUploading ? '上传中…' : (mediaKind === 'video' ? '确认生成视频' : '开始生成'))) : '下一步'}}</view>
     </view>
   </block>

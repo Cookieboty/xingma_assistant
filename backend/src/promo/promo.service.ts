@@ -8,7 +8,7 @@ import { PromoSetEntity, PromoSetImage, ImageGenCallRecord, OutfitCompareRecord 
 import { newId } from '../common/utils/id';
 import { ProductsService } from '../products/products.service';
 import { ImageGenClient } from './image-gen.client';
-import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind } from './promo.templates';
+import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind, VIDEO_BGM_PRESETS, findVideoBgm } from './promo.templates';
 import { enrichPoseSceneText } from './pose-scene-enrich';
 import { analyzeStyleRefs, styleKeywordsToPromptZh, StyleKeywordsZh } from './style-ref-analyze';
 import { prepareRefsForCategory, buildPromptZh } from './garment-ref-prepare';
@@ -23,7 +23,7 @@ import { buildPromoCaption } from './promo.captions';
 import { buildJobDisplayTitle } from '../jobs/job-display-title';
 import { VideoGenClient } from './video-gen.client';
 import { LkbVideoClient, clampDuration, LkbVideoAttachment } from './lkb-video.client';
-import { draftVideoBeatScript, resolveVideoPromptZh } from './video-script';
+import { draftVideoBeatScript, resolveVideoPromptZh, syncScriptFromBeats, VideoBeat } from './video-script';
 import { ExternalOutfitClient } from './external-outfit.client';
 
 export interface GenerateInput {
@@ -66,6 +66,12 @@ export interface GenerateInput {
   sellingPoint?: string;
   /** 业主确认/编辑后的中文分镜脚本 */
   script?: string;
+  /** 可编辑分镜 beats（可选；有则优先用于拼脚本） */
+  beats?: VideoBeat[];
+  /** 视频配乐预设 id（none / soft_ambient / …）；引擎未支持曲目时仍透传 params */
+  bgmId?: string | null;
+  /** 是否请上游生成/附带音频（LKB generateAudio） */
+  generateAudio?: boolean;
 }
 
 interface JobItem {
@@ -207,13 +213,17 @@ export class PromoService implements OnModuleInit {
     return listTemplatesByKind(kind).map(templateDto);
   }
   listModels() {
-    return MODELS.map(({ id, name, desc }) => ({ id, name, desc }));
+    return MODELS.map(({ id, name, desc, avatar, prompt }) => ({ id, name, desc, avatar, prompt }));
+  }
+  listVideoBgm() {
+    return VIDEO_BGM_PRESETS.map(({ id, name, desc, generateAudio }) => ({ id, name, desc, generateAudio }));
   }
   presets() {
     return {
       templates: this.listTemplates('image'),
       videoTemplates: this.listTemplates('video'),
       models: this.listModels(),
+      videoBgmPresets: this.listVideoBgm(),
       sizes: Object.values(SIZES),
     };
   }
@@ -565,6 +575,9 @@ export class PromoService implements OnModuleInit {
       /** heuristic（默认）| polish（润色，调 LLM） */
       mode?: 'heuristic' | 'polish';
       polish?: boolean;
+      templateId?: string;
+      modelId?: string | null;
+      beats?: VideoBeat[];
     },
   ) {
     const { product } = await this.productAssets(user, productId);
@@ -578,11 +591,23 @@ export class PromoService implements OnModuleInit {
     );
     const mode =
       body?.mode === 'polish' || body?.polish === true ? 'polish' : 'heuristic';
-    const draft = await draftVideoBeatScript(this.vision, { feature, sellingPoint, seconds, mode });
+    const templateId = String(body?.templateId || '').trim() || undefined;
+    const modelId = body?.modelId ? String(body.modelId) : null;
+    // 若前端已改 beats 再请求同步，可回写 script（仍走 heuristic/polish 生成时忽略入参 beats）
+    const draft = await draftVideoBeatScript(this.vision, {
+      feature,
+      sellingPoint,
+      seconds,
+      mode,
+      templateId,
+      modelId,
+    });
     return {
       ...draft,
       feature,
       sellingPoint: sellingPoint || null,
+      templateId: templateId || null,
+      modelId,
       engine: this.resolveVideoEngine(),
       configured: this.videoEngineConfigured(),
       productId,
@@ -614,6 +639,32 @@ export class PromoService implements OnModuleInit {
     const seconds = clampDuration(
       Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
     );
+    const bgm = findVideoBgm(input.bgmId);
+    const generateAudio = input.generateAudio === true || (input.generateAudio !== false && bgm.generateAudio);
+    const modelId =
+      tpl.model === 'none' ? null : input.modelId ? String(input.modelId) : null;
+    if (tpl.model === 'required' && !modelId) {
+      throw new BadRequestException('该视频模板需要选择模特');
+    }
+    if (tpl.id === 'multi_color_outfit_video') {
+      const colors = (input.colors || []).filter(Boolean);
+      if (colors.length < 2) throw new BadRequestException('多色换装至少选 2 个颜色');
+      if (colors.length !== refs.length) {
+        throw new BadRequestException('颜色数量需与参考图数量一致（按顺序对应）');
+      }
+    }
+    let beats = Array.isArray(input.beats) ? input.beats : undefined;
+    let scriptFinal = script;
+    if (!scriptFinal && beats && beats.length) {
+      scriptFinal = syncScriptFromBeats({
+        beats,
+        seconds,
+        sellingPoint,
+        feature,
+        withPerson: tpl.model !== 'none',
+        templateId: tpl.id,
+      }).script;
+    }
     const caption = this.captionFor(product, { ...input, feature, count, sizeId }, tpl.id);
     const params = {
       kind: 'video' as const,
@@ -621,15 +672,18 @@ export class PromoService implements OnModuleInit {
       templateId: tpl.id,
       feature,
       sellingPoint: sellingPoint || undefined,
-      script: script || undefined,
+      script: scriptFinal || undefined,
+      beats: beats || undefined,
       referenceAssetIds: refs,
-      modelId: null,
+      modelId,
       poses: [],
       scenes: [],
-      colors: [],
+      colors: (input.colors || []).filter(Boolean),
       count,
       sizeId,
       seconds,
+      bgmId: bgm.id,
+      generateAudio: !!generateAudio,
       videoEngine: this.resolveVideoEngine(),
     };
 
@@ -736,13 +790,38 @@ export class PromoService implements OnModuleInit {
     const seconds = clampDuration(
       Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
     );
-    const promptZh = resolveVideoPromptZh({ script, feature, sellingPoint, seconds });
+    const model = tpl.model === 'none' ? null : MODELS.find((m) => m.id === input.modelId) || null;
+    const colors = ((input.colors as string[]) || []).filter(Boolean);
+    const beats = Array.isArray(input.beats) ? (input.beats as VideoBeat[]) : undefined;
+    const bgm = findVideoBgm(input.bgmId as string | undefined);
+    const generateAudio =
+      input.generateAudio === true || (input.generateAudio !== false && bgm.generateAudio);
+    let scriptResolved = script;
+    if (!scriptResolved && beats && beats.length) {
+      scriptResolved = syncScriptFromBeats({
+        beats,
+        seconds,
+        sellingPoint,
+        feature,
+        withPerson: tpl.model !== 'none',
+        templateId: tpl.id,
+      }).script;
+    }
+    const promptZh = resolveVideoPromptZh({
+      script: scriptResolved,
+      feature,
+      sellingPoint,
+      seconds,
+      templateId: tpl.id,
+      modelId: model?.id,
+      beats,
+    });
     const promptEn = tpl.buildPrompt({
       feature: [sellingPoint, feature].filter(Boolean).join('\n'),
-      model: null,
+      model,
       pose: null,
       scene: null,
-      colors: [],
+      colors,
       index: 0,
       total: 1,
     });
@@ -778,7 +857,7 @@ export class PromoService implements OnModuleInit {
         mediaKind: 'video',
         feature,
         sellingPoint: sellingPoint || undefined,
-        script: script || promptZh,
+        script: scriptResolved || promptZh,
         count: 1,
         sizeId,
         seconds,
@@ -812,7 +891,7 @@ export class PromoService implements OnModuleInit {
             name: 'first_frame',
             metadata: { role: 'first_frame' },
           });
-          for (let i = 1; i < Math.min(refUrls.length, 4); i++) {
+          for (let i = 1; i < Math.min(refUrls.length, 9); i++) {
             attachments.push({
               type: 'image',
               uri: refUrls[i],
@@ -827,7 +906,7 @@ export class PromoService implements OnModuleInit {
           : 'FREE';
         // FREE 时仍可带 reference_image
         if (taskType === 'FREE' && refUrls.length && !attachments.length) {
-          for (let i = 0; i < Math.min(refUrls.length, 4); i++) {
+          for (let i = 0; i < Math.min(refUrls.length, 9); i++) {
             attachments.push({
               type: 'image',
               uri: refUrls[i],
@@ -842,7 +921,7 @@ export class PromoService implements OnModuleInit {
           duration: seconds,
           taskType,
           attachments,
-          generateAudio: false,
+          generateAudio: !!generateAudio,
           watermark: false,
         });
       } else {

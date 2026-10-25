@@ -103,3 +103,35 @@
   font-weight: 600;
   color: #444;
 }
+
+.nick-save-btn {
+  margin-top: 12rpx;
+  width: auto !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24rpx !important;
+  height: 56rpx;
+  line-height: 56rpx;
+  font-size: 24rpx;
+}
+
+
+.invite-share-btn {
+  width: auto !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  line-height: 1.4;
+}
+.invite-share-btn::after { border: none; }
+.invite-share-link {
+  display: inline;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0 8rpx 0 0;
+  font-size: inherit;
+  color: #c45c26;
+  line-height: inherit;
+}
+.invite-share-link::after { border: none; }

@@ -5,6 +5,7 @@ import { Tenant } from '../common/entities/tenant.entity';
 import { TenantMember } from '../common/entities/tenant-member.entity';
 import { AuditService } from '../common/audit.service';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
+import { stableMediaUrl } from '../common/utils/media-url';
 
 export interface TenantInfo {
   id: string;
@@ -23,6 +24,8 @@ export interface MemberRec {
   tenantId: string;
   openid: string;
   role: 'owner' | 'staff';
+  inviteId?: string | null;
+  inviteCode?: string | null;
 }
 
 /**
@@ -57,7 +60,7 @@ export class TenantsService {
           id: t.id,
           name: t.name,
           wxAppId: t.wxAppId,
-          contactQrUrl: (t as any).contactQrUrl || null,
+          contactQrUrl: stableMediaUrl((t as any).contactQrUrl) || null,
           allowCustomerDownload: !!(t as any).allowCustomerDownload,
         };
       }
@@ -76,7 +79,7 @@ export class TenantsService {
             id: t.id,
             name: t.name,
             wxAppId: t.wxAppId,
-            contactQrUrl: (t as any).contactQrUrl || null,
+            contactQrUrl: stableMediaUrl((t as any).contactQrUrl) || null,
             allowCustomerDownload: !!(t as any).allowCustomerDownload,
           }
         : null;
@@ -192,7 +195,7 @@ export class TenantsService {
   }
 
 
-  async listMembers(tenantId: string): Promise<Array<{ id: string; openid: string; role: string; nickname: string | null; status: string; createdAt?: Date }>> {
+  async listMembers(tenantId: string): Promise<Array<{ id: string; openid: string; role: string; nickname: string | null; status: string; createdAt?: Date; inviteId?: string | null; inviteCode?: string | null }>> {
     if (this.db) {
       const rows = await this.db.getRepository(TenantMember).find({
         where: { tenantId, status: 'active' },
@@ -205,11 +208,45 @@ export class TenantsService {
         nickname: m.nickname,
         status: m.status,
         createdAt: m.createdAt,
+        inviteId: (m as any).inviteId ?? null,
+        inviteCode: (m as any).inviteCode ?? null,
       }));
     }
     return [...this.memMembers.values()]
       .filter((m) => m.tenantId === tenantId)
-      .map((m) => ({ id: m.id, openid: m.openid, role: m.role, nickname: null, status: 'active' }));
+      .map((m) => ({
+        id: m.id,
+        openid: m.openid,
+        role: m.role,
+        nickname: null,
+        status: 'active',
+        inviteId: m.inviteId ?? null,
+        inviteCode: m.inviteCode ?? null,
+      }));
+  }
+
+  /** 接受邀请后回写来源邀请码（可覆盖为最近一次） */
+  async setMemberInviteSource(
+    tenantId: string,
+    memberId: string,
+    opts: { inviteId: string; inviteCode: string },
+  ) {
+    const inviteId = String(opts.inviteId || '').trim() || null;
+    const inviteCode = String(opts.inviteCode || '').trim().toUpperCase() || null;
+    if (this.db) {
+      await this.db.getRepository(TenantMember).update(
+        { id: memberId, tenantId },
+        { inviteId, inviteCode },
+      );
+      return;
+    }
+    for (const m of this.memMembers.values()) {
+      if (m.tenantId === tenantId && m.id === memberId) {
+        m.inviteId = inviteId;
+        m.inviteCode = inviteCode;
+        break;
+      }
+    }
   }
 
   async getContactQr(tenantId: string): Promise<string | null> {
@@ -218,18 +255,21 @@ export class TenantsService {
   }
 
   async setContactQr(tenantId: string, url: string | null, actor?: AuthContext | null) {
+    // 公网读：入库前剥签名；null/空串表示清除
+    const normalized =
+      url == null || String(url).trim() === '' ? null : stableMediaUrl(String(url).trim());
     let result: { contactQrUrl: string | null | undefined };
     if (this.db) {
       const repo = this.db.getRepository(Tenant);
       const row = await repo.findOne({ where: { id: tenantId } });
       if (!row) throw new NotFoundException('租户不存在');
-      row.contactQrUrl = url;
+      row.contactQrUrl = normalized;
       await repo.save(row);
       result = { contactQrUrl: row.contactQrUrl };
     } else {
       const mem = this.memTenants.find((x) => x.id === tenantId);
       if (!mem) throw new NotFoundException('租户不存在');
-      mem.contactQrUrl = url;
+      mem.contactQrUrl = normalized;
       result = { contactQrUrl: mem.contactQrUrl };
     }
     await this.audit.record({

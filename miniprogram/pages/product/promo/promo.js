@@ -12,7 +12,7 @@ const STYLE_STRENGTH_OPTS = [
 ];
 
 const STEP_NAMES = {
-  reference: '选参考图', colors: '选颜色', feature: '商品特征', script: '分镜脚本', model: '选模特',
+  reference: '选参考图', colors: '选颜色', feature: '商品特征', script: '分镜脚本', model: '选模特', bgm: '配乐',
   pose: '动作 / 呈现', scene: '场景 / 背景', pose_scene: '姿势与场景',
   style_keywords: '风格关键词', count: '张数与尺寸',
 };
@@ -34,6 +34,10 @@ Page({
     assets: [], colors: [], feature: '', featureDirty: false,
     sellingPoint: '',
     script: '', scriptSeconds: 10, scriptVia: '', scriptLoading: false, scriptDirty: false,
+    scriptBeats: [],
+    scriptPromptEn: '',
+    videoBgmPresets: [],
+    bgmId: 'none',
     sel: { refs: [], colors: [], modelId: '', poses: [], scenes: [], poseText: '', sceneText: '', count: 1, sizeId: '' },
     // 风格样例（可选，不进商品图库）：{ objectKey, url, uploading? }
     styleRefs: [],
@@ -67,7 +71,7 @@ Page({
       const uniq = [];
       templates.forEach((t) => { if (t && t.id && !seen[t.id]) { seen[t.id] = 1; uniq.push(t); } });
       this.setData({
-        templates: uniq, models: p.models,
+        templates: uniq, models: p.models, videoBgmPresets: p.videoBgmPresets || [],
         assets: s.assets.map((a) => Object.assign(a, { checked: false })),
         colors: s.colors.map((c) => ({ name: c, checked: false })),
         feature: s.feature, product: s.product, loading: false,
@@ -149,7 +153,7 @@ Page({
     const assetSrc = (e && e._assets) || this.data.assets;
     const picked = this._autoPickRefs(tpl, assetSrc);
     this.setData({
-      tpl, steps, fullSteps, quickMode, stepIdx: 0, stepKey: steps[0], job: null,
+      tpl, steps, fullSteps, quickMode, stepIdx: 0, stepKey: steps[0], job: null, script: '', scriptBeats: [], scriptPromptEn: '', scriptSeconds: 10, scriptVia: '', scriptDirty: false, bgmId: 'none',
       singlePoseScene,
       sel: {
         refs: picked.refs,
@@ -209,7 +213,8 @@ Page({
     if (needAnalyze && nextKey === 'style_keywords') {
       this.analyzeStyleRefs();
     }
-    if (this.data.mediaKind === 'video' && nextKey === 'script' && (leavingFeature || leavingRef) && !this.data.scriptDirty) {
+    const leavingModel = this.data.stepKey === 'model';
+    if (this.data.mediaKind === 'video' && nextKey === 'script' && (leavingFeature || leavingRef || leavingModel) && !this.data.scriptDirty) {
       this.draftVideoScript();
     }
   },
@@ -229,7 +234,7 @@ Page({
       }
     }
     if (k === 'colors') {
-      if (tpl.id === 'multi_color') {
+      if (tpl.id === 'multi_color' || tpl.id === 'multi_color_outfit_video') {
         if (sel.colors.length < 2) return '多色展示至少选 2 个颜色';
         if (sel.colors.length !== sel.refs.length) {
           return `已选 ${sel.refs.length} 张图，请选同样数量的颜色（按顺序对应）`;
@@ -237,6 +242,9 @@ Page({
       } else if (sel.colors.length && sel.colors.length !== sel.refs.length) {
         return `已选 ${sel.refs.length} 张图，请选同样数量的颜色（按顺序对应）`;
       }
+    }
+    if (k === 'script' && (!(this.data.scriptBeats || []).length) && !(this.data.script || '').trim()) {
+      /* fallthrough to existing script check */
     }
     if (k === 'script') {
       if (this.data.scriptLoading) return '脚本生成中…';
@@ -374,6 +382,118 @@ Page({
   onFeature(e) { this.setData({ feature: e.detail.value, featureDirty: true }); },
   onSellingPoint(e) { this.setData({ sellingPoint: e.detail.value }); },
   onScript(e) { this.setData({ script: e.detail.value, scriptDirty: true }); },
+  normalizeBeats(raw, totalSeconds) {
+    const total = Number(totalSeconds) || 10;
+    const list = Array.isArray(raw) ? raw : [];
+    const out = [];
+    list.forEach((b, i) => {
+      if (b == null) return;
+      if (typeof b === 'string') {
+        const text = String(b).trim();
+        if (!text) return;
+        out.push({ id: `b${i}_${Date.now()}`, text, seconds: 0 });
+        return;
+      }
+      const text = String(b.text || b.script || '').trim();
+      if (!text) return;
+      out.push({
+        id: String(b.id || `b${i}_${Date.now()}`),
+        text: text.slice(0, 200),
+        seconds: Math.max(0, Math.round(Number(b.seconds) || 0)),
+      });
+    });
+    if (!out.length) return [];
+    if (out.every((x) => !x.seconds)) {
+      const each = Math.max(1, Math.floor(total / out.length));
+      let left = total;
+      out.forEach((x, i) => {
+        x.seconds = i === out.length - 1 ? Math.max(1, left) : each;
+        left -= x.seconds;
+      });
+    } else {
+      out.forEach((x) => { if (!x.seconds) x.seconds = 1; });
+    }
+    return out;
+  },
+  syncScriptFromBeats() {
+    const beats = this.data.scriptBeats || [];
+    let t0 = 0;
+    const lines = beats.map((b) => {
+      const start = t0;
+      t0 += Number(b.seconds) || 1;
+      return `${start}–${t0}s：${b.text || ''}`;
+    });
+    const seconds = Math.max(4, Math.min(15, t0 || this.data.scriptSeconds || 10));
+    const sell = (this.data.sellingPoint || '').trim();
+    const withPerson = this.data.tpl && this.data.tpl.model !== 'none';
+    const script = [
+      `【${seconds}秒·竖屏${withPerson ? '穿搭' : '商品展示'}】`,
+      ...lines,
+      sell ? `卖点：${sell}。` : '',
+    ].filter(Boolean).join('\n');
+    const promptEn = [
+      `Vertical 9:16 ${seconds}s knitwear video.`,
+      ...beats.map((b) => `(${b.seconds}s) ${b.text}`),
+      'Keep garment faithful to reference. No on-screen text.',
+    ].join(' ');
+    this.setData({
+      script,
+      scriptPromptEn: promptEn,
+      scriptSeconds: seconds,
+      scriptDirty: true,
+    });
+  },
+  onBeatText(e) {
+    const idx = Number(e.currentTarget.dataset.index);
+    const beats = (this.data.scriptBeats || []).slice();
+    if (!beats[idx]) return;
+    beats[idx] = Object.assign({}, beats[idx], { text: e.detail.value });
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  onBeatSeconds(e) {
+    const idx = Number(e.currentTarget.dataset.index);
+    const beats = (this.data.scriptBeats || []).slice();
+    if (!beats[idx]) return;
+    let sec = Math.round(Number(e.detail.value) || 0);
+    if (sec < 1) sec = 1;
+    if (sec > 12) sec = 12;
+    beats[idx] = Object.assign({}, beats[idx], { seconds: sec });
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  addBeat() {
+    const beats = (this.data.scriptBeats || []).slice();
+    if (beats.length >= 6) return wx.showToast({ title: '最多 6 段', icon: 'none' });
+    beats.push({ id: `b${Date.now()}`, text: '新镜头：请描述画面与动作', seconds: 2 });
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  removeBeat(e) {
+    const idx = Number(e.currentTarget.dataset.index);
+    const beats = (this.data.scriptBeats || []).slice();
+    if (beats.length <= 1) return wx.showToast({ title: '至少保留 1 段', icon: 'none' });
+    beats.splice(idx, 1);
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  moveBeat(e) {
+    const idx = Number(e.currentTarget.dataset.index);
+    const dir = e.currentTarget.dataset.dir === 'up' ? -1 : 1;
+    const beats = (this.data.scriptBeats || []).slice();
+    const j = idx + dir;
+    if (idx < 0 || j < 0 || j >= beats.length) return;
+    const tmp = beats[idx];
+    beats[idx] = beats[j];
+    beats[j] = tmp;
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  pickBgm(e) {
+    const id = e.currentTarget.dataset.id;
+    if (!id) return;
+    this.setData({ bgmId: id });
+  },
   /** mode: heuristic（默认即时）| polish（可选润色，慢） */
   async draftVideoScript(opts) {
     if (this.data.scriptLoading) return;
@@ -389,10 +509,15 @@ Page({
           referenceAssetIds: (this.data.sel && this.data.sel.refs) || [],
           seconds: this.data.scriptSeconds || 10,
           mode,
+          templateId: (this.data.tpl && this.data.tpl.id) || undefined,
+          modelId: (this.data.sel && this.data.sel.modelId) || undefined,
         },
       });
+      const beats = this.normalizeBeats(r.beats, r.seconds || 10);
       this.setData({
         script: r.script || '',
+        scriptBeats: beats,
+        scriptPromptEn: r.promptEn || '',
         scriptSeconds: r.seconds || 10,
         scriptVia: r.via || '',
         scriptDirty: false,
@@ -635,7 +760,9 @@ Page({
     }
     this.setData({ submitting: true });
     try {
-      const isMulti = tpl.id === 'multi_color';
+      const isMultiImage = tpl.id === 'multi_color';
+      const isMultiVideo = tpl.id === 'multi_color_outfit_video';
+      const isMulti = isMultiImage || isMultiVideo;
       if (isMulti) {
         if (sel.colors.length < 2) {
           wx.showToast({ title: '多色展示至少选 2 个颜色', icon: 'none' });
@@ -645,14 +772,14 @@ Page({
           wx.showToast({ title: '颜色数量需与参考图一致', icon: 'none' });
           return;
         }
-        if (!sel.modelId) {
+        if (isMultiImage && !sel.modelId) {
           wx.showToast({ title: '请选择模特', icon: 'none' });
           return;
         }
       }
-      const count = isMulti ? sel.colors.length : sel.count;
-      let poses = isMulti ? (sel.poses || []).slice(0, 1) : (sel.poses || []).slice();
-      let scenes = isMulti ? (sel.scenes || []).slice(0, 1) : (sel.scenes || []).slice();
+      const count = isMultiImage ? sel.colors.length : (this.data.mediaKind === 'video' ? 1 : sel.count);
+      let poses = isMultiImage ? (sel.poses || []).slice(0, 1) : (sel.poses || []).slice();
+      let scenes = isMultiImage ? (sel.scenes || []).slice(0, 1) : (sel.scenes || []).slice();
       const poseText = String(sel.poseText || '').trim();
       const sceneText = String(sel.sceneText || '').trim();
       if (poseText) {
@@ -676,9 +803,14 @@ Page({
         mediaKind: this.data.mediaKind === 'video' ? 'video' : 'image',
         feature, sellingPoint: this.data.sellingPoint || undefined, script: this.data.script || undefined, seconds: this.data.scriptSeconds || undefined, referenceAssetIds: sel.refs,
         modelId: sel.modelId || null, poses, scenes,
+        beats: this.data.mediaKind === 'video' ? (this.data.scriptBeats || []).map((b) => ({ text: b.text, seconds: b.seconds })) : undefined,
+        bgmId: this.data.mediaKind === 'video' ? (this.data.bgmId || 'none') : undefined,
+        generateAudio: this.data.mediaKind === 'video'
+          ? !!(this.data.videoBgmPresets || []).find((b) => b.id === this.data.bgmId && b.generateAudio)
+          : undefined,
         poseText: poseText || undefined,
         sceneText: sceneText || undefined,
-        colors: sel.colors, count, sizeId: sel.sizeId,
+        colors: sel.colors || [], count, sizeId: sel.sizeId,
       };
       const styleAllowed = !!(tpl.styleRef && tpl.styleRef.max > 0);
       if (styleAllowed && this.data.mediaKind !== 'video' && styleRefObjectKeys.length) {

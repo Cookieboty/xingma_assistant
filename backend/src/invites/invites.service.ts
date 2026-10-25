@@ -224,6 +224,8 @@ export class InvitesService {
       status: m.status,
       role: 'staff',
       createdAt: m.createdAt,
+      inviteId: m.inviteId || null,
+      inviteCode: m.inviteCode || null,
     }));
   }
 
@@ -283,6 +285,10 @@ export class InvitesService {
 
     const role = (invite.role === 'owner' ? 'owner' : 'staff') as InviteRole;
     const member = await this.tenants.ensureMember(tenantId, openid, role);
+    await this.tenants.setMemberInviteSource(tenantId, member.id, {
+      inviteId: invite.id,
+      inviteCode: invite.code,
+    });
 
     invite.useCount += 1;
     invite.acceptedOpenid = openid;

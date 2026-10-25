@@ -4,7 +4,7 @@
  */
 
 export type Platform = 'moments' | 'xiaohongshu';
-export type PromoStep = 'reference' | 'feature' | 'script' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count' | 'style_keywords';
+export type PromoStep = 'reference' | 'feature' | 'script' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count' | 'style_keywords' | 'bgm';
 
 export interface Option {
   id: string;
@@ -405,8 +405,8 @@ export const TEMPLATES: PromoTemplate[] = [
 
   {
     id: 'product_showcase_video',
-    name: '商品竖版短视频',
-    desc: '约 8～12 秒竖屏短视频：选图 → 可选卖点 → 编辑分镜脚本 → 生成一条 9:16（一期单段，暂不上模特）',
+    name: '商品挂拍短视频',
+    desc: '约 8～12 秒竖屏：静物/挂拍展示，不出真人；可多选商品图作参考',
     platforms: ['moments', 'xiaohongshu'],
     defaultSize: 'vertical_video',
     sizes: ['vertical_video'],
@@ -414,21 +414,152 @@ export const TEMPLATES: PromoTemplate[] = [
     poses: [],
     scenes: [],
     sceneLabel: '场景',
-    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张商品主图/细节图作为视频参考' },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 9, hint: '选 1-9 张商品主图/细节图作为视频参考（越多细节越稳）' },
     count: { min: 1, max: 1, default: 1 },
-    steps: ['reference', 'feature', 'script'],
+    steps: ['reference', 'feature', 'script', 'bgm'],
     mediaKind: 'video',
     buildPrompt: (c) =>
       [
         'Vertical 9:16 short product showcase video of a knitwear garment for social commerce.',
         'Smooth cinematic camera: slow push-in, gentle orbit or tilt, soft natural light, premium e-commerce look.',
         'Keep the garment appearance faithful to the reference image(s): same color, knit texture, neckline, sleeves and cut. Do not redesign.',
-        'No on-screen text, logos, watermarks or captions. No people / models on camera in this phase.',
+        'No on-screen text, logos, watermarks or captions. No people / models on camera.',
         'Photoreal fabric motion and subtle depth of field; clean background suitable for Moments / Xiaohongshu.',
         FEATURE(c.feature),
       ].filter(Boolean).join(' '),
   },
+
+  {
+    id: 'street_walk_video',
+    name: '街头漫步穿搭',
+    desc: '真人模特穿着成衣在街上自然走动；可选模特与配乐',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'optional',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['main', 'detail'], min: 1, max: 9, hint: '选 1-9 张商品图（正面/侧面/细节均可）' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'feature', 'model', 'script', 'bgm'],
+    mediaKind: 'video',
+    buildPrompt: (c) =>
+      [
+        'Vertical 9:16 lifestyle fashion video: a person walking casually on a city street wearing the exact knit garment from the reference.',
+        c.model?.prompt
+          ? `Talent: ${c.model.prompt}.`
+          : 'Talent: a natural-looking East Asian young adult, realistic proportions, not a celebrity.',
+        'Camera follows at mid-shot / three-quarter, gentle handheld feel, soft daylight, shallow depth of field.',
+        'Keep garment faithful to reference: same color, knit texture, neckline, sleeves and cut; do not redesign.',
+        'Natural walking gait, subtle fabric motion, clean urban backdrop; no on-screen text, logos or watermarks.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' '),
+  },
+
+  {
+    id: 'multi_color_outfit_video',
+    name: '多色换装短视频',
+    desc: '同一镜头氛围下切换成衣颜色；请按顺序选多色参考图',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'optional',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['main', 'detail'], min: 2, max: 9, hint: '按颜色顺序选 2-9 张成衣图（一张一色）' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'colors', 'feature', 'model', 'script', 'bgm'],
+    mediaKind: 'video',
+    buildPrompt: (c) => {
+      const colorHint = (c.colors || []).filter(Boolean).join(', ');
+      return [
+        'Vertical 9:16 knitwear color-change promo video for social commerce.',
+        c.model?.prompt
+          ? `Talent: ${c.model.prompt} wears successive color variants of the same knit garment.`
+          : 'Show the same knit garment design in successive color variants (hanging or on a model if implied).',
+        colorHint ? `Color sequence from merchant refs: ${colorHint}.` : 'Cycle through the color variants implied by the reference images in order.',
+        'Smooth transitions between colors; keep cut, knit texture and styling consistent; only color changes.',
+        'Keep each variant faithful to its matching reference. Soft light, clean set. No on-screen text, logos or watermarks.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' ');
+    },
+  },
+
+  {
+    id: 'cafe_lifestyle_video',
+    name: '咖啡馆生活感',
+    desc: '窗边/咖啡馆氛围，模特轻坐或转身展示成衣',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'optional',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['main', 'detail'], min: 1, max: 9, hint: '选 1-9 张商品主图/细节图' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'feature', 'model', 'script', 'bgm'],
+    mediaKind: 'video',
+    buildPrompt: (c) =>
+      [
+        'Vertical 9:16 cozy lifestyle fashion video in a cafe / by a warm window.',
+        c.model?.prompt
+          ? `Talent: ${c.model.prompt} wearing the exact knit garment from the reference.`
+          : 'An East Asian model wearing the exact knit garment from the reference.',
+        'Soft warm indoor light, gentle camera push-in and slight orbit; calm premium mood for Xiaohongshu / Moments.',
+        'Keep garment faithful to reference. No on-screen text, logos or watermarks.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' '),
+  },
+
+  {
+    id: 'detail_macro_video',
+    name: '织纹细节特写',
+    desc: '静物细节推进：领口/袖口/织纹微距，不出真人',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'none',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['detail', 'main'], min: 1, max: 9, hint: '优先选细节图，可叠加主图共 1-9 张' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'feature', 'script', 'bgm'],
+    mediaKind: 'video',
+    buildPrompt: (c) =>
+      [
+        'Vertical 9:16 macro detail video of a knitwear garment: neckline, cuff, knit texture close-ups.',
+        'Slow cinematic push-in and gentle glide across fabric; soft natural light; premium e-commerce look.',
+        'Keep color and texture faithful to references. No people, no on-screen text, logos or watermarks.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' '),
+  },
 ];
+
+/** 视频配乐预设（一期：UI + 入参透传；LKB 仅 generateAudio 布尔，具体曲目待上游支持） */
+export interface VideoBgmPreset {
+  id: string;
+  name: string;
+  desc: string;
+  /** 传给 LKB videoGeneration.generateAudio */
+  generateAudio: boolean;
+}
+
+export const VIDEO_BGM_PRESETS: VideoBgmPreset[] = [
+  { id: 'none', name: '无配乐', desc: '静音成片 / 后期自配', generateAudio: false },
+  { id: 'soft_ambient', name: '轻柔氛围', desc: '低干扰铺底（若上游支持）', generateAudio: true },
+  { id: 'upbeat_light', name: '轻快流行', desc: '节奏略明快（若上游支持）', generateAudio: true },
+  { id: 'warm_acoustic', name: '温暖原声', desc: '吉他/原声气质（若上游支持）', generateAudio: true },
+];
+
+export function findVideoBgm(id?: string | null) {
+  const hit = VIDEO_BGM_PRESETS.find((b) => b.id === id);
+  return hit || VIDEO_BGM_PRESETS[0];
+}
+
 
 
 /** 将自由文本匹配到最近预设；匹配不上则返回自定义 Option */

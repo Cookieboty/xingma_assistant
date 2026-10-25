@@ -1,5 +1,5 @@
 const { request } = require('../../../utils/request');
-const { saveProfileWithAvatarUpload, isTempAvatarPath } = require('../../../utils/profile');
+const { saveProfileWithAvatarUpload, isTempAvatarPath, stableMediaUrl } = require('../../../utils/profile');
 
 Page({
   data: {
@@ -23,6 +23,9 @@ Page({
     if (q && q.profile === '1') this.setData({ showProfile: true });
   },
   onShow() {
+    try {
+      wx.showShareMenu({ withShareTicket: true, menus: ['shareAppMessage'] });
+    } catch (e) { /* ignore */ }
     this.load();
   },
   async load() {
@@ -50,7 +53,7 @@ Page({
       }));
       const invites = canInvite ? (results[3] || []) : [];
       const nickname = (me && me.nickname) || '';
-      const avatarUrl = (me && me.avatarUrl) || '';
+      const avatarUrl = stableMediaUrl((me && me.avatarUrl) || '') || '';
       const phone = (me && me.phone) || '';
       const needProfileGuide = !nickname || !avatarUrl;
       this.setData({
@@ -61,7 +64,7 @@ Page({
         avatarUrl,
         phone,
         needProfileGuide,
-        contactQrUrl: (tenant && tenant.contactQrUrl) || '',
+        contactQrUrl: stableMediaUrl((tenant && tenant.contactQrUrl) || '') || '',
         members,
         invites,
       });
@@ -75,22 +78,75 @@ Page({
     this.setData({ avatarUrl: url });
     this.persistProfile({ avatarUrl: url });
   },
-  onNickname(e) {
-    const nickname = ((e.detail && e.detail.value) || '').trim();
+  /** 从各事件里抠昵称；微信「用微信昵称」时 detail 常为空，需靠 form submit */
+  _pickNickname(...candidates) {
+    for (let i = 0; i < candidates.length; i++) {
+      const raw = candidates[i];
+      if (raw == null) continue;
+      const s = String(raw).trim();
+      if (s) return s.slice(0, 64);
+    }
+    return '';
+  },
+  _rememberNickname(nickname) {
     if (!nickname) return;
-    this.setData({ nickname });
+    this._pendingNickname = nickname;
+    if (nickname !== this.data.nickname) this.setData({ nickname });
+  },
+  onNicknameInput(e) {
+    const nickname = this._pickNickname(e.detail && e.detail.value);
+    if (nickname) this._rememberNickname(nickname);
+  },
+  /** 非聚焦态内容变化（含部分基础库下微信昵称回填） */
+  onNicknameChange(e) {
+    const nickname = this._pickNickname(e.detail && e.detail.value);
+    if (!nickname) return;
+    this._rememberNickname(nickname);
+    this.scheduleNicknameSave(nickname);
+  },
+  onNickname(e) {
+    const nickname = this._pickNickname(
+      e.detail && e.detail.value,
+      this._pendingNickname,
+      this.data.nickname,
+    );
+    if (!nickname) return;
+    this._rememberNickname(nickname);
     this.scheduleNicknameSave(nickname);
   },
   onNicknameReview(e) {
     const pass = !!(e.detail && e.detail.pass);
-    if (!pass) {
-      wx.showToast({ title: '昵称未通过校验', icon: 'none' });
+    const timeout = !!(e.detail && e.detail.timeout);
+    // review 事件本身不含昵称值；有 pending/data 才自动存。无值时请点「保存昵称」(form)。
+    const nickname = this._pickNickname(
+      e.detail && (e.detail.value || e.detail.nickname),
+      this._pendingNickname,
+      this.data.nickname,
+    );
+    if (!pass && !timeout) {
+      wx.showToast({ title: '昵称未通过微信校验', icon: 'none' });
       return;
     }
-    const nickname = (this.data.nickname || '').trim();
-    if (nickname) this.scheduleNicknameSave(nickname);
+    if (nickname) {
+      this._rememberNickname(nickname);
+      this.scheduleNicknameSave(nickname);
+    } else if (pass) {
+      wx.showToast({ title: '请再点「保存昵称」', icon: 'none' });
+    }
+  },
+  /** form submit：唯一可靠拿到「用微信昵称」回填值的路径（不依赖 bindinput） */
+  onNicknameFormSubmit(e) {
+    const formNick = e.detail && e.detail.value && e.detail.value.nickname;
+    const nickname = this._pickNickname(formNick, this._pendingNickname, this.data.nickname);
+    if (!nickname) {
+      wx.showToast({ title: '请先填写或点选微信昵称', icon: 'none' });
+      return;
+    }
+    this._rememberNickname(nickname);
+    this.persistProfile({ nickname });
   },
   scheduleNicknameSave(nickname) {
+    if (!nickname) return;
     if (this._nickSaveTimer) clearTimeout(this._nickSaveTimer);
     this._nickSaveTimer = setTimeout(() => {
       this._nickSaveTimer = null;
@@ -159,18 +215,26 @@ Page({
         uploadAvatarIfTemp,
       });
       const patch = {};
-      if (saved.avatarUrl) patch.avatarUrl = saved.avatarUrl;
+      const serverAvatar = stableMediaUrl(
+        (saved.me && saved.me.avatarUrl) || saved.avatarUrl || '',
+      ) || '';
+      if (serverAvatar) {
+        patch.avatarUrl = serverAvatar;
+      } else if (isTempAvatarPath(this.data.avatarUrl)) {
+        // 临时头像未上传成功：去掉 wxfile，避免下次误带；保留空以显示占位
+        patch.avatarUrl = '';
+      }
       if (saved.nickname != null) patch.nickname = saved.nickname;
       if (saved.phone != null) patch.phone = saved.phone;
       const nextNick = patch.nickname != null ? patch.nickname : (this.data.nickname || '');
       const nextAvatar = patch.avatarUrl != null ? patch.avatarUrl : (this.data.avatarUrl || '');
-      // 若页面仍挂着临时头像且本次未更新头像，清掉以免下次误上传
-      if (!saved.avatarUrl && isTempAvatarPath(this.data.avatarUrl)) {
-        patch.avatarUrl = '';
-      }
       patch.needProfileGuide = !nextNick || !nextAvatar || isTempAvatarPath(nextAvatar);
       this.setData(patch);
-      wx.showToast({ title: '已保存', icon: 'success' });
+      if (saved.avatarUploadFailed && nickname) {
+        wx.showToast({ title: '昵称已保存（头像待重选）', icon: 'none' });
+      } else {
+        wx.showToast({ title: '已保存', icon: 'success' });
+      }
     } catch (e) {
       wx.showToast({ title: (e && e.message) || '保存失败', icon: 'none' });
     } finally {
@@ -205,7 +269,9 @@ Page({
               fail: reject,
             });
           });
-          const url = upload.url || upload.publicUrl || upload.avatarUrl || path;
+          const raw = upload.url || upload.publicUrl || upload.avatarUrl || '';
+          const url = stableMediaUrl(raw) || raw;
+          if (!url || isTempAvatarPath(url)) throw new Error('上传未返回可访问地址');
           await request({
             url: '/api/tenants/current/contact-qr',
             method: 'PATCH',
@@ -252,6 +318,24 @@ Page({
       data: String(code),
       success: () => wx.showToast({ title: '已复制邀请码', icon: 'none' }),
     });
+  },
+  /** 微信转发邀请：落地页带 code，同事打开即可加入（不提供存相册） */
+  onShareAppMessage(res) {
+    let code = (this.data.latestInvite && this.data.latestInvite.code) || '';
+    let imageUrl = (this.data.latestInvite && this.data.latestInvite.wxacodeUrl) || '';
+    if (res && res.from === 'button' && res.target && res.target.dataset) {
+      code = res.target.dataset.code || code;
+      imageUrl = res.target.dataset.url || imageUrl;
+    }
+    code = String(code || '').trim().toUpperCase();
+    const path = code
+      ? `/pages/invite/accept/accept?code=${encodeURIComponent(code)}`
+      : '/pages/invite/accept/accept';
+    return {
+      title: code ? `邀请你加入档口（码 ${code}）` : '邀请你加入档口',
+      path,
+      imageUrl: imageUrl || undefined,
+    };
   },
   async revokeInvite(e) {
     const id = e.currentTarget.dataset.id;
