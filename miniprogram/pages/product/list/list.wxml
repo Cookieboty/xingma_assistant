@@ -72,9 +72,7 @@
   </view>
 
   <view class="card muted empty" wx:if="{{!list.length && !loading}}">
-    <view>还没有商品</view>
-    <view class="muted small" style="margin-top:8rpx;">先发一款，再做素材和转发</view>
-    <view class="btn-primary" style="margin-top:24rpx;" bindtap="goPublish">选图发品</view>
+    <view>暂无商品</view>
   </view>
   <view class="muted footer-tip" wx:if="{{loading}}">加载中…</view>
   <view class="muted footer-tip" wx:elif="{{loadingMore}}">加载更多…</view>
