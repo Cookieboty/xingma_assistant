@@ -65,7 +65,7 @@
   </view>
 
   <view class="bottom-bar">
-    <view class="catalog-btn" wx:if="{{showCatalogCta}}" bindtap="goCatalog">本分组全部款式</view>
+    <view class="catalog-btn" wx:if="{{showCatalogCta}}" bindtap="goCatalog">更多</view>
     <view class="inquire-btn" bindtap="openInquirySheet">询价</view>
   </view>
 
