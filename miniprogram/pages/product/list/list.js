@@ -424,4 +424,3 @@ Page({
     wx.navigateTo({ url: '/pages/product/publish/publish' });
   },
 });
-);
