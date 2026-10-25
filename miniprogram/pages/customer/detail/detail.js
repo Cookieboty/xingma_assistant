@@ -46,14 +46,11 @@ function buildContact(customer) {
   if (!customer) return { name: '', phone: '', copyText: '', hasContact: false };
   const name = (customer.nickname || '').trim();
   const phone = (customer.phone || '').trim();
-  const parts = [];
-  if (name) parts.push(name);
-  if (phone) parts.push(phone);
   return {
     name: name || '未留姓名',
     phone: phone || '未留手机',
-    copyText: parts.join(' '),
-    hasContact: parts.length > 0,
+    copyText: phone,
+    hasContact: !!phone,
   };
 }
 
