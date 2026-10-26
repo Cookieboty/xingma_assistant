@@ -418,6 +418,16 @@ export class PromoService implements OnModuleInit {
         throw new BadRequestException('多色展示需要选择模特');
       }
       count = n;
+    } else if (tpl.id === 'model_scene') {
+      const refs = (input.referenceAssetIds || []).filter(Boolean);
+      if (refs.length !== 1) {
+        throw new BadRequestException(`模特上身场景图请只选 1 张商品参考图（已选 ${refs.length}）`);
+      }
+      if (!input.modelId) {
+        throw new BadRequestException('模特上身场景图需要选择 1 个模特');
+      }
+      // 动作/场景保持数组；张数按用户 count（前端默认 pose×scene）
+      count = Math.min(tpl.count.max, Math.max(tpl.count.min, Number(input.count) || tpl.count.default));
     } else {
       count = Math.min(tpl.count.max, Math.max(tpl.count.min, Number(input.count) || tpl.count.default));
     }
@@ -1416,23 +1426,41 @@ export class PromoService implements OnModuleInit {
       poses = poses.length ? [poses[0]] : tpl.poses[0] ? [tpl.poses[0]] : [];
       scenes = scenes.length ? [scenes[0]] : tpl.scenes[0] ? [tpl.scenes[0]] : [];
     }
-    // 自由文本：匹配预设或生成 custom option（整组共用）
+    // 自由文本：仅在「单选语义」下覆盖为单个 option。
+    // model_scene 等多选动作/场景时，芯片数组必须保留；芯片名回填到文本框不得塌缩数组。
     const poseTextEarly = String(input.poseText || '').trim();
     const sceneTextEarly = String(input.sceneText || '').trim();
     if (poseTextEarly && tpl.poses.length) {
-      const resolved = resolveOption(tpl.poses, (input.poses as string[]) || [], poseTextEarly, 'pose');
-      if (resolved) poses = [resolved];
+      const allowCollapse = isMultiColor || poses.length <= 1;
+      if (allowCollapse) {
+        const resolved = resolveOption(tpl.poses, (input.poses as string[]) || [], poseTextEarly, 'pose');
+        if (resolved) poses = [resolved];
+      }
     }
     if (sceneTextEarly && tpl.scenes.length) {
-      const resolved = resolveOption(tpl.scenes, (input.scenes as string[]) || [], sceneTextEarly, 'scene');
-      if (resolved) scenes = [resolved];
+      const allowCollapse = isMultiColor || scenes.length <= 1;
+      if (allowCollapse) {
+        const resolved = resolveOption(tpl.scenes, (input.scenes as string[]) || [], sceneTextEarly, 'scene');
+        if (resolved) scenes = [resolved];
+      }
     }
+    // 芯片名回填：多选时去掉与芯片同名的 freeText，避免 effectivePrompt 覆盖错开配对
+    const stripChipEcho = (text: string, opts: { id: string; name: string }[]) => {
+      const t = String(text || '').trim();
+      if (!t || opts.length <= 1) return t;
+      if (opts.some((o) => o.name === t || o.id === t)) return '';
+      return t;
+    };
     const feature = String(
       input.feature ?? this.readFeature(user.tenantId, productId)?.feature ?? this.defaultFeature(product),
     ).slice(0, 2000);
     // 中文原话（留痕用，不被英文 enrich 覆盖）
-    const poseTextZh = String(input.poseText || '').trim();
-    const sceneTextZh = String(input.sceneText || '').trim();
+    let poseTextZh = String(input.poseText || '').trim();
+    let sceneTextZh = String(input.sceneText || '').trim();
+    if (!isMultiColor) {
+      poseTextZh = stripChipEcho(poseTextZh, poses);
+      sceneTextZh = stripChipEcho(sceneTextZh, scenes);
+    }
     let poseText = poseTextZh;
     let sceneText = sceneTextZh;
     // 自由描述 → 关键词拆解 + 英文生图片段（LLM 优先，否则启发式）；自定义文案覆盖芯片 prompt
@@ -1463,18 +1491,36 @@ export class PromoService implements OnModuleInit {
       if (existing?.images?.length) priorImages = existing.images;
     }
 
+    // model_scene 等：先铺满 pose×scene 网格，再按序取；不足 N 时循环网格并由后续 nudge 保证提示词不同
+    const posePool = poses.length ? poses : (tpl.poses[0] ? [tpl.poses[0]] : []);
+    const scenePool = scenes.length ? scenes : (tpl.scenes[0] ? [tpl.scenes[0]] : []);
+    const poseSceneGrid: { pose: (typeof poses)[number] | null; scene: (typeof scenes)[number] | null }[] = [];
+    if (!isMultiColor) {
+      const pList = posePool.length ? posePool : [null];
+      const sList = scenePool.length ? scenePool : [null];
+      for (const sc of sList) {
+        for (const po of pList) {
+          poseSceneGrid.push({ pose: po, scene: sc });
+        }
+      }
+    }
+    const gridSize = Math.max(1, poseSceneGrid.length || 1);
+
     const items: JobItem[] = [];
     for (let i = 0; i < count; i++) {
-      const pose = isMultiColor
-        ? (poses[0] || tpl.poses[0] || null)
-        : poses.length
-          ? poses[i % poses.length]
-          : tpl.poses[0] || null;
-      const scene = isMultiColor
-        ? (scenes[0] || tpl.scenes[0] || null)
-        : scenes.length
-          ? scenes[Math.floor(i / Math.max(1, poses.length)) % scenes.length]
-          : tpl.scenes[0] || null;
+      let pose: (typeof poses)[number] | null;
+      let scene: (typeof scenes)[number] | null;
+      if (isMultiColor) {
+        pose = poses[0] || tpl.poses[0] || null;
+        scene = scenes[0] || tpl.scenes[0] || null;
+      } else if (poseSceneGrid.length) {
+        const pair = poseSceneGrid[i % poseSceneGrid.length];
+        pose = pair.pose;
+        scene = pair.scene;
+      } else {
+        pose = tpl.poses[0] || null;
+        scene = tpl.scenes[0] || null;
+      }
       const prior = priorImages.find((x) => x.index === i);
       if (onlyRegen && !regenSet.has(i) && prior?.objectKey && prior.status === 'done') {
         items.push({
@@ -1634,25 +1680,35 @@ export class PromoService implements OnModuleInit {
       : '';
     for (const it of items) {
       if (this.itemHasResult(it)) continue;
+      const wrapPass = !isMultiColor && count > gridSize ? Math.floor(it.index / gridSize) : 0;
       const slotNudgeEn =
         count > 1
           ? `Independent variant ${it.index + 1}/${count} (slot-${it.index + 1}): change camera angle, crop, pose micro-gesture, expression or lighting vs sibling slots; never clone the same frame; keep garment identity/color/knit texture identical.`
           : '';
+      const wrapNudgeEn =
+        wrapPass > 0
+          ? `Extra distinct pass ${wrapPass + 1} for a repeated pose×scene pair: alter camera height, crop tightness, gaze direction and hand placement vs earlier passes of the same pair; still identical garment.`
+          : '';
       const slotNudgeZh =
         count > 1
           ? `独立变体 ${it.index + 1}/${count}（槽位${it.index + 1}）：须在机位/构图/姿势微动作/表情/光影上与同组其它张明显不同，禁止复刻同一构图；成衣款式颜色织纹不变。`
+          : '';
+      const wrapNudgeZh =
+        wrapPass > 0
+          ? `同动作×场景第 ${wrapPass + 1} 轮补充：相对前一轮改机位高度/裁切松紧/视线与手位，保证提示词与成片均不同；成衣不变。`
           : '';
       const enrichedPrompt = [
         it.prompt,
         garmentPrep.garmentConstraintEn,
         garmentPrep.refRolesPromptEn,
         slotNudgeEn,
+        wrapNudgeEn,
         regenNudgeEn,
       ]
         .filter(Boolean)
         .join(' ');
       it.prompt = enrichedPrompt;
-      it.promptZh = [promptZhBase, slotNudgeZh, regenNudgeZh].filter(Boolean).join('\n');
+      it.promptZh = [promptZhBase, slotNudgeZh, wrapNudgeZh, regenNudgeZh].filter(Boolean).join('\n');
     }
 
     // 风格样例：仅 style_ref；其它模板强制忽略（即便 params 残留）

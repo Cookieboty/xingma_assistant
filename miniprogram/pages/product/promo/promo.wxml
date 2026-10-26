@@ -33,7 +33,7 @@
 
     <view class="card" wx:if="{{stepKey === 'reference'}}">
       <view class="section-title">{{stepNames.reference}}</view>
-      <view class="section-hint">{{tpl.reference.hint}} · 可多选（已选 {{sel.refs.length}}/{{tpl.reference.max}}）</view>
+      <view class="section-hint">{{tpl.reference.hint}} · 已选 {{sel.refs.length}}/{{tpl.reference.max}}{{tpl.reference.max > 1 ? '（可多选）' : '（仅 1 张）'}}</view>
       <view class="grid">
         <view class="cell {{item.checked ? 'checked' : ''}}" wx:for="{{assets}}" wx:key="id" data-id="{{item.id}}" bindtap="toggleRef" bindlongpress="previewAsset" data-url="{{item.url}}">
           <image src="{{item.url}}" mode="aspectFill" lazy-load />
@@ -41,7 +41,7 @@
           <view class="mark" wx:if="{{item.isPromo}}">AI</view>
         </view>
       </view>
-      <view class="muted small">点选切换勾选（可多张）· 长按预览</view>
+      <view class="muted small">点选切换勾选{{tpl.reference.max > 1 ? '（可多张）' : '（模特图仅 1 张）'}} · 长按预览</view>
 
       <!-- 风格样例：仅 style_ref（styleRef.max>0）必传；其它模板不展示。视频一期不做 -->
       <view class="style-ref-block" wx:if="{{mediaKind !== 'video' && tpl.styleRef && tpl.styleRef.max > 0}}">
@@ -162,7 +162,7 @@
     <!-- 兼容旧 steps：单独 pose / scene -->
     <view class="card" wx:if="{{stepKey === 'pose'}}">
       <view class="section-title">{{stepNames.pose}}</view>
-      <view class="section-hint">{{singlePoseScene ? '整组共用同一姿势（单选）' : '可多选，多张图会轮换使用'}}</view>
+      <view class="section-hint">{{singlePoseScene ? '整组共用同一姿势（单选）' : (tpl.id === 'model_scene' ? '可多选；生成时按 动作×场景 错开配图' : '可多选，多张图会轮换使用')}}</view>
       <view class="chips">
         <text class="chip {{item.on ? 'on' : ''}}" wx:for="{{poseOpts}}" wx:key="id" data-kind="poses" data-id="{{item.id}}" bindtap="toggleMulti">{{item.name}}</text>
       </view>
@@ -170,7 +170,7 @@
 
     <view class="card" wx:if="{{stepKey === 'scene'}}">
       <view class="section-title">{{tpl.sceneLabel}}</view>
-      <view class="section-hint">{{singlePoseScene ? '整组共用同一场景（单选）' : '可多选，多张图会轮换使用'}}</view>
+      <view class="section-hint">{{singlePoseScene ? '整组共用同一场景（单选）' : (tpl.id === 'model_scene' ? '可多选；与动作交叉错开出图' : '可多选，多张图会轮换使用')}}</view>
       <view class="chips">
         <text class="chip {{item.on ? 'on' : ''}}" wx:for="{{sceneOpts}}" wx:key="id" data-kind="scenes" data-id="{{item.id}}" bindtap="toggleMulti">{{item.name}}</text>
       </view>
@@ -179,7 +179,7 @@
     <!-- 合并步：姿势 + 场景 + 自由描述 + 语音 -->
     <view class="card" wx:if="{{stepKey === 'pose_scene'}}">
       <view class="section-title">姿势与场景</view>
-      <view class="section-hint">{{singlePoseScene ? '整组共用同一姿势与场景（单选）；也可自己描述' : '可点选预设（多选会轮换）；也可打字或语音补充'}}</view>
+      <view class="section-hint">{{singlePoseScene ? '整组共用同一姿势与场景（单选）；也可自己描述' : (tpl.id === 'model_scene' ? '可多选动作与场景，生成时按 动作×场景 错开；张数默认等于组合数，不够时自动补不同提示词；也可打字/语音补充' : '可点选预设（多选会轮换）；也可打字或语音补充')}}</view>
 
       <block wx:if="{{poseOpts.length}}">
         <view class="sub-label">姿势 / 呈现</view>
@@ -243,6 +243,7 @@
 
     <view class="card" wx:if="{{stepKey === 'count'}}">
       <view class="section-title">{{stepNames.count}}</view>
+      <view class="section-hint" wx:if="{{tpl.id === 'model_scene'}}">默认按已选动作×场景组合数；可改。组合不够时服务端会为每张补不同提示词</view>
       <view class="counter">
         <text class="cbtn" bindtap="countMinus">－</text><text class="cnum">{{sel.count}}</text><text class="cbtn" bindtap="countPlus">＋</text>
         <text class="muted small">（{{tpl.count.min}}-{{tpl.count.max}} 张，每张约 30-60 秒）</text>

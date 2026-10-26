@@ -245,7 +245,7 @@ export const TEMPLATES: PromoTemplate[] = [
   {
     id: 'model_scene',
     name: '模特上身 · 场景图',
-    desc: '选模特、动作、场景；衣服颜色款式保持不变',
+    desc: '1 张商品图 + 1 个模特；可多选动作与场景，按动作×场景错开出图',
     platforms: ['moments', 'xiaohongshu'],
     defaultSize: 'portrait',
     sizes: ['portrait', 'square'],
@@ -253,17 +253,24 @@ export const TEMPLATES: PromoTemplate[] = [
     poses: MODEL_POSES,
     sceneLabel: '场景',
     scenes: MODEL_SCENES,
-    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张清晰主图与细节（正面整件优先）' },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 1, hint: '只选 1 张清晰商品主图（正面整件优先）' },
     count: { min: 1, max: 6, default: 1 },
     steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
     buildPrompt: (c) =>
       [
         `Fashion lifestyle photograph: ${c.model?.prompt || 'an East Asian model'} wearing the exact knit garment from the reference image.`,
-        (c.poseText || c.pose?.prompt) ? `Pose: ${effectivePrompt(c.pose, c.poseText)}.` : '',
-        (c.sceneText || c.scene?.prompt) ? `Scene: ${effectivePrompt(c.scene, c.sceneText)}.` : '',
+        // 多动作×场景：槽位用芯片 pose/scene；自由文案仅作补充，不覆盖错开配对
+        c.pose?.prompt ? `Pose: ${c.pose.prompt}.` : '',
+        c.poseText && !(c.pose?.name && c.poseText.trim() === c.pose.name)
+          ? `Pose note from merchant: ${c.poseText}.`
+          : '',
+        c.scene?.prompt ? `Scene: ${c.scene.prompt}.` : '',
+        c.sceneText && !(c.scene?.name && c.sceneText.trim() === c.scene.name)
+          ? `Scene note from merchant: ${c.sceneText}.`
+          : '',
         'Pair with simple neutral bottoms that do not distract. Realistic skin, natural proportions, professional e-commerce fashion photography.',
         c.total > 1
-          ? `Shot ${c.index + 1} of ${c.total}: if pose and scene are the same as other shots, add natural micro-variation (expression, weight shift, hand position) so images are not clones; do not change garment or framing style.`
+          ? `Shot ${c.index + 1} of ${c.total}: this slot's pose×scene pair must read differently from sibling slots; if the pair repeats, vary camera height/crop/gaze/hands; never clone the same frame; do not change garment.`
           : '',
         FEATURE(c.feature), KEEP, PHOTOREAL, NO_TEXT,
       ].filter(Boolean).join(' '),

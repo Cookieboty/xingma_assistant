@@ -132,9 +132,9 @@ Page({
     pool.forEach((a) => { if (!seen[a.id]) { seen[a.id] = 1; ordered.push(a); } });
     const max = Math.min(tpl.reference.max || 1, ordered.length);
     const min = Math.min(tpl.reference.min || 1, max);
-    // 平铺/挂拍静物、细节特写、模特上身：尽量勾满（封面+细节），不要只勾 1 张封面
-    const generousIds = { flatlay: 1, detail_closeup: 1, model_scene: 1 };
-    const n = generousIds[tpl.id] ? max : Math.max(min, Math.min(max, min));
+    // 平铺/挂拍静物、细节特写：尽量勾满；模特上身场景图强制 1 张 SKU
+    const generousIds = { flatlay: 1, detail_closeup: 1 };
+    const n = tpl.id === 'model_scene' ? 1 : (generousIds[tpl.id] ? max : Math.max(min, Math.min(max, min)));
     const refs = ordered.slice(0, n).map((a) => a.id);
     const assetsOut = (assets || []).map((a) => Object.assign({}, a, {
       checked: refs.indexOf(a.id) >= 0,
@@ -212,6 +212,9 @@ Page({
     const nextKey = this.data.steps[i];
     this.setData({ stepIdx: i, stepKey: nextKey });
     this.syncFooterLabel();
+    if (nextKey === 'count' && (this.data.tpl || {}).id === 'model_scene') {
+      this._syncCountFromGrid();
+    }
     if (needAnalyze && nextKey === 'style_keywords') {
       this.analyzeStyleRefs();
     }
@@ -538,6 +541,36 @@ Page({
     const id = e.currentTarget.dataset.id;
     this.setData({ 'sel.modelId': this.data.sel.modelId === id && this.data.tpl.model !== 'required' ? '' : id });
   },
+  /** 模特图：动作×场景网格大小（夹在 count.min/max） */
+  _poseSceneGridSize(sel, tpl) {
+    const s = sel || this.data.sel || {};
+    const t = tpl || this.data.tpl || {};
+    const pc = Math.max(1, (s.poses || []).length || 1);
+    const sc = Math.max(1, (s.scenes || []).length || 1);
+    const min = (t.count && t.count.min) || 1;
+    const max = (t.count && t.count.max) || 6;
+    return Math.min(max, Math.max(min, pc * sc));
+  },
+  /** 模特上身：张数默认跟动作×场景走（用户仍可在 count 步改） */
+  _syncCountFromGrid(extraPatch) {
+    const tpl = this.data.tpl;
+    if (!tpl || tpl.id !== 'model_scene' || this.data.mediaKind === 'video') {
+      if (extraPatch) this.setData(extraPatch);
+      return;
+    }
+    const sel = Object.assign({}, this.data.sel, extraPatch && extraPatch.sel ? extraPatch.sel : {});
+    // merge shallow sel.* keys from patch
+    const patch = Object.assign({}, extraPatch || {});
+    Object.keys(patch).forEach((k) => {
+      if (k.indexOf('sel.') === 0) {
+        const sk = k.slice(4);
+        sel[sk] = patch[k];
+      }
+    });
+    const n = this._poseSceneGridSize(sel, tpl);
+    patch['sel.count'] = n;
+    this.setData(patch);
+  },
   toggleMulti(e) {
     const { kind, id } = e.currentTarget.dataset; // kind = poses | scenes
     const tpl = this.data.tpl || {};
@@ -549,17 +582,13 @@ Page({
       if (kind === 'poses') return { 'sel.poseText': opt.name };
       return { 'sel.sceneText': opt.name };
     };
-    // multi_color 或单选合并步：姿态/场景单选（整组共用）
-    if (this.data.singlePoseScene || (tpl && tpl.id === 'multi_color') || this.data.stepKey === 'pose_scene') {
-      // pose_scene 下姿势仍可多选（非 multi_color）；multi_color 强制单选
-      const forceSingle = this.data.singlePoseScene || (tpl && tpl.id === 'multi_color');
-      if (forceSingle || this.data.stepKey === 'pose_scene') {
-        if (forceSingle) {
-          this.setData(Object.assign({ [`sel.${kind}`]: [id] }, fillText()));
-          this.refreshOptionFlags();
-          return;
-        }
-      }
+    // multi_color：姿态/场景强制单选（整组共用）；其它模板 pose_scene 可多选
+    const forceSingle = this.data.singlePoseScene || (tpl && tpl.id === 'multi_color');
+    if (forceSingle) {
+      const patch = Object.assign({ [`sel.${kind}`]: [id] }, fillText());
+      this._syncCountFromGrid(patch);
+      this.refreshOptionFlags();
+      return;
     }
     let arr = this.data.sel[kind].slice();
     const i = arr.indexOf(id);
@@ -567,7 +596,7 @@ Page({
     const patch = { [`sel.${kind}`]: arr };
     // 点选预设时把名称填进文本框作起点（用户可继续改成完整描述）
     if (opt && i < 0) Object.assign(patch, fillText());
-    this.setData(patch);
+    this._syncCountFromGrid(patch);
     this.refreshOptionFlags();
   },
   refreshOptionFlags() {
@@ -614,14 +643,23 @@ Page({
     if (target === 'pose') {
       const hit = matchPreset(tpl.poses || [], result);
       const patch = { 'sel.poseText': result };
-      if (hit) patch['sel.poses'] = [hit.id];
-      this.setData(patch);
+      // 多色单选：可覆盖为命中芯片；模特图等多选：只写文本，不塌缩已选动作
+      if (hit && (this.data.singlePoseScene || (tpl && tpl.id === 'multi_color') || !(this.data.sel.poses || []).length)) {
+        patch['sel.poses'] = [hit.id];
+      } else if (hit && (this.data.sel.poses || []).indexOf(hit.id) < 0) {
+        patch['sel.poses'] = (this.data.sel.poses || []).concat([hit.id]);
+      }
+      this._syncCountFromGrid(patch);
       this.refreshOptionFlags();
     } else {
       const hit = matchPreset(tpl.scenes || [], result);
       const patch = { 'sel.sceneText': result };
-      if (hit) patch['sel.scenes'] = [hit.id];
-      this.setData(patch);
+      if (hit && (this.data.singlePoseScene || (tpl && tpl.id === 'multi_color') || !(this.data.sel.scenes || []).length)) {
+        patch['sel.scenes'] = [hit.id];
+      } else if (hit && (this.data.sel.scenes || []).indexOf(hit.id) < 0) {
+        patch['sel.scenes'] = (this.data.sel.scenes || []).concat([hit.id]);
+      }
+      this._syncCountFromGrid(patch);
       this.refreshOptionFlags();
     }
     wx.showToast({ title: '已填入：' + String(result).slice(0, 12), icon: 'none' });
@@ -807,22 +845,51 @@ Page({
           return;
         }
       }
+      if (tpl.id === 'model_scene') {
+        if ((sel.refs || []).length !== 1) {
+          this.setData({ submitting: false });
+          wx.showToast({ title: '模特图请只选 1 张商品图', icon: 'none' });
+          return;
+        }
+        if (!sel.modelId) {
+          this.setData({ submitting: false });
+          wx.showToast({ title: '请选择 1 个模特', icon: 'none' });
+          return;
+        }
+      }
       const count = isMultiImage ? sel.colors.length : (this.data.mediaKind === 'video' ? 1 : sel.count);
       let poses = isMultiImage ? (sel.poses || []).slice(0, 1) : (sel.poses || []).slice();
       let scenes = isMultiImage ? (sel.scenes || []).slice(0, 1) : (sel.scenes || []).slice();
-      const poseText = String(sel.poseText || '').trim();
-      const sceneText = String(sel.sceneText || '').trim();
-      if (poseText) {
-        const hit = matchPreset(tpl.poses || [], poseText);
-        if (hit) poses = [hit.id];
-      }
-      if (sceneText) {
-        const hit = matchPreset(tpl.scenes || [], sceneText);
-        if (hit) scenes = [hit.id];
-      }
+      let poseText = String(sel.poseText || '').trim();
+      let sceneText = String(sel.sceneText || '').trim();
+      // 多色：文本命中芯片可塌缩为单选；模特图等：保留多选数组，芯片名回填不覆盖
       if (isMulti) {
+        if (poseText) {
+          const hit = matchPreset(tpl.poses || [], poseText);
+          if (hit) poses = [hit.id];
+        }
+        if (sceneText) {
+          const hit = matchPreset(tpl.scenes || [], sceneText);
+          if (hit) scenes = [hit.id];
+        }
         poses = poses.slice(0, 1);
         scenes = scenes.slice(0, 1);
+      } else {
+        // 芯片名回填：多选时不把 freeText 当唯一姿势（避免后端/提示词覆盖错开）
+        if (poses.length > 1) {
+          const names = (tpl.poses || []).filter((o) => poses.indexOf(o.id) >= 0).map((o) => o.name);
+          if (names.indexOf(poseText) >= 0) poseText = '';
+        } else if (poseText && !poses.length) {
+          const hit = matchPreset(tpl.poses || [], poseText);
+          if (hit) poses = [hit.id];
+        }
+        if (scenes.length > 1) {
+          const names = (tpl.scenes || []).filter((o) => scenes.indexOf(o.id) >= 0).map((o) => o.name);
+          if (names.indexOf(sceneText) >= 0) sceneText = '';
+        } else if (sceneText && !scenes.length) {
+          const hit = matchPreset(tpl.scenes || [], sceneText);
+          if (hit) scenes = [hit.id];
+        }
       }
       const styleRefObjectKeys = (this.data.styleRefs || [])
         .map((x) => x && x.objectKey)
