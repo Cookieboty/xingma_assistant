@@ -166,6 +166,14 @@ export class PromoService implements OnModuleInit {
     return this.publicUrl(key);
   }
 
+  /** 槽位是否已有可展示结果（本地/OSS objectKey 或外部 http(s) 直链） */
+  private itemHasResult(it: { status?: string; objectKey?: string | null; url?: string | null; externalUrl?: string | null }): boolean {
+    if (it?.status !== 'done') return false;
+    if (String(it?.objectKey || '').trim()) return true;
+    const u = String(it?.externalUrl || it?.url || '').trim();
+    return /^https?:\/\//i.test(u);
+  }
+
   /** 校验并规范化风格样例 keys；空/缺省 → [] */
   private normalizeStyleRefs(user: AuthContext, keys: unknown): string[] {
     if (keys == null || keys === undefined) return [];
@@ -1614,7 +1622,7 @@ export class PromoService implements OnModuleInit {
       ? `重新生成 ${regenNonce}：请在构图/机位/姿势微动作/表情/光影上做出可见差异，切勿与上一版几乎相同；衣服款式、颜色、织纹必须与参考成衣一致。`
       : '';
     for (const it of items) {
-      if (it.status === 'done' && it.objectKey) continue;
+      if (this.itemHasResult(it)) continue;
       const enrichedPrompt = [it.prompt, garmentPrep.garmentConstraintEn, garmentPrep.refRolesPromptEn, regenNudgeEn]
         .filter(Boolean)
         .join(' ');
@@ -1653,7 +1661,7 @@ export class PromoService implements OnModuleInit {
           done += 1;
           return;
         }
-        if (it.status === 'done' && it.objectKey) {
+        if (this.itemHasResult(it)) {
           done += 1;
           const okKeep = items.filter((x) => x.status === 'done').length;
           await opts?.onProgress?.({
@@ -1933,8 +1941,17 @@ export class PromoService implements OnModuleInit {
 
       const downloadExtToItem = async (it: JobItem, url: string) => {
         try {
-          const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
-          const extName = url.toLowerCase().includes('.png') ? '.png' : '.jpg';
+          const u = String(url || '').trim();
+          // 外部引擎已返回可访问直链：直接入库/展示，不下载、不转存自有 OSS（同视频 LKB 直链策略）
+          if (/^https?:\/\//i.test(u)) {
+            it.status = 'done';
+            it.objectKey = undefined;
+            it.url = u;
+            it.via = 'external_outfit';
+            return;
+          }
+          const buf = Buffer.from(await (await fetch(u)).arrayBuffer());
+          const extName = u.toLowerCase().includes('.png') ? '.png' : '.jpg';
           const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${extName}`;
           fs.writeFileSync(path.join(this.storageRoot(), objectKey), buf);
           await this.oss.putObjectSafe(buf, objectKey, extName === '.png' ? 'image/png' : 'image/jpeg');
@@ -1955,7 +1972,7 @@ export class PromoService implements OnModuleInit {
         // 关键：每个颜色单独调一次 Agent（1 色参考 + 该色 prompt），避免整组一锅炖只出第一色
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
-          if (it.status === 'done' && it.objectKey) continue;
+          if (this.itemHasResult(it)) continue;
           const colorLabel = colorsAll[i] || '';
           const garmentUrls = garmentUrlForSlot(i);
           if (!garmentUrls.length) {
@@ -2012,7 +2029,7 @@ export class PromoService implements OnModuleInit {
         // 非多色：整组一次调用（原逻辑）
         const garmentUrls = garmentUrlForSlot(0);
         const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
-        const pending = items.filter((x) => !(x.status === 'done' && x.objectKey));
+        const pending = items.filter((x) => !this.itemHasResult(x));
         const lead = pending[0] || items[0];
         const promptLead = String(lead?.prompt || lead?.promptZh || '').trim();
         const instruction = [
@@ -2049,7 +2066,7 @@ export class PromoService implements OnModuleInit {
           }
           for (let i = 0; i < items.length; i++) {
             const it = items[i];
-            if (it.status === 'done' && it.objectKey) continue;
+            if (this.itemHasResult(it)) continue;
             applyExternalToItem(it, ext, i);
             if ((it as any)._extUrl) {
               await downloadExtToItem(it, String((it as any)._extUrl));
@@ -2175,7 +2192,9 @@ export class PromoService implements OnModuleInit {
       return hist.slice(-30);
     };
     for (const it of opts.items) {
-      if (it.status !== 'done' || !it.objectKey) {
+      const externalUrl = String(it.url || '').trim();
+      const hasExternal = /^https?:\/\//i.test(externalUrl);
+      if (it.status !== 'done' || !(it.objectKey || hasExternal)) {
         const genCalls = mergeGenCalls(it);
         images.push({
           index: it.index,
@@ -2185,6 +2204,7 @@ export class PromoService implements OnModuleInit {
           error: it.error,
           ms: it.ms,
           objectKey: it.objectKey,
+          externalUrl: hasExternal ? externalUrl : undefined,
           mediaId: it.savedMediaId,
           prompt: it.prompt || priorByIndex.get(it.index)?.prompt,
           promptZh: it.promptZh || it.genCall?.promptZh || priorByIndex.get(it.index)?.promptZh,
@@ -2198,17 +2218,25 @@ export class PromoService implements OnModuleInit {
       }
       let mediaId = it.savedMediaId;
       if (!mediaId) {
-        const abs = path.join(this.storageRoot(), it.objectKey);
-        const size = fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+        const abs = !hasExternal && it.objectKey ? path.join(this.storageRoot(), it.objectKey) : '';
+        const size = abs && fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+        const mime = hasExternal
+          ? externalUrl.toLowerCase().includes('.png')
+            ? 'image/png'
+            : 'image/jpeg'
+          : it.objectKey!.endsWith('.jpg')
+            ? 'image/jpeg'
+            : 'image/png';
         const saved = await mediaRepo.save(
           mediaRepo.create({
             tenantId: user.tenantId,
             productId,
             promoSetId: setId,
             type: 'image',
-            provider: this.oss.mediaProvider(),
-            objectKey: it.objectKey,
-            mimeType: it.objectKey.endsWith('.jpg') ? 'image/jpeg' : 'image/png',
+            provider: hasExternal ? 'external' : this.oss.mediaProvider(),
+            // 直链存完整 URL；本地/OSS 仍存 objectKey
+            objectKey: hasExternal ? externalUrl : it.objectKey!,
+            mimeType: mime,
             sizeBytes: String(size),
             status: 'active',
           }),
@@ -2223,7 +2251,8 @@ export class PromoService implements OnModuleInit {
       images.push({
         index: it.index,
         status: 'done',
-        objectKey: it.objectKey,
+        objectKey: hasExternal ? undefined : it.objectKey,
+        externalUrl: hasExternal ? externalUrl : undefined,
         mediaId,
         poseId: it.poseId,
         sceneId: it.sceneId,
@@ -2562,7 +2591,7 @@ export class PromoService implements OnModuleInit {
         error: i.error,
         ms: i.ms,
         saved: !!i.mediaId,
-        regenerating: !!regenerating && !!i.objectKey,
+        regenerating: !!regenerating && !!(i.objectKey || (i as any).externalUrl || (i as any).url),
         // IMAGE_GEN 可分析：中文原话 + 英文最终提示词 + 历次调用（重生追加）
         prompt: i.prompt || null,
         promptZh: i.promptZh || null,
@@ -2906,17 +2935,27 @@ export class PromoService implements OnModuleInit {
     const want = body?.indexes?.length ? body.indexes : job.items.map((i) => i.index);
     const added: string[] = [];
     for (const it of job.items) {
-      if (!want.includes(it.index) || it.status !== 'done' || !it.objectKey || it.savedMediaId) continue;
-      const stInfo = fs.statSync(path.join(this.storageRoot(), it.objectKey));
+      const externalUrl = String(it.url || '').trim();
+      const hasExternal = /^https?:\/\//i.test(externalUrl);
+      if (!want.includes(it.index) || it.status !== 'done' || !(it.objectKey || hasExternal) || it.savedMediaId) continue;
+      const abs = !hasExternal && it.objectKey ? path.join(this.storageRoot(), it.objectKey) : '';
+      const sizeBytes = abs && fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+      const mime = hasExternal
+        ? externalUrl.toLowerCase().includes('.png')
+          ? 'image/png'
+          : 'image/jpeg'
+        : it.objectKey!.endsWith('.jpg')
+          ? 'image/jpeg'
+          : 'image/png';
       const saved = await repo.save(
         repo.create({
           tenantId: user.tenantId,
           productId,
           type: 'image',
-          provider: this.oss.mediaProvider(),
-          objectKey: it.objectKey,
-          mimeType: it.objectKey.endsWith('.jpg') ? 'image/jpeg' : 'image/png',
-          sizeBytes: String(stInfo.size),
+          provider: hasExternal ? 'external' : this.oss.mediaProvider(),
+          objectKey: hasExternal ? externalUrl : it.objectKey!,
+          mimeType: mime,
+          sizeBytes: String(sizeBytes),
           status: 'active',
         }),
       );
