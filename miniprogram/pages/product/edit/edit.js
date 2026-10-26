@@ -395,7 +395,7 @@ Page({
       if (!r) continue;
       if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return i;
     }
-    // 容错：按最近中心点
+    // 容错：按最近中心点（拖出格外时仍能落到最近格）
     let best = -1;
     let bestDist = Infinity;
     for (let i = 0; i < rects.length; i++) {
@@ -409,7 +409,7 @@ Page({
     return best;
   },
   onImgTouchStart(e) {
-    // 提前量测格子，避免 longpress 后首帧 touchmove 无 rect
+    // 提前量测格子；拖动过程中不改 images 数组，避免 wx:key 重排打断 touch
     if (this.data.reordering || !this.data.id) return;
     this._touchStartIndex = Number(e.currentTarget.dataset.index);
     this._refreshCellRects();
@@ -419,7 +419,7 @@ Page({
     const index = Number(e.currentTarget.dataset.index);
     const id = e.currentTarget.dataset.id;
     if (!id || Number.isNaN(index) || index < 0) return;
-    this._drag = { active: true, from: index, origin: index, id, moved: false, dirty: false };
+    this._drag = { active: true, from: index, over: index, id, moved: false };
     this.setData({ draggingIndex: index, dragOverIndex: index });
     try { wx.vibrateShort({ type: 'medium' }); } catch (err) { /* */ }
     this._refreshCellRects();
@@ -434,31 +434,23 @@ Page({
       return;
     }
     const over = this._hitCellIndex(t.clientX, t.clientY);
-    if (over < 0) return;
-    const from = this._drag.from;
-    if (over === from) {
-      if (over !== this.data.dragOverIndex) this.setData({ dragOverIndex: over });
-      return;
-    }
-    // 拖动过程中即时换位，封面角标随首张变化
-    const images = (this.data.images || []).slice();
-    if (from < 0 || from >= images.length || over >= images.length) return;
-    const [item] = images.splice(from, 1);
-    images.splice(over, 0, item);
-    this._drag.from = over;
-    this._drag.dirty = true;
-    this.setData({ images, draggingIndex: over, dragOverIndex: over });
-    this._refreshCellRects();
+    if (over < 0 || over === this._drag.over) return;
+    this._drag.over = over;
+    // 只高亮目标格，不 splice images（重排会丢 touch / 来回抖）
+    if (over !== this.data.dragOverIndex) this.setData({ dragOverIndex: over });
   },
   onImgTouchEnd() {
     if (!this._drag || !this._drag.active) return;
-    const dirty = this._drag.dirty || (this._drag.moved && this._drag.from !== this._drag.origin);
+    const from = this._drag.from;
+    const to = this._drag.over;
     const moved = this._drag.moved;
     this._drag = null;
     this._cellRects = null;
     this.setData({ draggingIndex: -1, dragOverIndex: -1 });
     if (moved) this._skipPreviewOnce = true;
-    if (dirty) this.persistImageOrder();
+    if (moved && from >= 0 && to >= 0 && from !== to) {
+      this.reorderImages(from, to);
+    }
   },
   async persistImageOrder() {
     if (this.data.reordering || !this.data.id) return;

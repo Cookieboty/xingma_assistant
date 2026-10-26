@@ -76,6 +76,7 @@
 .img-cell.sortable.is-over {
   outline: 4rpx solid #c45c26;
   outline-offset: -4rpx;
+  background: #fff0e8;
 }
 .img-cover-badge {
   position: absolute;
