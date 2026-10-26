@@ -253,7 +253,7 @@ export const TEMPLATES: PromoTemplate[] = [
     poses: MODEL_POSES,
     sceneLabel: '场景',
     scenes: MODEL_SCENES,
-    reference: { prefer: ['main'], min: 1, max: 2, hint: '选 1-2 张清晰主图（正面整件）' },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张清晰主图与细节（正面整件优先；短路径会尽量全选）' },
     count: { min: 1, max: 6, default: 1 },
     steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
     buildPrompt: (c) =>
