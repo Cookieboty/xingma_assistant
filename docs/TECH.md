@@ -249,7 +249,11 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 | 存相册 | `utils/saveAlbum.js` |
 | SKU UI | `components/sku-list` |
 
-合法域名（mp 后台）：request = `xingma.visitworld.me`；uploadFile / **downloadFile** 均需配置 `chathub.oss-cn-hangzhou.aliyuncs.com`（存相册走 `wx.downloadFile`）。
+合法域名（mp 后台）：
+- request = `xingma.visitworld.me`
+- uploadFile / **downloadFile** 均需：`chathub.oss-cn-hangzhou.aliyuncs.com`（自有 OSS 图/旧视频）
+- **downloadFile 还必须含** `xingma.visitworld.me`：LKB 等外部成片不转存自有 OSS，播放/存相册走同域中转 `GET /api/media/external-play?u&e&s`（HMAC）。`<video src>` 与 `wx.downloadFile` 都查 downloadFile 列表；Mac 微信/真机无「不校验合法域名」时尤甚。
+- `<image>` 展示网络图一般不要求 downloadFile；外部宣传**视频**必须同域或已白名单的桶域名。
 
 ### OSS 读链接（当前：公开读）
 
@@ -347,8 +351,10 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 ### 8.4 宣传视频组（v2：LKB 单段竖屏）
 
 - 业主 **task** = 一次视频动作（`promo_sets.params.kind=video`）；底层 `promo_video` job 不单独暴露为业主任务。  
-- 流程：选商品图 → 可选卖点/特征 → `POST …/promo/video-script` 自动短分镜（可编辑）→ `POST …/promo/generate` → 一条 9:16、约 8–12s → OSS → gallery。  
-- 上游默认 **LKB** `sinan-video-generator`：`POST /api/invocations/rsync` + poll；`videoGeneration`：`FREE` 或 `FIRST_LAST_FRAME`（有商品图作 `first_frame`），`ratio=9:16`，`resolution=720p`；`generateAudio` 由业主可选配乐预设驱动（`bgmId` 透传 params；上游暂仅布尔，具体曲目待支持）。密钥：`backend/.secrets/lkb-video-agent.key`（或 `VIDEO_LKB_AGENT_KEY` / `LKB_AGENT_CALL_KEY`），**不入仓**。  
+- 流程：选商品图 → 可选卖点/特征 → `POST …/promo/video-script` 自动短分镜（可编辑）→ `POST …/promo/generate` → 一条 9:16、约 8–12s → gallery。  
+- **成片不转存自有 OSS**：LKB `SUCCEEDED` 的 `result.artifacts[].uri` 直链写入 `promo_sets.images[].externalUrl` / `media_assets`（`provider=external`，`objectKey`=完整 URL）；时长取上游 `parameters.duration`。非 LKB 引擎仍可本地落盘+OSS。  
+- 播放：列表/详情 `itemPlayUrl` 对外部视频返回同域 ` /api/media/external-play`（HMAC，不落盘）；避免小程序因 LKB 桶（如 `xy-tradex.oss-cn-shenzhen.aliyuncs.com`）未进 downloadFile 白名单而在 Mac/真机无法播。  
+- 上游默认 **LKB** `sinan-video-generator`：`POST /api/invocations/rsync` + poll；`videoGeneration`：`FREE` 或 `FIRST_LAST_FRAME`（有商品图作 `first_frame`），`ratio=9:16`，`resolution=720p`，**`generateAudio=true`**（忽略 none BGM）。密钥：`backend/.secrets/lkb-video-agent.key`（或 `VIDEO_LKB_AGENT_KEY` / `LKB_AGENT_CALL_KEY`），**不入仓**。  
 - 视频模板：挂拍静物 / 街头漫步 / 多色换装 / 咖啡馆生活感 / 织纹特写；参考图上限 9；街头/生活感/多色可选手模；分镜 beats 可编辑。  
 - 兜底：`VIDEO_ENGINE=xytoken` 走原 Seedance `/v1/videos`。  
 - 一期单段，不做多镜拼接。OUTFIT 仍走外部穿搭 Agent，与视频密钥分离。  

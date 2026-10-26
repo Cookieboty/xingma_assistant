@@ -20,6 +20,7 @@ import { registerPromoImageHandler } from '../jobs/handlers/promo-image.handler'
 import { registerPromoVideoHandler } from '../jobs/handlers/promo-video.handler';
 import { JobProgress } from '../jobs/job.types';
 import { OssClient } from '../media/oss.client';
+import { MediaService } from '../media/media.service';
 import { buildPromoCaption } from './promo.captions';
 import { buildJobDisplayTitle } from '../jobs/job-display-title';
 import { VideoGenClient } from './video-gen.client';
@@ -131,6 +132,7 @@ export class PromoService implements OnModuleInit {
     private readonly lkbVideo: LkbVideoClient,
     private readonly jobs: JobsService,
     private readonly oss: OssClient,
+    private readonly media: MediaService,
     private readonly externalOutfit: ExternalOutfitClient,
     @Optional() private readonly vision?: VisionClient,
     @Optional() private readonly dataSource?: DataSource,
@@ -157,10 +159,22 @@ export class PromoService implements OnModuleInit {
     return this.oss.publicUrl(objectKey);
   }
 
-  /** 槽位播放 URL：外部直链优先，否则 OSS/本地 objectKey */
-  private itemPlayUrl(it: { objectKey?: string | null; externalUrl?: string | null; url?: string | null }): string | null {
+  /**
+   * 槽位播放 URL：外部直链优先，否则 OSS/本地 objectKey。
+   * 视频且上游非自有 OSS/本站时，经 /api/media/external-play 同域中转
+   * （小程序 <video>/downloadFile 合法域名不含 LKB 桶如 xy-tradex.oss-cn-shenzhen）。
+   */
+  private itemPlayUrl(
+    it: { objectKey?: string | null; externalUrl?: string | null; url?: string | null },
+    opts?: { proxyExternal?: boolean },
+  ): string | null {
     const ext = String(it?.externalUrl || it?.url || '').trim();
-    if (/^https?:\/\//i.test(ext)) return ext;
+    if (/^https?:\/\//i.test(ext)) {
+      if (opts?.proxyExternal && !this.media.isAlreadyPlayableHost(ext)) {
+        return this.media.buildExternalPlayUrl(ext);
+      }
+      return ext;
+    }
     const key = String(it?.objectKey || '').trim();
     if (!key) return null;
     return this.publicUrl(key);
@@ -1049,7 +1063,7 @@ export class PromoService implements OnModuleInit {
         {
           index: 0,
           status: 'done',
-          url: this.itemPlayUrl(item),
+          url: this.itemPlayUrl(item, { proxyExternal: true }),
           mediaId: item.savedMediaId || null,
           mimeType: 'video/mp4',
           ms: item.ms,
@@ -2578,6 +2592,10 @@ export class PromoService implements OnModuleInit {
 
   // ---------- 宣传图组（UI 以 set 为中心） ----------
   private setDto(row: PromoSetEntity) {
+    const kindEarly =
+      (row as any).kind || (row.params as any)?.kind || (row.params as any)?.mediaKind || 'image';
+    const proxyExternal =
+      kindEarly === 'video' || kindEarly === 'promo_video';
     const images = (row.images || []).map((i) => {
       const regenerating = i.status === 'pending' || i.status === 'running';
       return {
@@ -2587,7 +2605,7 @@ export class PromoService implements OnModuleInit {
         sceneId: i.sceneId,
         mediaId: i.mediaId || null,
         // 重生中的槽位先藏旧图，列表立刻出现「生成中」占位
-        url: !regenerating ? this.itemPlayUrl(i) : null,
+        url: !regenerating ? this.itemPlayUrl(i, { proxyExternal }) : null,
         error: i.error,
         ms: i.ms,
         saved: !!i.mediaId,
