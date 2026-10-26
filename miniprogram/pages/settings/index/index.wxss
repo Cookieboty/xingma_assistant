@@ -158,7 +158,7 @@
   text-overflow: ellipsis;
 }
 .invite-record .ops {
-  gap: 10rpx;
+  gap: 6rpx;
   flex-shrink: 0;
   white-space: nowrap;
 }
