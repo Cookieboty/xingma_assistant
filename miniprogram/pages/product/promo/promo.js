@@ -49,7 +49,7 @@ Page({
     styleKeywordsText: '',
     styleAnalyzing: false,
     styleKeywordChips: [],
-    job: null, submitting: false, saving: false, singlePoseScene: false,
+    job: null, submitting: false, saving: false, singlePoseScene: false, footerPrimaryLabel: '下一步',
     quickMode: false, fullSteps: [],
     voiceTarget: '', voiceListening: false, voiceHint: '按住说话',
     savingAlbum: false, albumSelectedCount: 0, albumAllSelected: false, albumSaveLabel: '保存到相册',
@@ -174,6 +174,7 @@ Page({
       colors: this.data.colors.map((c) => Object.assign(c, { checked: false })),
     });
     this.refreshOptionFlags();
+    this.syncFooterLabel();
   },
   /** 兼容旧入口：已默认完整向导，无需再展开 */
   showMoreOptions() {
@@ -191,6 +192,7 @@ Page({
     if (this.data.stepIdx <= 0) return this.backToTemplates();
     const i = this.data.stepIdx - 1;
     this.setData({ stepIdx: i, stepKey: this.data.steps[i] });
+    this.syncFooterLabel();
   },
   async next() {
     const err = this.validate(this.data.stepKey);
@@ -209,6 +211,7 @@ Page({
     const i = this.data.stepIdx + 1;
     const nextKey = this.data.steps[i];
     this.setData({ stepIdx: i, stepKey: nextKey });
+    this.syncFooterLabel();
     if (needAnalyze && nextKey === 'style_keywords') {
       this.analyzeStyleRefs();
     }
@@ -751,6 +754,31 @@ Page({
     this.syncAlbumSel(merged.items);
   },
 
+  /** 分镜页一键提交：校验 script 后直接 generate（跳过可选配乐步） */
+
+  syncFooterLabel() {
+    const { stepIdx, steps, mediaKind, submitting, styleUploading } = this.data;
+    const last = stepIdx >= (steps || []).length - 1;
+    let footerPrimaryLabel = '下一步';
+    if (last) {
+      if (submitting) footerPrimaryLabel = '提交中…';
+      else if (styleUploading) footerPrimaryLabel = '上传中…';
+      else if (mediaKind === 'video') footerPrimaryLabel = '确认生成视频';
+      else footerPrimaryLabel = '开始生成';
+    }
+    if (this.data.footerPrimaryLabel !== footerPrimaryLabel) {
+      this.setData({ footerPrimaryLabel });
+    }
+  },
+
+  async submitFromScript() {
+    if (this.data.mediaKind !== 'video') return this.next();
+    if (this.data.submitting) return;
+    const err = this.validate('script');
+    if (err) return wx.showToast({ title: err, icon: 'none' });
+    return this.submit();
+  },
+
   async submit() {
     try { await requestJobSubscribe(); } catch (e) { /* ignore */ }
     const { tpl, sel, feature, id } = this.data;
@@ -764,14 +792,17 @@ Page({
       const isMulti = isMultiImage || isMultiVideo;
       if (isMulti) {
         if (sel.colors.length < 2) {
+          this.setData({ submitting: false });
           wx.showToast({ title: '多色展示至少选 2 个颜色', icon: 'none' });
           return;
         }
         if (sel.colors.length !== sel.refs.length) {
+          this.setData({ submitting: false });
           wx.showToast({ title: '颜色数量需与参考图一致', icon: 'none' });
           return;
         }
         if (isMultiImage && !sel.modelId) {
+          this.setData({ submitting: false });
           wx.showToast({ title: '请选择模特', icon: 'none' });
           return;
         }
