@@ -143,7 +143,7 @@
 
     <view class="card" wx:if="{{stepKey === 'model'}}">
       <view class="section-title">{{stepNames.model}}{{tpl.model === 'optional' ? '（可不选）' : ''}}</view>
-      <view class="section-hint">点选头像卡片选择模特</view>
+      <view class="section-hint">点选预置模特（带人脸参考）；人设提示词仅后台注入，界面不展示</view>
       <view class="model-grid">
         <view
           class="model-card {{sel.modelId === item.id ? 'on' : ''}}"

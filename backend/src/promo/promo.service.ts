@@ -303,7 +303,14 @@ export class PromoService implements OnModuleInit {
     return listTemplatesByKind(kind).map(templateDto);
   }
   listModels() {
-    return MODELS.map(({ id, name, desc, avatar, prompt }) => ({ id, name, desc, avatar, prompt }));
+    // 不下发英文 prompt；前端只展示短标签 + 人脸图
+    return MODELS.map(({ id, name, desc, avatar, faceUrl }) => ({
+      id,
+      name,
+      desc,
+      avatar: faceUrl || avatar,
+      faceUrl: faceUrl || avatar || '',
+    }));
   }
   listVideoBgm() {
     return VIDEO_BGM_PRESETS.map(({ id, name, desc, generateAudio }) => ({ id, name, desc, generateAudio }));
@@ -1831,6 +1838,27 @@ export class PromoService implements OnModuleInit {
     const styleStrength = this.normalizeStyleStrength(
       styleAllowedExec ? input.styleStrength : undefined,
     );
+    // 预置模特人脸：下载到本地供自建 IMAGE_GEN 作身份参考；公网 URL 给 external modelImageUrl
+    let modelFaceLocal: string | null = null;
+    let modelFaceUrl: string | null = null;
+    if (model) {
+      modelFaceUrl = String(model.faceUrl || '').trim() || null;
+      if (model.faceObjectKey) {
+        modelFaceLocal = await this.ensureLocal(model.faceObjectKey);
+        if (!modelFaceUrl) {
+          const u = this.oss.publicUrl(model.faceObjectKey);
+          if (/^https?:\/\//i.test(u)) modelFaceUrl = u;
+        }
+      }
+      if (!modelFaceLocal && modelFaceUrl) {
+        // faceObjectKey miss 时走 HTTPS 缓存（ensureLocal 已支持 http(s)）
+        modelFaceLocal = await this.ensureLocal(modelFaceUrl);
+      }
+      if (!modelFaceLocal && modelFaceUrl) {
+        this.logger.warn(`preset model face local miss id=${model.id} url=${modelFaceUrl}`);
+      }
+    }
+
     const stylePaths: string[] = [];
     const styleWarns: string[] = [];
     for (const k of styleKeysRaw) {
@@ -1882,25 +1910,26 @@ export class PromoService implements OnModuleInit {
               .filter((p) => p && p !== colorPath);
             garmentRefs = [colorPath, ...detailOnly];
           }
-          const refsForShot = stylePaths.length
-            ? [...garmentRefs, ...stylePaths]
-            : garmentRefs;
+          const faceRefs = modelFaceLocal ? [modelFaceLocal] : [];
+          const refsForShot = [...garmentRefs, ...faceRefs, ...stylePaths];
+          const faceBlock = faceRefs.length
+            ? ' A model face reference image is provided after the garment reference(s): match that face identity, age appearance and hairstyle exactly; do not copy clothing from the face reference.'
+            : '';
           const styleBlock = buildStyleRefPrompt({
             garmentRefCount: garmentRefs.length,
             styleRefCount: stylePaths.length,
             strength: styleStrength,
             primary: !!tpl.styleRefPrimary || tpl.id === 'style_ref',
           });
-          const prompt = styleBlock ? `${it.prompt} ${styleBlock}` : it.prompt;
+          const prompt = `${it.prompt}${faceBlock}${styleBlock ? ` ${styleBlock}` : ''}`.trim();
           if (styleBlock) it.prompt = prompt;
           const promptZh = it.promptZh || promptZhBase;
           const garmentKeys =
             isMultiColor && refs[it.index]
               ? [refs[it.index]!.objectKey]
               : refs.map((r) => r!.objectKey);
-          const refObjectKeys = styleKeysRaw.length
-            ? [...garmentKeys, ...styleKeysRaw]
-            : garmentKeys;
+          const faceKeys = model?.faceObjectKey ? [model.faceObjectKey] : [];
+          const refObjectKeys = [...garmentKeys, ...faceKeys, ...styleKeysRaw];
           const callBase: ImageGenCallRecord = {
             at: new Date().toISOString(),
             prompt,
@@ -2040,7 +2069,11 @@ export class PromoService implements OnModuleInit {
         else if (tpl.model === 'none') bits.push('不要出真人模特，做静物/挂拍/细节');
         else if (tpl.model === 'required') bits.push('必须出真人模特上身展示成衣');
         else bits.push('模特可选');
-        if (model) bits.push(`模特：${model.name}（${model.desc || ''}）`);
+        if (model) {
+          bits.push(`模特：${model.name}${model.desc ? `（${model.desc}）` : ''}`);
+          if (model.prompt) bits.push(`Talent must match: ${model.prompt}`);
+          if (modelFaceUrl) bits.push('已提供模特人脸参考图 modelImageUrl，脸型五官发型须对齐该图');
+        }
         if (pose?.name) bits.push(`姿势/呈现：${pose.name}`);
         if (scene?.name) bits.push(`场景：${scene.name}`);
         return bits.filter(Boolean).join('；');
@@ -2193,6 +2226,7 @@ export class PromoService implements OnModuleInit {
             .slice(0, 2400);
           const ext = await this.externalOutfit.invoke({
             garmentImages: combinedImages,
+            modelImageUrl: modelFaceUrl || undefined,
             instruction: instruction || undefined,
           });
           await opts?.appendEvent?.('external_outfit', ext.ok ? `外部 Agent 色${i + 1}成功` : `外部 Agent 色${i + 1}失败`, {
@@ -2255,6 +2289,7 @@ export class PromoService implements OnModuleInit {
             .slice(0, 2400);
           const ext = await this.externalOutfit.invoke({
             garmentImages: combinedImages.length ? combinedImages : garmentUrls,
+            modelImageUrl: modelFaceUrl || undefined,
             instruction: instruction || undefined,
           });
           await opts?.appendEvent?.(

@@ -32,11 +32,18 @@ export interface ReferenceRule {
 
 export interface PromoModel {
   id: string;
+  /** 短标签，展示用，如「25岁中国女」 */
   name: string;
+  /** 短描述，展示用；不展示英文 prompt */
   desc: string;
+  /** 生成注入用英文人设（不下发前端） */
   prompt: string;
-  /** 小程序本地头像路径（包内 /images/models/…） */
+  /** 小程序头像：优先公网人脸图 */
   avatar: string;
+  /** 公网人脸参考图 URL（external modelImageUrl / 前端展示） */
+  faceUrl: string;
+  /** OSS objectKey（无 OSS_PREFIX）：presets/models/{id}.jpg */
+  faceObjectKey: string;
 }
 
 export interface PromptContext {
@@ -88,12 +95,66 @@ export const SIZES: Record<string, SizeOption> = {
   vertical_video: { id: 'vertical_video', name: '竖短视频 720×1280 (9:16)', upstream: '720x1280', target: '720x1280' },
 };
 
+/** 预置模特人脸：OSS xingma-stall/presets/models/；提示词仅服务端注入 */
+const PRESET_FACE_BASE =
+  process.env.PRESET_MODEL_FACE_BASE ||
+  'https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall';
+
+function presetFace(id: string): Pick<PromoModel, 'avatar' | 'faceUrl' | 'faceObjectKey'> {
+  const faceObjectKey = `presets/models/${id}.jpg`;
+  const faceUrl = `${PRESET_FACE_BASE.replace(/\/$/, '')}/${faceObjectKey}`;
+  return { faceObjectKey, faceUrl, avatar: faceUrl };
+}
+
 export const MODELS: PromoModel[] = [
-  { id: 'f_young', name: '亚洲女 · 22-28 岁', desc: '清爽自然、黑长直', prompt: 'a natural-looking East Asian woman in her mid twenties, long straight black hair, light natural makeup, slim build', avatar: '/images/models/f_young.png' },
-  { id: 'f_mature', name: '亚洲女 · 30-40 岁', desc: '知性温柔、齐肩发', prompt: 'an elegant East Asian woman in her thirties, shoulder-length hair, gentle confident expression', avatar: '/images/models/f_mature.png' },
-  { id: 'f_mom', name: '亚洲女 · 45-55 岁', desc: '端庄大方、妈妈款', prompt: 'a graceful East Asian woman in her fifties, short neat hair, warm smile, healthy figure', avatar: '/images/models/f_mom.png' },
-  { id: 'm_young', name: '亚洲男 · 25-35 岁', desc: '干净利落、短发', prompt: 'a clean-cut East Asian man in his late twenties, short black hair, relaxed posture', avatar: '/images/models/m_young.png' },
-  { id: 'm_mature', name: '亚洲男 · 40-55 岁', desc: '稳重儒雅', prompt: 'a refined East Asian man in his late forties, neat short hair, calm and steady look', avatar: '/images/models/m_mature.png' },
+  {
+    id: 'f_young',
+    name: '25岁中国女',
+    desc: '黑长直 · 清爽自然',
+    prompt:
+      'a natural-looking Chinese woman about 25 years old, long straight black hair, light natural makeup, slim build, East Asian facial features matching the provided face reference',
+    ...presetFace('f_young'),
+  },
+  {
+    id: 'f_fresh',
+    name: '22岁中国女',
+    desc: '微卷 · 清新甜美',
+    prompt:
+      'a fresh-faced Chinese woman about 22 years old, soft wavy black hair past the shoulders, light freckles optional, gentle closed-lip smile, youthful slim build, East Asian facial features matching the provided face reference',
+    ...presetFace('f_fresh'),
+  },
+  {
+    id: 'f_mature',
+    name: '35岁中国女',
+    desc: '齐肩发 · 知性温柔',
+    prompt:
+      'an elegant Chinese woman about 35 years old, shoulder-length dark hair, gentle confident expression, light natural makeup, East Asian facial features matching the provided face reference',
+    ...presetFace('f_mature'),
+  },
+  {
+    id: 'f_mom',
+    name: '50岁中国女',
+    desc: '短发 · 端庄妈妈款',
+    prompt:
+      'a graceful Chinese woman about 50 years old, short neat hair with soft gray strands, warm kind smile, healthy mature figure, East Asian facial features matching the provided face reference',
+    ...presetFace('f_mom'),
+  },
+  {
+    id: 'm_young',
+    name: '28岁中国男',
+    desc: '短发 · 干净利落',
+    prompt:
+      'a clean-cut Chinese man about 28 years old, short black hair, relaxed posture, natural expression, East Asian facial features matching the provided face reference',
+    ...presetFace('m_young'),
+  },
+  {
+    id: 'm_mature',
+    name: '45岁中国男',
+    desc: '短发 · 稳重儒雅',
+    prompt:
+      'a refined Chinese man about 45 years old, neat short hair with slight gray at the temples, calm and steady look, East Asian facial features matching the provided face reference',
+    ...presetFace('m_mature'),
+  },
 ];
 
 /** 所有模板通用的约束：服装不变、不画字（颜色与参考图一致） */
