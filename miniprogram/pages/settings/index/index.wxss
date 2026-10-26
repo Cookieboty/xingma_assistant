@@ -1,6 +1,6 @@
 .section { font-weight: 600; margin-bottom: 8rpx; }
 .item { justify-content: space-between; margin-top: 16rpx; padding-top: 12rpx; border-top: 1px solid #eee; }
-.ops { display: flex; gap: 16rpx; }
+.ops { display: flex; align-items: center; gap: 28rpx; flex-shrink: 0; }
 .link { color: #3b82f6; font-size: 24rpx; }
 .link.danger { color: #ef4444; }
 .form { margin-top: 20rpx; }
@@ -125,13 +125,29 @@
 }
 .invite-share-btn::after { border: none; }
 .invite-share-link {
-  display: inline;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   padding: 0;
-  margin: 0 8rpx 0 0;
-  font-size: inherit;
-  color: #c45c26;
-  line-height: inherit;
+  margin: 0;
+  min-height: 0;
+  height: auto;
+  line-height: 1.4;
+  font-size: 24rpx;
+  color: #3b82f6;
 }
 .invite-share-link::after { border: none; }
+
+.invite-record .invite-meta {
+  flex: 1;
+  min-width: 0;
+  padding-right: 16rpx;
+}
+.invite-code-text {
+  font-size: 28rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+  color: #333;
+}

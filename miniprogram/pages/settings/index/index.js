@@ -1,6 +1,16 @@
 const { request } = require('../../../utils/request');
 const { saveProfileWithAvatarUpload, isTempAvatarPath, stableMediaUrl } = require('../../../utils/profile');
 
+function inviteStatusLabel(status) {
+  const map = {
+    active: '有效',
+    revoked: '已撤销',
+    exhausted: '已用完',
+    expired: '已过期',
+  };
+  return map[status] || status || '';
+}
+
 Page({
   data: {
     showProfile: true,
@@ -51,7 +61,11 @@ Page({
         status: m.status,
         role: 'staff',
       }));
-      const invites = canInvite ? (results[3] || []) : [];
+      const rawInvites = canInvite ? (results[3] || []) : [];
+      const invites = (Array.isArray(rawInvites) ? rawInvites : []).map((inv) => ({
+        ...inv,
+        statusLabel: inviteStatusLabel(inv && inv.status),
+      }));
       const nickname = (me && me.nickname) || '';
       const avatarUrl = stableMediaUrl((me && me.avatarUrl) || '') || '';
       const phone = (me && me.phone) || '';

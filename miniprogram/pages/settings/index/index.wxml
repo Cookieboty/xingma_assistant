@@ -82,22 +82,20 @@
     </view>
 
     <view class="section" style="margin-top:24rpx;">邀请记录</view>
-    <view class="row item" wx:for="{{invites}}" wx:key="id">
-      <view>
-        <text>员工</text>
-        <text class="muted"> {{item.code}} · {{item.status}}</text>
-        <text class="muted" wx:if="{{item.useCount}}"> · 已用{{item.useCount}}/{{item.maxUses}}</text>
+    <view class="row item invite-record" wx:for="{{invites}}" wx:key="id">
+      <view class="invite-meta">
+        <text class="invite-code-text">{{item.code}}</text>
+        <text class="muted" wx:if="{{item.status!=='active'}}"> · {{item.statusLabel}}</text>
+        <text class="muted" wx:elif="{{item.maxUses}}"> · 已用{{item.useCount || 0}}/{{item.maxUses}}</text>
       </view>
-      <view class="ops">
+      <view class="ops" wx:if="{{item.status==='active'}}">
         <button
           class="link invite-share-link"
           open-type="share"
           data-code="{{item.code}}"
           data-url="{{item.wxacodeUrl}}"
-          wx:if="{{item.status==='active'}}"
-        >转发</button>
-        <text class="link" data-code="{{item.code}}" bindtap="copyInviteCode">复制</text>
-        <text class="link danger" wx:if="{{item.status==='active'}}" data-id="{{item.id}}" bindtap="revokeInvite">撤销</text>
+        >邀请</button>
+        <text class="link danger" data-id="{{item.id}}" bindtap="revokeInvite">撤销</text>
       </view>
     </view>
     <view class="muted" wx:if="{{!invites.length}}">暂无邀请</view>
