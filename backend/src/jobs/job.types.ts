@@ -4,7 +4,7 @@ export type JobType = 'publish_product' | 'promo_image' | 'promo_video' | 'cover
  * 业主任务中心 /「本商品任务」可见类型。
  * 新 job type 默认不展示，除非显式加入此白名单。
  */
-export const USER_VISIBLE_JOB_TYPES = ['promo_image', 'promo_video'] as const;
+export const USER_VISIBLE_JOB_TYPES = ['promo_image', 'promo_video', 'publish_product'] as const;
 export type UserVisibleJobType = (typeof USER_VISIBLE_JOB_TYPES)[number];
 
 export function isUserVisibleJobType(type: string | null | undefined): boolean {

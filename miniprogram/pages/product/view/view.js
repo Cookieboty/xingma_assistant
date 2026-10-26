@@ -10,6 +10,7 @@ const {
   isProfileComplete,
   isProfilePrompted,
   markProfilePrompted,
+  missingProfileFields,
   saveProfileWithAvatarUpload,
   stableMediaUrl,
 } = require('../../../utils/profile');
@@ -68,6 +69,11 @@ Page({
     profileDraftNick: '',
     profileDraftPhone: '',
     profileSaving: false,
+    needProfileAvatar: false,
+    needProfileNickname: false,
+    needProfilePhone: false,
+    profileSheetTitle: '完善资料',
+    profileSheetDesc: '',
   },
   async onLoad(q) {
     this._layoutHomeFab();
@@ -180,15 +186,38 @@ Page({
         profileDraftNick: name,
         profileDraftPhone: phone,
       });
-      // 首次客户打开：软弹完善资料（不挡看货；可跳过）
-      if (!isProfilePrompted() && !isProfileComplete(me)) {
-        this.setData({ showProfileSheet: true, showSoftTip: false });
+      // 缺啥补啥：已有头像/昵称不重复催；仅缺项弹层（可跳过，不挡看货）
+      const miss = missingProfileFields(me);
+      if (isProfileComplete(me)) {
+        markProfilePrompted();
+        markContactPrompted();
+      } else if (!isProfilePrompted() && miss.length) {
+        const needAvatar = miss.indexOf('avatar') >= 0;
+        const needNickname = miss.indexOf('nickname') >= 0;
+        const needPhone = miss.indexOf('phone') >= 0;
+        let title = '完善资料';
+        let desc = '只补还缺的项；可跳过，看货不受影响';
+        if (miss.length === 1 && needPhone) {
+          title = '补一下手机号';
+          desc = '方便档口联系你；可用微信一键授权，也可跳过';
+        } else if (!needAvatar && !needNickname && needPhone) {
+          title = '补一下手机号';
+          desc = '头像昵称已有；还差手机号（可跳过）';
+        }
+        this.setData({
+          showProfileSheet: true,
+          showSoftTip: false,
+          needProfileAvatar: needAvatar,
+          needProfileNickname: needNickname,
+          needProfilePhone: needPhone,
+          profileSheetTitle: title,
+          profileSheetDesc: desc,
+        });
       } else if (!hasContactInfo(me) && !isContactPrompted()) {
         this.setData({ showSoftTip: true });
       } else if (hasContactInfo(me)) {
         markContactPrompted();
       }
-      if (isProfileComplete(me)) markProfilePrompted();
     } catch (e) {
       /* 不阻断看货 */
     }
@@ -273,6 +302,11 @@ Page({
       this.setData({
         showProfileSheet: false,
         profileSaving: false,
+    needProfileAvatar: false,
+    needProfileNickname: false,
+    needProfilePhone: false,
+    profileSheetTitle: '完善资料',
+    profileSheetDesc: '',
         profileName: nextNick,
         profilePhone: nextPhone,
         profileAvatarUrl: nextAvatar,

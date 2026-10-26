@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { Tenant } from '../common/entities/tenant.entity';
 import { TenantMember } from '../common/entities/tenant-member.entity';
+import { CustomerProfile } from '../common/entities/customer-profile.entity';
 import { AuditService } from '../common/audit.service';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { stableMediaUrl } from '../common/utils/media-url';
@@ -195,22 +196,34 @@ export class TenantsService {
   }
 
 
-  async listMembers(tenantId: string): Promise<Array<{ id: string; openid: string; role: string; nickname: string | null; status: string; createdAt?: Date; inviteId?: string | null; inviteCode?: string | null }>> {
+  async listMembers(tenantId: string): Promise<Array<{ id: string; openid: string; role: string; nickname: string | null; avatarUrl?: string | null; phone?: string | null; status: string; createdAt?: Date; inviteId?: string | null; inviteCode?: string | null }>> {
     if (this.db) {
       const rows = await this.db.getRepository(TenantMember).find({
         where: { tenantId, status: 'active' },
         order: { createdAt: 'ASC' },
       });
-      return rows.map((m) => ({
-        id: m.id,
-        openid: m.openid,
-        role: m.role,
-        nickname: m.nickname,
-        status: m.status,
-        createdAt: m.createdAt,
-        inviteId: (m as any).inviteId ?? null,
-        inviteCode: (m as any).inviteCode ?? null,
-      }));
+      const openids = rows.map((m) => m.openid).filter(Boolean);
+      const profiles = openids.length
+        ? await this.db.getRepository(CustomerProfile).find({
+            where: { tenantId, openid: In(openids) },
+          })
+        : [];
+      const byOpen = new Map(profiles.map((c) => [c.openid, c]));
+      return rows.map((m) => {
+        const c = byOpen.get(m.openid);
+        return {
+          id: m.id,
+          openid: m.openid,
+          role: m.role,
+          nickname: m.nickname || c?.nickname || null,
+          avatarUrl: c?.avatarUrl ? stableMediaUrl(c.avatarUrl) : null,
+          phone: c?.phone || null,
+          status: m.status,
+          createdAt: m.createdAt,
+          inviteId: (m as any).inviteId ?? null,
+          inviteCode: (m as any).inviteCode ?? null,
+        };
+      });
     }
     return [...this.memMembers.values()]
       .filter((m) => m.tenantId === tenantId)

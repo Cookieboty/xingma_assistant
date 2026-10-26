@@ -42,6 +42,17 @@ function hasContactInfo(me) {
 }
 
 
+
+/** 返回仍缺的资料字段：avatar / nickname / phone（已有则不返回，避免反复打扰） */
+function missingProfileFields(me) {
+  const miss = [];
+  if (!me) return ['avatar', 'nickname', 'phone'];
+  if (!String(me.avatarUrl || '').trim()) miss.push('avatar');
+  if (!String(me.nickname || '').trim()) miss.push('nickname');
+  if (!String(me.phone || '').trim()) miss.push('phone');
+  return miss;
+}
+
 /** 头像+昵称+手机是否都齐（完善资料软提示用） */
 function isProfileComplete(me) {
   if (!me) return false;
@@ -133,6 +144,8 @@ function maybeCollectProfile(opts) {
   const app = getApp();
   const role = app.globalData.role || '';
   if (role !== 'customer' && role !== 'owner' && role !== 'staff') return Promise.resolve();
+  // 客户主路径由 view 页按「缺啥补啥」处理；此处不重复打扰
+  if (role === 'customer') return Promise.resolve();
   if (wx.getStorageSync('profile_prompted_v1')) return Promise.resolve();
   const route = currentRoute();
   const onCustomerShareUi =
@@ -141,29 +154,36 @@ function maybeCollectProfile(opts) {
   if (onCustomerShareUi) return Promise.resolve();
   return request({ url: '/api/auth/me' })
     .then((me) => {
-      if (me && (hasContactInfo(me) || (me.nickname && (role !== 'customer' || me.avatarUrl)))) {
+      const miss = missingProfileFields(me);
+      // 头像昵称已有则不再催；仅缺手机时去设置补手机
+      if (!miss.length) {
         wx.setStorageSync('profile_prompted_v1', '1');
         return;
       }
-      // 员工自愿完善；客户主路径已在 view 弹联系方式，此处不再强推
-      if (role === 'customer') {
+      const onlyPhone = miss.length === 1 && miss[0] === 'phone';
+      const needAvatarOrNick = miss.indexOf('avatar') >= 0 || miss.indexOf('nickname') >= 0;
+      if (!needAvatarOrNick && !onlyPhone) {
         wx.setStorageSync('profile_prompted_v1', '1');
         return;
       }
+      const content = onlyPhone
+        ? '还差手机号，方便同事认出你（可微信一键授权）'
+        : '请完善头像和昵称，方便同事认出你';
       return new Promise((resolve) => {
         wx.showModal({
-          title: '完善资料',
-          content: '可自愿完善昵称（方便档口认出你），可跳过',
+          title: onlyPhone ? '补一下手机号' : '完善资料',
+          content,
           confirmText: '去设置',
-          cancelText: '跳过',
+          cancelText: '稍后',
+          showCancel: onlyPhone, // 头像昵称缺失时不可跳过打扰一次
           success: (r) => {
             wx.setStorageSync('profile_prompted_v1', '1');
-            if (!r.confirm) {
+            if (onlyPhone && !r.confirm) {
               resolve();
               return;
             }
             wx.switchTab({
-              url: '/pages/settings/index/index',
+              url: '/pages/settings/index/index?profile=1',
               complete: () => resolve(),
               fail: () => resolve(),
             });
@@ -255,5 +275,6 @@ module.exports = {
   isProfilePrompted,
   markProfilePrompted,
   PROFILE_PROMPTED_KEY,
+  missingProfileFields,
   requestJobSubscribe,
 };

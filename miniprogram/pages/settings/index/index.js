@@ -58,8 +58,13 @@ Page({
       const members = (Array.isArray(rawMembers) ? rawMembers : []).map((m) => ({
         id: m.id,
         nickname: m.nickname || '',
+        avatarUrl: stableMediaUrl(m.avatarUrl || '') || '',
+        phone: m.phone || '',
         status: m.status,
         role: 'staff',
+        displayName: (m.nickname || '').trim() || (m.phone || '').trim() || '未设昵称',
+        nickShort: ((m.nickname || '').trim() || (m.phone || '').trim() || '员').slice(0, 1),
+        whoLine: [m.nickname, m.phone].filter((x) => (x || '').trim()).join(' · ') || '未完善资料',
       }));
       const rawInvites = canInvite ? (results[3] || []) : [];
       const invites = (Array.isArray(rawInvites) ? rawInvites : []).map((inv) => ({

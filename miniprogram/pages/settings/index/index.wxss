@@ -175,3 +175,15 @@
 .invite-meta .muted {
   font-size: 22rpx;
 }
+
+.member-row { align-items: center; gap: 16rpx; }
+.member-avatar {
+  width: 72rpx; height: 72rpx; border-radius: 50%; background: #f0ebe6; flex-shrink: 0;
+}
+.member-avatar-ph {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28rpx; color: #c45c26; font-weight: 600;
+}
+.member-meta { flex: 1; min-width: 0; }
+.member-name-row { display: flex; align-items: center; gap: 8rpx; flex-wrap: wrap; }
+.member-name { font-size: 30rpx; font-weight: 600; color: #333; }

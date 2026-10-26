@@ -1,1 +1,17 @@
 .mini { text-align: center; padding: 20rpx; margin-top: 12rpx; }
+
+
+.profile-row { display:flex; align-items:center; gap:16rpx; }
+.avatar-pick {
+  width:112rpx;height:112rpx;padding:0;margin:0;border-radius:12rpx;
+  background:#f0ebe6; overflow:hidden;
+}
+.avatar-pick::after { border:none; }
+.avatar-pick-inner { width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:22rpx;color:#8a8a8a; }
+.avatar-preview { width:112rpx;height:112rpx;border-radius:12rpx; }
+.nick-input { flex:1; }
+.phone-row { display:flex; align-items:center; gap:12rpx; }
+.phone-wx-link {
+  flex-shrink:0; font-size:24rpx; color:#c45c26; background:transparent; padding:0 8rpx;
+}
+.phone-wx-link::after { border:none; }

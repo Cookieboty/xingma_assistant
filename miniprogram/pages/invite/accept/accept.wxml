@@ -3,6 +3,7 @@
     <view class="section">正在加入档口…</view>
     <view class="muted">邀请码 {{code}}</view>
   </view>
+
   <view class="card" wx:elif="{{error}}">
     <view class="section">无法加入</view>
     <view class="muted">{{error}}</view>
@@ -12,6 +13,49 @@
     </view>
     <view class="btn-ghost mini" style="margin-top:16rpx;" bindtap="goHome">返回首页</view>
   </view>
+
+  <view class="card" wx:elif="{{needProfile}}">
+    <view class="section">完善资料后进入</view>
+    <view class="muted">已有的项会跳过；同事要靠头像/昵称认出你</view>
+
+    <view class="profile-row" wx:if="{{needAvatar || needNickname}}" style="margin-top:20rpx;">
+      <button
+        wx:if="{{needAvatar}}"
+        class="avatar-pick"
+        open-type="chooseAvatar"
+        bind:chooseavatar="onChooseAvatar"
+      >
+        <image wx:if="{{avatarUrl}}" src="{{avatarUrl}}" class="avatar-preview" mode="aspectFill" />
+        <view wx:else class="avatar-pick-inner"><text>选头像</text></view>
+      </button>
+      <image wx:elif="{{avatarUrl}}" src="{{avatarUrl}}" class="avatar-preview" mode="aspectFill" />
+      <input
+        wx:if="{{needNickname}}"
+        class="input nick-input"
+        type="nickname"
+        placeholder="点选微信昵称"
+        value="{{nickname}}"
+        bindblur="onNickname"
+        bindinput="onNickname"
+      />
+      <view wx:elif="{{nickname}}" class="muted">昵称：{{nickname}}</view>
+    </view>
+
+    <view class="phone-row" wx:if="{{needPhone}}" style="margin-top:16rpx;">
+      <input class="input" placeholder="手机号" value="{{phone}}" bindinput="onPhoneInput" />
+      <button
+        class="phone-wx-link"
+        open-type="getPhoneNumber"
+        bindgetphonenumber="onGetPhoneNumber"
+        disabled="{{phoneBinding}}"
+      >微信获取</button>
+    </view>
+
+    <view class="btn-primary" style="margin-top:28rpx;" bindtap="saveProfileAndEnter">
+      {{saving ? '保存中…' : '保存并进入工作台'}}
+    </view>
+  </view>
+
   <view class="card" wx:elif="{{!code}}">
     <view class="section">加入档口</view>
     <view class="muted">请扫描业主邀请小程序码，或输入邀请码</view>
@@ -20,6 +64,7 @@
       <view class="btn-primary mini" bindtap="retry">加入</view>
     </view>
   </view>
+
   <view class="card" wx:else>
     <view class="section">已加入为{{roleLabel}}</view>
     <view class="muted">正在进入工作台…</view>

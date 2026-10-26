@@ -221,6 +221,8 @@ export class InvitesService {
     return rows.map((m) => ({
       id: m.id,
       nickname: m.nickname,
+      avatarUrl: (m as any).avatarUrl || null,
+      phone: (m as any).phone || null,
       status: m.status,
       role: 'staff',
       createdAt: m.createdAt,

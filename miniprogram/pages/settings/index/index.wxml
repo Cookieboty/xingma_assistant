@@ -46,15 +46,20 @@
 
   <view class="card" wx:if="{{canInvite}}">
     <view class="section">当前成员</view>
-    <view class="row item" wx:for="{{members}}" wx:key="id">
-      <view>
-        <text>{{item.nickname || '未设昵称'}}</text>
-        <text class="tag">员工</text>
-        <view class="muted small" wx:if="{{item.inviteCode}}" style="margin-top:4rpx;">来自邀请 {{item.inviteCode}}</view>
-        <view class="muted small" wx:else style="margin-top:4rpx;">无邀请码记录</view>
+    <view class="row item member-row" wx:for="{{members}}" wx:key="id">
+      <image wx:if="{{item.avatarUrl}}" src="{{item.avatarUrl}}" class="member-avatar" mode="aspectFill" />
+      <view wx:else class="member-avatar member-avatar-ph">{{item.nickShort}}</view>
+      <view class="member-meta">
+        <view class="member-name-row">
+          <text class="member-name">{{item.displayName}}</text>
+          <text class="tag" wx:if="{{item.id === myMemberId}}">我</text>
+          <text class="tag">员工</text>
+        </view>
+        <view class="muted small">{{item.whoLine}}</view>
+        <view class="muted small" wx:if="{{item.inviteCode}}">来自邀请 {{item.inviteCode}}</view>
       </view>
       <view class="ops" wx:if="{{item.id !== myMemberId}}">
-        <text class="link danger" data-id="{{item.id}}" data-name="{{item.nickname}}" bindtap="kickMember">踢除</text>
+        <text class="link danger" data-id="{{item.id}}" data-name="{{item.displayName}}" bindtap="kickMember">踢除</text>
       </view>
     </view>
     <view class="muted" wx:if="{{!members.length}}">暂无成员</view>

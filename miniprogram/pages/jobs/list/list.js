@@ -57,7 +57,7 @@ function enrich(j) {
     j.title ||
     (j.payload && j.payload.displayTitle) ||
     (rawMsg && !looksLikeId && rawMsg !== '排队中' && rawMsg !== '执行中' ? rawMsg : '') ||
-    (j.type === 'promo_image' ? '宣传生图' : j.type === 'promo_video' ? '宣传视频' : '任务');
+    (j.type === 'promo_image' ? '宣传生图' : j.type === 'promo_video' ? '宣传视频' : j.type === 'publish_product' ? '图片发品' : '任务');
   const productThumb = j.productThumb || '';
   const doneTotal =
     progress.done != null && progress.total != null
@@ -125,6 +125,7 @@ Page({
     typeChips: [
       { id: '', name: '全部类型' },
       { id: 'promo_image', name: '生图' },
+      { id: 'publish_product', name: '发品' },
       { id: 'promo_video', name: '生视频' },
     ],
   },
