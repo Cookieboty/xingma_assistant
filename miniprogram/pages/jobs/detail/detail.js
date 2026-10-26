@@ -72,7 +72,9 @@ function enrichJob(j) {
     canRetry: j.status === 'failed' || j.status === 'cancelled',
     canCancel: busy,
     cancelLabel: j.status === 'running' ? '停止' : '取消',
-    retryLabel: j.status === 'cancelled' ? '重跑' : '重试',
+    retryLabel: j.status === 'cancelled'
+      ? '重跑'
+      : (j.type === 'promo_image' || j.type === 'promo_video' ? '重新生成' : '重试'),
     busy,
     doneTotal,
     percent: Number(progress.percent) || 0,

@@ -31,10 +31,12 @@ function enrich(j) {
   const statusLabel = STATUS_LABEL[j.status] || j.status;
   const tone = STATUS_TONE[j.status] || 'muted';
   // 失败一律可重试；取消后也可重跑（后端会重置 attempts）
+  const isPromo = j.type === 'promo_image' || j.type === 'promo_video';
+  const isOrphan = !!(j.orphanPromoSet || String(j.id || '').indexOf('orphan_') === 0);
   const canRetry = j.status === 'failed' || j.status === 'cancelled';
   const canCancel = j.status === 'queued' || j.status === 'running';
   const cancelLabel = j.status === 'running' ? '停止' : '取消';
-  const retryLabel = j.status === 'cancelled' ? '重跑' : '重试';
+  const retryLabel = j.status === 'cancelled' ? '重跑' : (isPromo ? '重新生成' : '重试');
   const productId =
     j.productId ||
     (j.payload && j.payload.productId) ||
@@ -82,6 +84,8 @@ function enrich(j) {
     canCancel,
     cancelLabel,
     retryLabel,
+    isOrphan,
+    orphanPromoSet: isOrphan,
     productId,
     setId,
     styleNo,
@@ -179,9 +183,20 @@ Page({
 
   async retry(e) {
     const id = e.currentTarget.dataset.id;
+    const row = (this.data.list || []).find((j) => j.id === id) || {};
+    if (row.orphanPromoSet || String(id || '').indexOf('orphan_') === 0) {
+      const pid = row.productId || '';
+      const sid = row.setId || String(id || '').replace(/^orphan_/, '');
+      if (pid && sid) {
+        wx.navigateTo({
+          url: `/pages/product/promo-gallery/promo-gallery?id=${pid}&setId=${sid}`,
+        });
+        return;
+      }
+    }
     try {
       await request({ url: `/api/jobs/${id}/retry`, method: 'POST', data: {} });
-      wx.showToast({ title: '已重新排队', icon: 'none' });
+      wx.showToast({ title: row.retryLabel === '重新生成' ? '已开始重新生成' : '已重新排队', icon: 'none' });
       this.load();
     } catch (err) {
       wx.showToast({ title: err.message || '重试失败', icon: 'none' });

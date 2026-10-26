@@ -77,7 +77,20 @@ function enrichSet(s, prev) {
       ? (isVideo ? `保存视频(${albumSelectedCount})` : `下载到相册(${albumSelectedCount})`)
       : (isVideo ? '保存视频到相册' : '下载到相册'),
     regenLabel: '重新生成',
-    canRegen: albumSelectedCount > 0,
+    // 失败整组可点；视频整组可点；图片需勾选（或点失败槽）
+    canRegen:
+      !busy &&
+      (s.status === 'failed' ||
+        isVideo ||
+        albumSelectedCount > 0 ||
+        items.some((i) => i && i.failed)),
+    failedWhole: s.status === 'failed' || (items.length > 0 && items.every((i) => i && i.failed)),
+    errorText: (() => {
+      if (s.status !== 'failed' && !items.some((i) => i && i.failed)) return '';
+      const fromItem = (items.find((i) => i && i.error) || {}).error || '';
+      const fromProg = (s.progress && s.progress.message) || '';
+      return String(fromItem || fromProg || s.error || '生成失败').slice(0, 200);
+    })(),
     statusLabel: STATUS_LABEL[s.status] || s.status,
     templateName: s.displayTitle || s.templateName || (isVideo ? '宣传视频' : '宣传图'),
     typeLabel: isVideo ? '视频' : '图',
@@ -361,29 +374,46 @@ Page({
   async regenSelected(e) {
     const setId = e.currentTarget.dataset.id;
     if (!setId || this.data.actingId) return;
-    const set = this.data.sets.find((s) => s.id === setId);
-    if (!set) return;
+    const set = (this.data.sets || []).find((s) => s.id === setId) || this.data.detailSet;
+    if (!set || set.id !== setId) return;
     if (set.busy) {
       wx.showToast({ title: '该组正在生成中', icon: 'none' });
       return;
     }
     const items = set.items || [];
-    const selected = items.filter((i) => i && i.url && i.albumSelected);
-    if (!selected.length) {
-      wx.showToast({ title: '请先勾选要重新生成的图片', icon: 'none' });
-      return;
-    }
-    const allWithUrl = items.filter((i) => i && i.url);
-    const whole = selected.length === allWithUrl.length && allWithUrl.length > 0;
+    const failedWhole = !!(set.failedWhole || set.status === 'failed');
+    const isVideo = !!set.isVideo;
+    let whole = false;
     const indexes = [];
-    if (!whole) {
-      for (const im of selected) {
-        const index = Number(im.index);
-        if (!Number.isInteger(index) || index < 0) {
-          wx.showToast({ title: '图片序号缺失，请下拉刷新后重试', icon: 'none' });
+    if (failedWhole || isVideo) {
+      // 失败或视频：整组重新生成，不要求勾选
+      whole = true;
+    } else {
+      const selected = items.filter((i) => i && i.url && i.albumSelected);
+      if (!selected.length) {
+        const failedIdx = items
+          .filter((i) => i && i.failed)
+          .map((i) => Number(i.index))
+          .filter((n) => Number.isInteger(n) && n >= 0);
+        if (failedIdx.length) {
+          indexes.push(...failedIdx);
+        } else {
+          wx.showToast({ title: '请先勾选要重新生成的图片', icon: 'none' });
           return;
         }
-        indexes.push(index);
+      } else {
+        const allWithUrl = items.filter((i) => i && i.url);
+        whole = selected.length === allWithUrl.length && allWithUrl.length > 0;
+        if (!whole) {
+          for (const im of selected) {
+            const index = Number(im.index);
+            if (!Number.isInteger(index) || index < 0) {
+              wx.showToast({ title: '图片序号缺失，请下拉刷新后重试', icon: 'none' });
+              return;
+            }
+            indexes.push(index);
+          }
+        }
       }
     }
 

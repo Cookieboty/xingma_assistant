@@ -735,15 +735,20 @@ export class PromoService implements OnModuleInit {
     };
 
     const repo = this.setsRepo();
-    const reused = await this.findActivePromo(user, productId, tpl.id, input.setId, 'promo_video');
-    if (reused) {
-      this.logger.log(
-        `generateVideo reuse productId=${productId} templateId=${tpl.id} setId=${reused.setId} jobId=${reused.jobId}`,
-      );
-      return reused;
+    const isExplicitSetRegen = !!String(input.setId || '').trim();
+    // 重生指定 set 时不得吞成「进行中复用」；仅全新提交防双开
+    if (!isExplicitSetRegen) {
+      const reused = await this.findActivePromo(user, productId, tpl.id, input.setId, 'promo_video');
+      if (reused) {
+        this.logger.log(
+          `generateVideo reuse productId=${productId} templateId=${tpl.id} setId=${reused.setId} jobId=${reused.jobId}`,
+        );
+        return reused;
+      }
     }
 
     let setId = input.setId;
+    let existingJobId: string | null = null;
     if (setId) {
       const existing = await repo.findOne({ where: { id: setId, tenantId: user.tenantId, productId } });
       if (!existing) throw new NotFoundException('宣传素材组不存在');
@@ -751,6 +756,9 @@ export class PromoService implements OnModuleInit {
       existing.params = params;
       existing.caption = caption;
       existing.templateId = tpl.id;
+      // 失败/重生：槽位回到 pending，详情立刻可感知「重新生成中」
+      existing.images = [{ index: 0, status: 'pending' as const }];
+      existingJobId = existing.jobId || null;
       await repo.save(existing);
     } else {
       setId = newId('ps');
@@ -775,12 +783,25 @@ export class PromoService implements OnModuleInit {
       setId,
       ...params,
       styleNo: product.styleNo,
+      regenNonce: input.regenNonce ? String(input.regenNonce) : undefined,
     };
     const displayTitle = buildJobDisplayTitle('promo_video', { ...jobPayload, displayTitle: undefined });
-    const job = await this.jobs.create(user, 'promo_video', {
-      ...jobPayload,
-      displayTitle,
-    });
+    // 与生图一致：重生复用同组 job，任务中心不堆新行
+    const job = await this.jobs.reuseOrCreate(
+      user,
+      'promo_video',
+      { ...jobPayload, displayTitle },
+      { existingJobId },
+    );
+    try {
+      await this.jobs.cancelSiblingPromoJobs(user, {
+        setId,
+        exceptJobId: job.id,
+        types: ['promo_video'],
+      });
+    } catch (e: any) {
+      this.logger.warn(`cancelSiblingPromoJobs(video): ${e?.message || e}`);
+    }
     await repo.update({ id: setId, tenantId: user.tenantId }, { jobId: job.id });
 
     return {

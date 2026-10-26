@@ -238,3 +238,10 @@
   opacity: 0.45;
   pointer-events: none;
 }
+
+.err-hint {
+  color: #c62828;
+  font-size: 24rpx;
+  line-height: 1.4;
+  word-break: break-all;
+}

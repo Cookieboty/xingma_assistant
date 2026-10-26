@@ -12,6 +12,7 @@
         <text wx:if="{{detailSet.durationLabel}}"> · {{detailSet.durationLabel}}</text>
       </view>
       <view class="muted small" wx:if="{{detailSet.progressText}}">{{detailSet.progressText}}</view>
+      <view class="err-hint" wx:if="{{detailSet.errorText}}" style="margin-top:8rpx;">{{detailSet.errorText}}</view>
     </view>
 
     <view class="card job" id="set-{{detailSet.id}}">
@@ -69,17 +70,24 @@
       <view class="muted small" wx:elif="{{detailSet.busy}}">排队或执行中，完成后自动刷新</view>
       <view class="muted small" wx:else>暂无成品</view>
 
-      <view class="media-actions" wx:if="{{!detailSet.busy && (detailSet.done || detailSet.status==='partial')}}">
+      <view class="media-actions" wx:if="{{!detailSet.busy && (detailSet.done || detailSet.status==='partial' || detailSet.status==='failed' || detailSet.errorText)}}">
         <view
           class="btn-primary media-btn"
           data-id="{{detailSet.id}}"
           bindtap="saveToAlbum"
+          wx:if="{{detailSet.done || detailSet.status==='partial'}}"
         >{{savingAlbumId === detailSet.id ? '保存中…' : detailSet.albumSaveLabel}}</view>
+        <view
+          class="btn-primary media-btn {{(actingId === detailSet.id) ? 'disabled' : ''}}"
+          data-id="{{detailSet.id}}"
+          bindtap="regenSelected"
+          wx:if="{{detailSet.status==='failed' || detailSet.errorText}}"
+        >{{actingId === detailSet.id ? '提交中…' : '重新生成'}}</view>
         <view
           class="btn-ghost media-btn {{(!detailSet.canRegen || actingId === detailSet.id) ? 'disabled' : ''}}"
           data-id="{{detailSet.id}}"
           bindtap="regenSelected"
-          wx:if="{{!detailSet.isVideo}}"
+          wx:elif="{{detailSet.canRegen}}"
         >{{actingId === detailSet.id ? '提交中…' : detailSet.regenLabel}}</view>
       </view>
 
@@ -125,6 +133,7 @@
           </view>
           <view class="muted small">{{item.isVideo ? (item.done + '/' + item.total + ' 条') : (item.done + ' / ' + item.total + ' 张')}} · 进入详情</view>
           <view class="muted small" wx:if="{{item.progressText}}">{{item.progressText}}</view>
+          <view class="err-hint" wx:if="{{item.errorText}}">{{item.errorText}}</view>
         </view>
       </view>
       <view class="bar-wrap" wx:if="{{item.busy}}">
