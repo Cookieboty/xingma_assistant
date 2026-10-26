@@ -152,7 +152,18 @@ export class PromoService implements OnModuleInit {
     return d;
   }
   private publicUrl(objectKey: string) {
+    const k = String(objectKey || '').trim();
+    if (/^https?:\/\//i.test(k)) return k;
     return this.oss.publicUrl(objectKey);
+  }
+
+  /** 槽位播放 URL：外部直链优先，否则 OSS/本地 objectKey */
+  private itemPlayUrl(it: { objectKey?: string | null; externalUrl?: string | null; url?: string | null }): string | null {
+    const ext = String(it?.externalUrl || it?.url || '').trim();
+    if (/^https?:\/\//i.test(ext)) return ext;
+    const key = String(it?.objectKey || '').trim();
+    if (!key) return null;
+    return this.publicUrl(key);
   }
 
   /** 校验并规范化风格样例 keys；空/缺省 → [] */
@@ -886,7 +897,7 @@ export class PromoService implements OnModuleInit {
     });
     const t0 = Date.now();
     try {
-      let r: { buffer: Buffer; mime: string; via: string; videoId: string; seconds?: number; size?: string };
+      let r: { buffer?: Buffer; mime: string; via: string; videoId: string; videoUrl?: string; seconds?: number; size?: string };
       if (engine === 'lkb') {
         const attachments: LkbVideoAttachment[] = [];
         if (refUrls.length) {
@@ -939,28 +950,42 @@ export class PromoService implements OnModuleInit {
           refs: refPaths,
         });
       }
-      const ext = r.mime.includes('webm') ? '.webm' : r.mime.includes('quicktime') ? '.mov' : '.mp4';
-      const objectKey = `${keyDir}/01${ext}`;
-      const absVideo = path.join(this.storageRoot(), objectKey);
-      fs.writeFileSync(absVideo, r.buffer);
-      let uploadBuf = r.buffer;
-      // WeChat <video> shows 0:00 when moov is after mdat; remux with faststart when possible
-      if (ext === '.mp4') {
-        const remuxed = await this.ensureMp4Faststart(absVideo);
-        if (remuxed?.length) uploadBuf = remuxed;
+      if (typeof (r as any).seconds === 'number' && (r as any).seconds > 0) {
+        seconds = clampDuration((r as any).seconds);
       }
-      await this.oss.putObjectSafe(uploadBuf, objectKey, r.mime || 'video/mp4');
-      Object.assign(item, {
-        status: 'done',
-        objectKey,
-        via: r.via,
-        ms: Date.now() - t0,
-      });
-      if (typeof r.seconds === 'number' && r.seconds > 0) {
-        seconds = clampDuration(r.seconds);
+      const directUrl = String((r as any).videoUrl || '').trim();
+      if (engine === 'lkb' && /^https?:\/\//i.test(directUrl)) {
+        // LKB：直接持久化 SUCCEEDED 直链，不下载、不转存自有 OSS
+        Object.assign(item, {
+          status: 'done',
+          objectKey: undefined,
+          url: directUrl,
+          via: r.via,
+          ms: Date.now() - t0,
+        });
+        this.saveJob(legacy);
+        await opts?.onProgress?.({ percent: 90, step: 'link', message: '已拿到成片链接', done: 1, total: 1 });
+      } else {
+        if (!r.buffer?.length) throw new Error('视频引擎未返回文件内容');
+        const ext = r.mime.includes('webm') ? '.webm' : r.mime.includes('quicktime') ? '.mov' : '.mp4';
+        const objectKey = `${keyDir}/01${ext}`;
+        const absVideo = path.join(this.storageRoot(), objectKey);
+        fs.writeFileSync(absVideo, r.buffer);
+        let uploadBuf = r.buffer;
+        if (ext === '.mp4') {
+          const remuxed = await this.ensureMp4Faststart(absVideo);
+          if (remuxed?.length) uploadBuf = remuxed;
+        }
+        await this.oss.putObjectSafe(uploadBuf, objectKey, r.mime || 'video/mp4');
+        Object.assign(item, {
+          status: 'done',
+          objectKey,
+          via: r.via,
+          ms: Date.now() - t0,
+        });
+        this.saveJob(legacy);
+        await opts?.onProgress?.({ percent: 85, step: 'upload', message: '上传完成', done: 1, total: 1 });
       }
-      this.saveJob(legacy);
-      await opts?.onProgress?.({ percent: 85, step: 'upload', message: '上传完成', done: 1, total: 1 });
     } catch (e: any) {
       item.status = 'failed';
       item.error = String(e.message || e).slice(0, 500);
@@ -1016,10 +1041,11 @@ export class PromoService implements OnModuleInit {
         {
           index: 0,
           status: 'done',
-          url: item.objectKey ? this.publicUrl(item.objectKey) : null,
+          url: this.itemPlayUrl(item),
           mediaId: item.savedMediaId || null,
           mimeType: 'video/mp4',
           ms: item.ms,
+          seconds,
         },
       ],
     };
@@ -1076,12 +1102,16 @@ export class PromoService implements OnModuleInit {
 
     const caption = this.captionFor(product, opts.input, opts.templateId);
     let mediaId: string | undefined;
-    if (opts.item.status === 'done' && opts.item.objectKey) {
-      const abs = path.join(this.storageRoot(), opts.item.objectKey);
-      const sizeBytes = fs.existsSync(abs) ? fs.statSync(abs).size : 0;
-      const mime = opts.item.objectKey.endsWith('.webm')
+    const externalUrl = String(opts.item.url || '').trim();
+    const hasExternal = /^https?:\/\//i.test(externalUrl);
+    if (opts.item.status === 'done' && (opts.item.objectKey || hasExternal)) {
+      const abs = opts.item.objectKey
+        ? path.join(this.storageRoot(), opts.item.objectKey)
+        : '';
+      const sizeBytes = abs && fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+      const mime = opts.item.objectKey?.endsWith('.webm')
         ? 'video/webm'
-        : opts.item.objectKey.endsWith('.mov')
+        : opts.item.objectKey?.endsWith('.mov')
           ? 'video/quicktime'
           : 'video/mp4';
       const saved = await mediaRepo.save(
@@ -1090,8 +1120,9 @@ export class PromoService implements OnModuleInit {
           productId,
           promoSetId: setId,
           type: 'video',
-          provider: this.oss.mediaProvider(),
-          objectKey: opts.item.objectKey,
+          provider: hasExternal ? 'external' : this.oss.mediaProvider(),
+          // 直链存完整 URL；本地/OSS 仍存 objectKey
+          objectKey: hasExternal ? externalUrl : opts.item.objectKey!,
           mimeType: mime,
           sizeBytes: String(sizeBytes),
           status: 'active',
@@ -1105,7 +1136,8 @@ export class PromoService implements OnModuleInit {
       {
         index: 0,
         status: opts.item.status === 'done' ? 'done' : 'failed',
-        objectKey: opts.item.objectKey,
+        objectKey: hasExternal ? undefined : opts.item.objectKey,
+        externalUrl: hasExternal ? externalUrl : undefined,
         mediaId,
         error: opts.item.error,
         ms: opts.item.ms,
@@ -1124,6 +1156,8 @@ export class PromoService implements OnModuleInit {
       count: 1,
       sizeId: opts.input.sizeId,
       seconds: opts.seconds,
+      durationSec: opts.seconds,
+      videoUrl: hasExternal ? externalUrl : undefined,
       size: opts.size,
       styleNo: product.styleNo,
     };
@@ -2062,7 +2096,7 @@ export class PromoService implements OnModuleInit {
       items: items.map((i) => ({
         index: i.index,
         status: i.status,
-        url: i.objectKey ? this.publicUrl(i.objectKey) : null,
+        url: this.itemPlayUrl(i),
         mediaId: i.savedMediaId || null,
         error: i.error,
         ms: i.ms,
@@ -2399,7 +2433,7 @@ export class PromoService implements OnModuleInit {
         status: i.status,
         poseId: i.poseId,
         sceneId: i.sceneId,
-        url: i.objectKey ? this.publicUrl(i.objectKey) : null,
+        url: this.itemPlayUrl(i),
         error: i.error,
         saved: !!i.savedMediaId,
         ms: i.ms,
@@ -2524,7 +2558,7 @@ export class PromoService implements OnModuleInit {
         sceneId: i.sceneId,
         mediaId: i.mediaId || null,
         // 重生中的槽位先藏旧图，列表立刻出现「生成中」占位
-        url: i.objectKey && !regenerating ? this.publicUrl(i.objectKey) : null,
+        url: !regenerating ? this.itemPlayUrl(i) : null,
         error: i.error,
         ms: i.ms,
         saved: !!i.mediaId,
@@ -2717,7 +2751,7 @@ export class PromoService implements OnModuleInit {
     });
     for (const row of rows) {
       if (exceptSetId && row.id === exceptSetId) continue;
-      const done = (row.images || []).filter((i) => i && i.status === 'done' && i.objectKey).length;
+      const done = (row.images || []).filter((i) => i && i.status === 'done' && (i.objectKey || (i as any).externalUrl || (i as any).url)).length;
       if (done > 0) continue;
       row.status = 'deleted';
       await repo.save(row);
@@ -2738,7 +2772,7 @@ export class PromoService implements OnModuleInit {
       take: 5,
     });
     for (const row of rows) {
-      const done = (row.images || []).filter((i) => i && i.status === 'done' && i.objectKey).length;
+      const done = (row.images || []).filter((i) => i && i.status === 'done' && (i.objectKey || (i as any).externalUrl || (i as any).url)).length;
       if (done > 0) continue;
       return row;
     }

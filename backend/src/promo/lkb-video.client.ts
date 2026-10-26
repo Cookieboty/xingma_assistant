@@ -30,11 +30,13 @@ export interface LkbVideoRequest {
 }
 
 export interface LkbVideoResult {
-  buffer: Buffer;
+  /** 仅非直链/需本地落盘时才有；LKB 直链模式可不下载 */
+  buffer?: Buffer;
   mime: string;
   via: string;
   videoId: string;
-  videoUrl?: string;
+  /** SUCCEEDED result.artifacts[].uri — 直接播放/入库，勿再转存自有 OSS */
+  videoUrl: string;
   seconds?: number;
   size?: string;
   taskType: string;
@@ -168,14 +170,14 @@ export class LkbVideoClient {
     if (!videoUrl) {
       throw new Error(`LKB 成功但无视频 URL: ${JSON.stringify(done).slice(0, 400)}`);
     }
-    const downloaded = await this.downloadUrl(videoUrl);
+    // 时长：优先 token_usage…parameters.duration（实测字段），否则用请求时长
     const secondsOut = extractDurationSec(done) || duration;
     this.logger.log(
-      `lkb video ${videoId} url_ok seconds=${secondsOut} (req=${duration})`,
+      `lkb video ${videoId} direct_url seconds=${secondsOut} (req=${duration}) url=${videoUrl.slice(0, 80)}`,
     );
+    // 直链播放：不下载、不转存自有 OSS（避免 moov/时长错乱）
     return {
-      buffer: downloaded.buffer,
-      mime: downloaded.mime,
+      mime: 'video/mp4',
       via: `lkb:${this.agentCode}`,
       videoId,
       videoUrl,

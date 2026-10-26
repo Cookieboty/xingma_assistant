@@ -64,6 +64,8 @@ export interface PromoSetImage {
   index: number;
   status: 'pending' | 'running' | 'done' | 'failed';
   objectKey?: string;
+  /** 外部直链（如 LKB artifacts.uri）；有则优先于 objectKey 播放 */
+  externalUrl?: string;
   mediaId?: string;
   poseId?: string;
   sceneId?: string;
