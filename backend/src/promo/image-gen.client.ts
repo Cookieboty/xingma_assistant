@@ -7,6 +7,7 @@ export interface GenRequest {
   prompt: string;
   size: string; // e.g. 1024x1024
   refs: string[]; // 本地绝对路径
+  seed?: number;
 }
 export interface GenResult {
   buffer: Buffer;
@@ -110,7 +111,8 @@ export class ImageGenClient {
         body: files[i].buf,
       });
     }
-    const params = { mode: 'image-to-image', size: req.size, resolution: '1K', quality: 'auto', count: 1, referenceCount: files.length };
+    const params: Record<string, unknown> = { mode: 'image-to-image', size: req.size, resolution: '1K', quality: 'auto', count: 1, referenceCount: files.length };
+    if (typeof req.seed === 'number' && Number.isFinite(req.seed)) params.seed = Math.abs(Math.floor(req.seed)) % 2147483647;
     const quote = (await this.call('/quotes', json({ type: 'image', model, params }))).data;
     const created = (
       await this.call(

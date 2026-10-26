@@ -46,6 +46,8 @@ export interface GenerateInput {
   setId?: string;
   /** 仅重生成这些下标；缺省则整组 */
   regenIndexes?: number[];
+  /** 每次重新生成随机令牌：写入 prompt/instruction/seed，避免同参同图 */
+  regenNonce?: string;
   /**
    * 风格样例 OSS objectKey（业务 key，无 OSS_PREFIX）。
    * 0～4；须 tenants/{tenantId}/promo_style_ref/ 前缀；不写 coverMediaIds。
@@ -423,6 +425,7 @@ export class PromoService implements OnModuleInit {
       styleStrength: styleRefObjectKeys.length ? styleStrength : undefined,
       styleKeywords: input.styleKeywords || undefined,
       styleKeywordsText: styleKeywordsText || undefined,
+      regenNonce: input.regenNonce ? String(input.regenNonce) : undefined,
     };
 
     const isPartialRegen = Array.isArray(input.regenIndexes) && input.regenIndexes.length > 0;
@@ -686,7 +689,7 @@ export class PromoService implements OnModuleInit {
       sizeId,
       seconds,
       bgmId: bgm.id,
-      generateAudio: !!generateAudio,
+      generateAudio: true,
       videoEngine: this.resolveVideoEngine(),
     };
 
@@ -924,7 +927,7 @@ export class PromoService implements OnModuleInit {
           duration: seconds,
           taskType,
           attachments,
-          generateAudio: !!generateAudio,
+          generateAudio: true,
           watermark: false,
         });
       } else {
@@ -1231,7 +1234,12 @@ export class PromoService implements OnModuleInit {
     if (!p.templateId || !(p.referenceAssetIds || []).length) {
       throw new BadRequestException('该组缺少生成参数，无法重生成');
     }
-    return this.generate(user, productId, { ...p, setId, regenIndexes: undefined });
+    return this.generate(user, productId, {
+      ...p,
+      setId,
+      regenIndexes: undefined,
+      regenNonce: newId('rg'),
+    });
   }
 
   /** 单张重生成（兼容旧路径） */
@@ -1248,7 +1256,12 @@ export class PromoService implements OnModuleInit {
     }
     const idxs = [...new Set((indexes || []).map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0))];
     if (!idxs.length) throw new BadRequestException('请指定要重生成的图片下标');
-    return this.generate(user, productId, { ...p, setId, regenIndexes: idxs });
+    return this.generate(user, productId, {
+      ...p,
+      setId,
+      regenIndexes: idxs,
+      regenNonce: newId('rg'),
+    });
   }
 
   private async getSetEntity(user: AuthContext, productId: string, setId: string) {
@@ -1543,13 +1556,20 @@ export class PromoService implements OnModuleInit {
     ]
       .filter(Boolean)
       .join('\n');
+    const regenNonce = String((input as any).regenNonce || '').trim();
+    const regenNudgeEn = regenNonce
+      ? `Regeneration ${regenNonce}: intentionally change camera angle, crop, pose micro-gesture, expression or lighting so the result is visibly different from any prior output; keep the exact same garment identity, color and knit texture.`
+      : '';
+    const regenNudgeZh = regenNonce
+      ? `重新生成 ${regenNonce}：请在构图/机位/姿势微动作/表情/光影上做出可见差异，切勿与上一版几乎相同；衣服款式、颜色、织纹必须与参考成衣一致。`
+      : '';
     for (const it of items) {
       if (it.status === 'done' && it.objectKey) continue;
-      const enrichedPrompt = [it.prompt, garmentPrep.garmentConstraintEn, garmentPrep.refRolesPromptEn]
+      const enrichedPrompt = [it.prompt, garmentPrep.garmentConstraintEn, garmentPrep.refRolesPromptEn, regenNudgeEn]
         .filter(Boolean)
         .join(' ');
       it.prompt = enrichedPrompt;
-      it.promptZh = promptZhBase;
+      it.promptZh = [promptZhBase, regenNudgeZh].filter(Boolean).join('\n');
     }
 
     // 风格样例：仅 style_ref；其它模板强制忽略（即便 params 残留）
@@ -1649,7 +1669,15 @@ export class PromoService implements OnModuleInit {
             },
           };
           try {
-            const r = await this.gen.generate({ prompt, size: legacy.size, refs: refsForShot });
+            const seed = regenNonce
+              ? Math.abs(Array.from(regenNonce).reduce((a, ch) => ((a * 33) + ch.charCodeAt(0)) | 0, it.index + 1))
+              : undefined;
+            const r = await this.gen.generate({
+              prompt,
+              size: legacy.size,
+              refs: refsForShot,
+              seed,
+            });
             const ext = r.mime.includes('jpeg') ? '.jpg' : r.mime.includes('webp') ? '.webp' : '.png';
             const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${ext}`;
             fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
@@ -1758,16 +1786,25 @@ export class PromoService implements OnModuleInit {
       const leadScene = (tpl.scenes || []).find((o) => o.id === lead?.sceneId);
       const templateBrief = (() => {
         const bits: string[] = [`模板：${tpl.name}`, `templateId=${tpl.id}`];
-        if (tpl.model === 'none') bits.push('不要出真人模特，做静物/挂拍/细节');
+        if (tpl.id === 'detail_closeup') bits.push('细节特写：微距织纹/领口/袖口，浅景深，不要全身、不要真人出镜');
+        else if (tpl.id === 'flatlay') bits.push('平铺/挂拍静物：整件成衣完整入镜，不要真人模特');
+        else if (tpl.id === 'model_scene') bits.push('模特上身场景图：真人穿着成衣，生活场景，衣服保真');
+        else if (tpl.id === 'multi_color') bits.push('多色展示：同一姿势场景，按颜色各出一张，姿态构图保持一致只换颜色');
+        else if (tpl.id === 'xhs_cover') bits.push('小红书封面风：竖版氛围感，上方留白（不要写字），可有可无模特');
+        else if (tpl.id === 'style_ref') bits.push('风格参考：成衣保真，构图光影学风格样例，禁止抄样例衣服/人脸/logo');
+        else if (tpl.model === 'none') bits.push('不要出真人模特，做静物/挂拍/细节');
         else if (tpl.model === 'required') bits.push('必须出真人模特上身展示成衣');
         else bits.push('模特可选');
         if (model) bits.push(`模特：${model.name}（${model.desc || ''}）`);
-        if (leadPose?.name) bits.push(`姿势：${leadPose.name}`);
+        if (leadPose?.name) bits.push(`姿势/呈现：${leadPose.name}`);
         if (leadScene?.name) bits.push(`场景：${leadScene.name}`);
         if (items.length > 1) bits.push(`共需 ${items.length} 张不同构图/微变体，勿完全重复`);
         return bits.filter(Boolean).join('；');
       })();
-      const promptLead = String(lead?.promptZh || lead?.prompt || '').trim();
+      const promptLead = String(lead?.prompt || lead?.promptZh || '').trim();
+      const regenNote = String((input as any).regenNonce || '').trim()
+        ? `重新生成 ${String((input as any).regenNonce).trim()}：必须与上一版有可见差异（机位/构图/姿势微变/光影），禁止复刻同一张；成衣保真不变。`
+        : '';
       const instruction = [
         templateBrief,
         poseTextZh ? `姿势描述：${poseTextZh}` : '',
@@ -1776,10 +1813,11 @@ export class PromoService implements OnModuleInit {
         styleKwZh,
         styleNote,
         promptLead ? `生图要求：${promptLead}` : '',
+        regenNote,
       ]
         .filter(Boolean)
         .join('\n')
-        .slice(0, 2000);
+        .slice(0, 2400);
       const ext = await this.externalOutfit.invoke({
         garmentImages: combinedImages.length ? combinedImages : garmentUrls,
         instruction: instruction || undefined,

@@ -152,7 +152,7 @@ Page({
     const assetSrc = (e && e._assets) || this.data.assets;
     const picked = this._autoPickRefs(tpl, assetSrc);
     this.setData({
-      tpl, steps, fullSteps, quickMode, stepIdx: 0, stepKey: steps[0], job: null, script: '', scriptBeats: [], scriptPromptEn: '', scriptSeconds: 10, scriptVia: '', scriptDirty: false, bgmId: 'none',
+      tpl, steps, fullSteps, quickMode, stepIdx: 0, stepKey: steps[0], job: null, script: '', scriptBeats: [], scriptPromptEn: '', scriptSeconds: 10, scriptVia: '', scriptDirty: false, bgmId: this.data.mediaKind === 'video' ? 'soft_ambient' : 'none',
       singlePoseScene,
       sel: {
         refs: picked.refs,
@@ -803,9 +803,9 @@ Page({
         feature, sellingPoint: this.data.sellingPoint || undefined, script: this.data.script || undefined, seconds: this.data.scriptSeconds || undefined, referenceAssetIds: sel.refs,
         modelId: sel.modelId || null, poses, scenes,
         beats: this.data.mediaKind === 'video' ? (this.data.scriptBeats || []).map((b) => ({ text: b.text, seconds: b.seconds })) : undefined,
-        bgmId: this.data.mediaKind === 'video' ? (this.data.bgmId || 'none') : undefined,
+        bgmId: this.data.mediaKind === 'video' ? (this.data.bgmId || 'soft_ambient') : undefined,
         generateAudio: this.data.mediaKind === 'video'
-          ? !!(this.data.videoBgmPresets || []).find((b) => b.id === this.data.bgmId && b.generateAudio)
+          ? ((this.data.bgmId || 'soft_ambient') !== 'none')
           : undefined,
         poseText: poseText || undefined,
         sceneText: sceneText || undefined,
