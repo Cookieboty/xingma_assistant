@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { MediaAsset } from '../common/entities/media-asset.entity';
 import { PromoSetEntity, PromoSetImage, ImageGenCallRecord, OutfitCompareRecord } from '../common/entities/promo-set.entity';
@@ -215,30 +216,84 @@ export class PromoService implements OnModuleInit {
   }
 
   /**
-   * 确保 objectKey 在本地 storage/ 可读；缺则从 OSS 拉取。
+   * 确保 objectKey 在本地 storage/ 可读。
+   * - 业务 key（tenants/...）：本地 miss 则从自有 OSS（xy-tradex）拉取
+   * - http(s) 直链（external outfit / LKB 结果入库时把 URL 写入 objectKey）：HTTP 下载到 _http_cache
+   * - 绝对本地路径：存在则直接用
    * 失败返回 null（调用方决定降级或报错）。
    */
   private async ensureLocal(objectKey: string): Promise<string | null> {
-    const abs = path.join(this.storageRoot(), objectKey);
+    const key = String(objectKey || '').trim();
+    if (!key) return null;
+
+    if (path.isAbsolute(key)) {
+      try {
+        if (fs.existsSync(key) && fs.statSync(key).size > 0) return key;
+      } catch {
+        /* fall through */
+      }
+    }
+
+    if (/^https?:\/\//i.test(key)) {
+      return this.ensureLocalFromHttp(key);
+    }
+
+    const abs = path.join(this.storageRoot(), key);
     try {
       if (fs.existsSync(abs) && fs.statSync(abs).size > 0) return abs;
     } catch {
       /* fall through to download */
     }
     try {
-      const buf = await this.oss.getObjectBuffer(objectKey);
+      const buf = await this.oss.getObjectBuffer(key);
       if (!buf?.length) return null;
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, buf);
       return abs;
     } catch (e: any) {
-      // 本地 mock / 无 OSS：若文件本就该在 storage，再探一次
       try {
         if (fs.existsSync(abs) && fs.statSync(abs).size > 0) return abs;
       } catch {
         /* ignore */
       }
-      this.logger.warn(`ensureLocal fail key=${objectKey}: ${e?.message || e}`);
+      this.logger.warn(`ensureLocal fail key=${key}: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  /** 外部 HTTPS 参考图缓存到 storage/_http_cache（生图 vision / 生视频附件共用） */
+  private async ensureLocalFromHttp(url: string): Promise<string | null> {
+    const hash = createHash('sha1').update(url).digest('hex');
+    let ext = '.jpg';
+    try {
+      const pathname = new URL(url).pathname;
+      const m = pathname.match(/\.(jpe?g|png|webp|gif)(?:$|\?)/i);
+      if (m) {
+        const raw = m[1].toLowerCase();
+        ext = raw === 'jpeg' ? '.jpg' : `.${raw}`;
+      }
+    } catch {
+      /* keep .jpg */
+    }
+    const abs = path.join(this.storageRoot(), '_http_cache', `${hash}${ext}`);
+    try {
+      if (fs.existsSync(abs) && fs.statSync(abs).size > 0) return abs;
+    } catch {
+      /* download */
+    }
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 90_000);
+      const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf?.length) return null;
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, buf);
+      return abs;
+    } catch (e: any) {
+      this.logger.warn(`ensureLocal http fail url=${url.slice(0, 160)}: ${e?.message || e}`);
       return null;
     }
   }
