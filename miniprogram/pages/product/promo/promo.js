@@ -88,7 +88,7 @@ Page({
       } else if (!s.configured) {
         wx.showToast({ title: '服务端未配置生图密钥', icon: 'none' });
       }
-      // 生图默认短路径：自动选「模特上身·场景图」（可换）；style_ref 仍走完整路径
+      // 生图默认进入「模特上身·场景图」完整向导（可换模板）；不再走短路径
       if (mediaKind !== 'video') {
         const prefer = uniq.find((t) => t.id === 'model_scene')
           || uniq.find((t) => t.id === 'flatlay')
@@ -112,23 +112,12 @@ Page({
   },
 
   // ---- 模板 ----
-  /** 风格参考 / 多色 / 视频：完整步骤；其余默认短路径。模特必选模板仍保留模特+姿势场景步 */
-  _supportsQuick(tpl) {
-    if (!tpl) return false;
-    if (this.data.mediaKind === 'video') return false;
-    if (tpl.id === 'style_ref' || tpl.id === 'multi_color') return false;
-    if (tpl.styleRef && tpl.styleRef.min > 0) return false;
-    return true;
+  /** 已禁用短路径：一律走模板完整 steps（含 feature / count 等） */
+  _supportsQuick(_tpl) {
+    return false;
   },
-  /** 短路径步骤：静物可只走参考图；需模特的模板必须露出模特+姿势场景，不可因默认 model_scene 而跳过 */
-  _quickSteps(tpl, fullSteps) {
-    if (!tpl) return fullSteps;
-    if (tpl.model === 'required' || tpl.model === 'optional') {
-      const keep = { reference: 1, model: 1, pose_scene: 1, pose: 1, scene: 1 };
-      const filtered = fullSteps.filter((s) => keep[s]);
-      return filtered.length ? filtered : ['reference'];
-    }
-    return ['reference'];
+  _quickSteps(_tpl, fullSteps) {
+    return fullSteps;
   },
   /** 自动勾选商品图作为参考：静物/挂拍/模特上身尽量勾满至 max；其余模板勾选至 min */
   _autoPickRefs(tpl, assets) {
@@ -157,8 +146,8 @@ Page({
     const tpl = this.data.templates.find((t) => t.id === e.currentTarget.dataset.id);
     if (!tpl) return;
     const fullSteps = tpl.steps.filter((s) => !(s === 'model' && tpl.model === 'none'));
-    const quickMode = this._supportsQuick(tpl);
-    const steps = quickMode ? this._quickSteps(tpl, fullSteps) : fullSteps;
+    const quickMode = false; // 不再跳过 feature/count 等步骤
+    const steps = fullSteps;
     const singlePoseScene = tpl.id === 'multi_color';
     const assetSrc = (e && e._assets) || this.data.assets;
     const picked = this._autoPickRefs(tpl, assetSrc);
@@ -186,9 +175,9 @@ Page({
     });
     this.refreshOptionFlags();
   },
-  /** 展开特征/模特/场景/张数等完整向导 */
+  /** 兼容旧入口：已默认完整向导，无需再展开 */
   showMoreOptions() {
-    const full = this.data.fullSteps || [];
+    const full = this.data.fullSteps || this.data.steps || [];
     if (!full.length) return;
     const cur = this.data.stepKey;
     let idx = full.indexOf(cur);

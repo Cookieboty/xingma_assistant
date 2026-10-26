@@ -378,73 +378,116 @@ Page({
   onSkusChange(e) {
     this.setData({ skus: e.detail.skus || [] });
   },
-  onImgLongPress(e) {
-    if (this.data.reordering || !this.data.id) return;
-    const index = Number(e.currentTarget.dataset.index);
-    const id = e.currentTarget.dataset.id;
-    if (!id || Number.isNaN(index) || index < 0) return;
-    this._drag = { active: true, from: index, id, moved: false };
-    this.setData({ draggingIndex: index, dragOverIndex: index });
-    try { wx.vibrateShort({ type: 'medium' }); } catch (err) { /* */ }
+  _refreshCellRects(cb) {
     wx.createSelectorQuery()
       .in(this)
       .selectAll('.img-cell.sortable')
       .boundingClientRect((rects) => {
         this._cellRects = Array.isArray(rects) ? rects : [];
+        if (typeof cb === 'function') cb(this._cellRects);
       })
       .exec();
+  },
+  _hitCellIndex(clientX, clientY) {
+    const rects = this._cellRects || [];
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      if (!r) continue;
+      if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return i;
+    }
+    // 容错：按最近中心点
+    let best = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      if (!r) continue;
+      const cx = (r.left + r.right) / 2;
+      const cy = (r.top + r.bottom) / 2;
+      const d = (clientX - cx) * (clientX - cx) + (clientY - cy) * (clientY - cy);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+  },
+  onImgTouchStart(e) {
+    // 提前量测格子，避免 longpress 后首帧 touchmove 无 rect
+    if (this.data.reordering || !this.data.id) return;
+    this._touchStartIndex = Number(e.currentTarget.dataset.index);
+    this._refreshCellRects();
+  },
+  onImgLongPress(e) {
+    if (this.data.reordering || !this.data.id) return;
+    const index = Number(e.currentTarget.dataset.index);
+    const id = e.currentTarget.dataset.id;
+    if (!id || Number.isNaN(index) || index < 0) return;
+    this._drag = { active: true, from: index, origin: index, id, moved: false, dirty: false };
+    this.setData({ draggingIndex: index, dragOverIndex: index });
+    try { wx.vibrateShort({ type: 'medium' }); } catch (err) { /* */ }
+    this._refreshCellRects();
   },
   onImgTouchMove(e) {
     if (!this._drag || !this._drag.active) return;
     const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
     if (!t) return;
     this._drag.moved = true;
-    const rects = this._cellRects || [];
-    let over = this._drag.from;
-    for (let i = 0; i < rects.length; i++) {
-      const r = rects[i];
-      if (!r) continue;
-      if (t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) {
-        over = i;
-        break;
-      }
+    if (!(this._cellRects && this._cellRects.length)) {
+      this._refreshCellRects();
+      return;
     }
-    if (over !== this.data.dragOverIndex) {
-      this.setData({ dragOverIndex: over });
+    const over = this._hitCellIndex(t.clientX, t.clientY);
+    if (over < 0) return;
+    const from = this._drag.from;
+    if (over === from) {
+      if (over !== this.data.dragOverIndex) this.setData({ dragOverIndex: over });
+      return;
     }
+    // 拖动过程中即时换位，封面角标随首张变化
+    const images = (this.data.images || []).slice();
+    if (from < 0 || from >= images.length || over >= images.length) return;
+    const [item] = images.splice(from, 1);
+    images.splice(over, 0, item);
+    this._drag.from = over;
+    this._drag.dirty = true;
+    this.setData({ images, draggingIndex: over, dragOverIndex: over });
+    this._refreshCellRects();
   },
   onImgTouchEnd() {
     if (!this._drag || !this._drag.active) return;
-    const from = this._drag.from;
-    const to = this.data.dragOverIndex;
+    const dirty = this._drag.dirty || (this._drag.moved && this._drag.from !== this._drag.origin);
     const moved = this._drag.moved;
     this._drag = null;
     this._cellRects = null;
     this.setData({ draggingIndex: -1, dragOverIndex: -1 });
     if (moved) this._skipPreviewOnce = true;
-    if (moved && from >= 0 && to >= 0 && from !== to) {
-      this.reorderImages(from, to);
-    }
+    if (dirty) this.persistImageOrder();
   },
-  async reorderImages(from, to) {
+  async persistImageOrder() {
     if (this.data.reordering || !this.data.id) return;
-    const images = (this.data.images || []).slice();
-    if (from < 0 || to < 0 || from >= images.length || to >= images.length) return;
-    const [item] = images.splice(from, 1);
-    images.splice(to, 0, item);
-    this.setData({ images, reordering: true });
+    const images = this.data.images || [];
+    const coverMediaIds = images.map((im) => im && im.id).filter(Boolean);
+    if (!coverMediaIds.length) return;
+    this.setData({ reordering: true });
     try {
       await request({
         url: `/api/products/${this.data.id}`,
         method: 'PATCH',
-        data: { coverMediaIds: images.map((im) => im.id).filter(Boolean) },
+        data: { coverMediaIds },
       });
+      wx.showToast({ title: '顺序已保存', icon: 'success', duration: 800 });
     } catch (err) {
       wx.showToast({ title: (err && err.message) || '调序失败', icon: 'none' });
       await this.loadProduct(this.data.id);
     } finally {
       this.setData({ reordering: false });
     }
+  },
+  async reorderImages(from, to) {
+    if (this.data.reordering || !this.data.id) return;
+    const images = (this.data.images || []).slice();
+    if (from < 0 || to < 0 || from >= images.length || to >= images.length || from === to) return;
+    const [item] = images.splice(from, 1);
+    images.splice(to, 0, item);
+    this.setData({ images });
+    await this.persistImageOrder();
   },
   buildPayload() {
     const skus = (this.data.skus || [])

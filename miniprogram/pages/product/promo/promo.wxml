@@ -23,12 +23,9 @@
       <view class="tpl-head">
         <view class="tpl-head-left">
           <text class="tpl-name">{{tpl.name}}</text>
-          <text class="tag" wx:if="{{quickMode}}">短路径</text>
         </view>
         <view class="btn-ghost mini tpl-switch" bindtap="backToTemplates">换模板</view>
       </view>
-      <view class="muted small" wx:if="{{quickMode && (tpl.model === 'required' || tpl.model === 'optional')}}" style="margin-top:8rpx;">短路径：默认模特上身 · 仍可选模特与姿势场景 · 风格参考 / 平铺挂拍 / 多色请点「换模板」</view>
-      <view class="muted small" wx:elif="{{quickMode}}" style="margin-top:8rpx;">短路径静物 · 风格参考 / 模特上身 / 多色请点「换模板」</view>
       <view class="progress">
         <text wx:for="{{steps}}" wx:key="*this" class="dot {{index <= stepIdx ? 'on' : ''}}">{{stepNames[item]}}</text>
       </view>
@@ -44,15 +41,7 @@
           <view class="mark" wx:if="{{item.isPromo}}">AI</view>
         </view>
       </view>
-      <view class="muted small">点选切换勾选（可多张）· 长按预览{{quickMode ? ' · 已自动勾选主图' : ''}}</view>
-      <view class="quick-bar" wx:if="{{quickMode}}" style="margin-top:16rpx;">
-        <view class="muted small" wx:if="{{tpl.model !== 'none'}}">短路径：商品图已预勾；下一步选模特与姿势场景（可改预设）。特征/张数等点「更多选项」。</view>
-        <view class="muted small" wx:else>短路径：商品图已预勾；姿势/场景用模板预设。特征/张数等点「更多选项」。</view>
-        <view class="quick-links" style="margin-top:12rpx;display:flex;gap:28rpx;flex-wrap:wrap;">
-          <view class="link" bindtap="backToTemplates">换模板（风格参考等）</view>
-          <view class="link" bindtap="showMoreOptions">更多选项</view>
-        </view>
-      </view>
+      <view class="muted small">点选切换勾选（可多张）· 长按预览</view>
 
       <!-- 风格样例：仅 style_ref（styleRef.max>0）必传；其它模板不展示。视频一期不做 -->
       <view class="style-ref-block" wx:if="{{mediaKind !== 'video' && tpl.styleRef && tpl.styleRef.max > 0}}">
@@ -259,7 +248,7 @@
     </view>
 
     <view class="footer">
-      <view class="btn-ghost half" bindtap="prev">{{quickMode && stepIdx === 0 ? '换模板' : '上一步'}}</view>
+      <view class="btn-ghost half" bindtap="prev">上一步</view>
       <view class="btn-primary half" bindtap="next">{{stepIdx >= steps.length - 1 ? (submitting ? '提交中…' : (styleUploading ? '上传中…' : (mediaKind === 'video' ? '确认生成视频' : '开始生成'))) : '下一步'}}</view>
     </view>
   </block>

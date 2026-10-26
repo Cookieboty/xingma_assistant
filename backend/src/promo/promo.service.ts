@@ -1750,10 +1750,35 @@ export class PromoService implements OnModuleInit {
       const styleNote = styleUrls.length
         ? `前 ${Math.min(garmentUrls.length, combinedImages.length)} 张是成衣参考（保真），后 ${Math.min(styleUrls.length, Math.max(0, combinedImages.length - garmentUrls.length))} 张是风格样例（只学构图光影氛围，禁止抄样例衣服/人脸/品牌logo）`
         : '';
-      const instruction = [poseTextZh, sceneTextZh, feature, styleKwZh, styleNote]
+      // 外部引擎原先忽略 templateId/buildPrompt，导致换模板观感几乎一样；把模板差异写进 instruction
+      const pending = items.filter((x) => !(x.status === 'done' && x.objectKey));
+      const lead = pending[0] || items[0];
+      const leadPose = (tpl.poses || []).find((o) => o.id === lead?.poseId);
+      const leadScene = (tpl.scenes || []).find((o) => o.id === lead?.sceneId);
+      const templateBrief = (() => {
+        const bits: string[] = [`模板：${tpl.name}`, `templateId=${tpl.id}`];
+        if (tpl.model === 'none') bits.push('不要出真人模特，做静物/挂拍/细节');
+        else if (tpl.model === 'required') bits.push('必须出真人模特上身展示成衣');
+        else bits.push('模特可选');
+        if (model) bits.push(`模特：${model.name}（${model.desc || ''}）`);
+        if (leadPose?.name) bits.push(`姿势：${leadPose.name}`);
+        if (leadScene?.name) bits.push(`场景：${leadScene.name}`);
+        if (items.length > 1) bits.push(`共需 ${items.length} 张不同构图/微变体，勿完全重复`);
+        return bits.filter(Boolean).join('；');
+      })();
+      const promptLead = String(lead?.promptZh || lead?.prompt || '').trim();
+      const instruction = [
+        templateBrief,
+        poseTextZh ? `姿势描述：${poseTextZh}` : '',
+        sceneTextZh ? `场景描述：${sceneTextZh}` : '',
+        feature ? `商品特征：${feature}` : '',
+        styleKwZh,
+        styleNote,
+        promptLead ? `生图要求：${promptLead}` : '',
+      ]
         .filter(Boolean)
-        .join('；')
-        .slice(0, 800);
+        .join('\n')
+        .slice(0, 2000);
       const ext = await this.externalOutfit.invoke({
         garmentImages: combinedImages.length ? combinedImages : garmentUrls,
         instruction: instruction || undefined,

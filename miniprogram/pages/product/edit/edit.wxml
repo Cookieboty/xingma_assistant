@@ -89,7 +89,7 @@
   <block wx:else>
     <view class="card">
       <view class="section-title">商品图片</view>
-      <view class="section-hint">点图预览；角标删除；长按拖动调序（松手立即保存）；首张为列表封面；可多选追加</view>
+      <view class="section-hint">点图预览；角标删除；长按拖动排序（拖到目标格松手即保存，首张=列表封面）；可多选追加</view>
       <view class="img-grid">
         <view
           class="img-cell sortable {{draggingIndex===index?'is-dragging':''}} {{dragOverIndex===index && draggingIndex!==index?'is-over':''}}"
@@ -97,6 +97,7 @@
           wx:key="id"
           data-id="{{item.id}}"
           data-index="{{index}}"
+          bindtouchstart="onImgTouchStart"
           bindlongpress="onImgLongPress"
           catchtouchmove="onImgTouchMove"
           bindtouchend="onImgTouchEnd"

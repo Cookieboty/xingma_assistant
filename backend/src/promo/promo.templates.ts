@@ -227,7 +227,7 @@ export const TEMPLATES: PromoTemplate[] = [
       { id: 'autumn', name: '秋冬氛围', prompt: 'with autumn leaves, pine cones and a warm scarf as props' },
       { id: 'wood', name: '原木地板', prompt: 'on light wooden floorboards with soft daylight' },
     ],
-    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张挂拍/平铺/静物主图与细节（短路径会尽量全选）' },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张挂拍/平铺/静物主图与细节' },
     count: { min: 1, max: 4, default: 1 },
     steps: ['reference', 'feature', 'pose_scene', 'count'],
     buildPrompt: (c) =>
@@ -253,7 +253,7 @@ export const TEMPLATES: PromoTemplate[] = [
     poses: MODEL_POSES,
     sceneLabel: '场景',
     scenes: MODEL_SCENES,
-    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张清晰主图与细节（正面整件优先；短路径会尽量全选）' },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张清晰主图与细节（正面整件优先）' },
     count: { min: 1, max: 6, default: 1 },
     steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
     buildPrompt: (c) =>
