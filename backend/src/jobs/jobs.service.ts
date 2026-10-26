@@ -110,12 +110,18 @@ export class JobsService {
       ...payload,
       displayTitle: (payload as any).displayTitle || displayTitle,
     };
+    const createTotal = Math.max(1, Number((payload as any)?.count) || 0) || undefined;
     const row = repo.create({
       id: newId('job'),
       tenantId: user.tenantId,
       type,
       status: 'queued',
-      progress: { percent: 0, step: 'queued', message: displayTitle },
+      progress: {
+        percent: 0,
+        step: 'queued',
+        message: displayTitle,
+        ...(createTotal ? { done: 0, total: createTotal } : {}),
+      },
       payload: enrichedPayload,
       result: null,
       error: null,
@@ -181,7 +187,27 @@ export class JobsService {
       };
       row.status = 'queued';
       row.payload = enrichedPayload;
-      row.progress = { percent: 0, step: 'queued', message: displayTitle };
+      {
+        const regenIdx = Array.isArray((payload as any)?.regenIndexes)
+          ? ((payload as any).regenIndexes as number[]).filter((n) => Number.isInteger(Number(n)))
+          : [];
+        const totalHint = Math.max(
+          1,
+          Number((payload as any)?.count) || 0,
+          regenIdx.length || 0,
+        );
+        // 局部重生：total 用整组 count；done 先按「未重生槽」估算，worker 会校准
+        const doneHint = regenIdx.length ? Math.max(0, totalHint - regenIdx.length) : 0;
+        row.progress = {
+          percent: 0,
+          step: 'queued',
+          message: regenIdx.length
+            ? `重新生成 ${regenIdx.length} 张（${doneHint}/${totalHint}）`
+            : displayTitle,
+          done: doneHint,
+          total: totalHint,
+        };
+      }
       row.result = null;
       row.error = null;
       row.lockedBy = null;
@@ -307,6 +333,13 @@ export class JobsService {
       templateId: row.templateId,
       styleNo: params.styleNo,
     });
+    const orphanImgs = Array.isArray(row.images) ? row.images : [];
+    const orphanDone = orphanImgs.filter((i: any) => i && i.status === 'done').length;
+    const orphanTotal = Math.max(
+      orphanImgs.length,
+      Number(params.count) || 0,
+      orphanDone,
+    );
     const dto: any = {
       id: `orphan_${row.id}`,
       type,
@@ -315,6 +348,8 @@ export class JobsService {
         percent: row.status === 'generating' ? 5 : 0,
         step: row.status === 'generating' ? 'running' : 'failed',
         message: String(err).slice(0, 120),
+        done: orphanDone,
+        total: orphanTotal || undefined,
       },
       payload: {
         ...params,
@@ -472,12 +507,21 @@ export class JobsService {
           templateId: row.templateId,
           styleNo: params.styleNo,
         });
+        const failImgs = Array.isArray(row.images) ? row.images : [];
+        const failDone = failImgs.filter((i: any) => i && i.status === 'done').length;
+        const failTotal = Math.max(failImgs.length, Number(params.count) || 0, failDone);
         out.push({
           // 真实 job 不可用时一律用 orphan_ 前缀，避免详情/重试打到已删 jobId
           id: `orphan_${row.id}`,
           type,
           status: 'failed',
-          progress: { percent: 0, step: 'failed', message: String(err).slice(0, 120) },
+          progress: {
+            percent: 0,
+            step: 'failed',
+            message: String(err).slice(0, 120),
+            done: failDone,
+            total: failTotal || undefined,
+          },
           payload: {
             ...params,
             productId,
@@ -856,6 +900,7 @@ export class JobsService {
         return null;
       }
       const id = rows[0].id;
+      // 保留已有 done/total（局部重生排队时已写入），只改运行态字段
       const upd = await qr.manager.query(
         `UPDATE jobs
          SET status = 'running',
@@ -863,12 +908,16 @@ export class JobsService {
              attempts = attempts + 1,
              started_at = NOW(3),
              error = NULL,
-             progress = CAST(? AS JSON),
+             progress = JSON_SET(
+               COALESCE(progress, JSON_OBJECT()),
+               '$.percent', 1,
+               '$.step', 'running',
+               '$.message', '执行中'
+             ),
              updated_at = NOW(3)
          WHERE id = ? AND status = 'queued'`,
         [
           this.workerId,
-          JSON.stringify({ percent: 1, step: 'running', message: '执行中' }),
           id,
         ],
       );
@@ -898,8 +947,27 @@ export class JobsService {
     job.error = null;
     job.finishedAt = new Date();
     job.lockedBy = null;
-    job.progress = { percent: 100, step: 'done', message: '完成', ...(job.progress || {}) };
-    (job.progress as any).percent = 100;
+    const prev = (job.progress || {}) as Record<string, unknown>;
+    const done =
+      typeof (result as any)?.done === 'number'
+        ? (result as any).done
+        : typeof prev.done === 'number'
+          ? prev.done
+          : undefined;
+    const total =
+      typeof (result as any)?.total === 'number'
+        ? (result as any).total
+        : typeof prev.total === 'number'
+          ? prev.total
+          : undefined;
+    job.progress = {
+      ...prev,
+      percent: 100,
+      step: 'done',
+      message: done != null && total != null ? `完成 ${done}/${total}` : '完成',
+      ...(done != null ? { done } : {}),
+      ...(total != null ? { total } : {}),
+    };
     await this.jobs().save(job);
     await this.appendEvent(job, 'succeeded', '任务成功', { keys: Object.keys(result || {}) });
   }

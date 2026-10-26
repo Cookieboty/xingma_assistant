@@ -629,6 +629,34 @@ export class PromoService implements OnModuleInit {
     }
     await repo.update({ id: setId, tenantId: user.tenantId }, { jobId: job.id });
 
+    // 任务中心进度：局部重生时 total 仍为整组槽位数，done 为仍成功的旧槽
+    let progressDone = 0;
+    let progressTotal = count;
+    try {
+      const setRow = await repo.findOne({ where: { id: setId!, tenantId: user.tenantId, productId } });
+      const imgs = Array.isArray(setRow?.images) ? setRow!.images : [];
+      if (imgs.length) {
+        progressTotal = Math.max(count, imgs.length);
+        progressDone = imgs.filter((im) => im && im.status === 'done').length;
+      } else if (isPartialRegen) {
+        progressDone = Math.max(0, count - ((input.regenIndexes as number[]) || []).length);
+      }
+      const prog = {
+        ...(job.progress || {}),
+        percent: 0,
+        step: 'queued',
+        message: isPartialRegen
+          ? `重新生成 ${((input.regenIndexes as number[]) || []).length} 张（${progressDone}/${progressTotal}）`
+          : ((job.progress as any)?.message || '排队中'),
+        done: progressDone,
+        total: progressTotal,
+      };
+      await this.jobs.updateProgress(job.id, user.tenantId, prog);
+      (job as any).progress = prog;
+    } catch (e: any) {
+      this.logger.warn(`init promo progress: ${e?.message || e}`);
+    }
+
     return {
       id: job.id,
       jobId: job.id,
@@ -639,8 +667,8 @@ export class PromoService implements OnModuleInit {
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
       progress: job.progress,
-      done: 0,
-      total: count,
+      done: progressDone,
+      total: progressTotal,
       items: [],
       reused: false,
     };
@@ -1598,13 +1626,18 @@ export class PromoService implements OnModuleInit {
         scene = tpl.scenes[0] || null;
       }
       const prior = priorImages.find((x) => x.index === i);
-      if (onlyRegen && !regenSet.has(i) && prior?.objectKey && prior.status === 'done') {
+      // 局部重生：保留未点选且已成功的槽（objectKey / externalUrl / https-in-objectKey）
+      if (onlyRegen && !regenSet.has(i) && prior?.status === 'done' && this.itemHasResult(prior)) {
+        const priorKey = String(prior.objectKey || '').trim();
+        const priorUrl = String((prior as any).externalUrl || (prior as any).url || '').trim();
+        const keyIsHttp = /^https?:\/\//i.test(priorKey);
         items.push({
           index: i,
           status: 'done',
           poseId: prior.poseId || pose?.id,
           sceneId: prior.sceneId || scene?.id,
-          objectKey: prior.objectKey,
+          objectKey: priorKey || undefined,
+          url: priorUrl || (keyIsHttp ? priorKey : undefined),
           savedMediaId: prior.mediaId,
           prompt: prior.prompt || '',
           promptZh: prior.promptZh,
@@ -1704,11 +1737,14 @@ export class PromoService implements OnModuleInit {
     fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
 
     // 羊毛衫专用标准流程：分类 → 宫格补细节 → 角色标注 → 硬约束；非羊毛衫/读不全拒生
+    const keptDone0 = items.filter((x) => x.status === 'done').length;
     await opts?.onProgress?.({
       percent: 8,
       step: 'prepare_refs',
-      message: '识别羊毛衫参考图…',
-      done: 0,
+      message: keptDone0
+        ? `准备参考图（已保留 ${keptDone0}/${items.length}）`
+        : '识别羊毛衫参考图…',
+      done: keptDone0,
       total: items.length,
     });
     const garmentPrep = await prepareRefsForCategory('knitwear', this.vision, refInputs, {
@@ -1824,7 +1860,7 @@ export class PromoService implements OnModuleInit {
           await opts?.onProgress?.({
             percent: Math.min(95, Math.round((done / items.length) * 90) + 5),
             step: 'generating',
-            message: `生图 ${done}/${items.length}`,
+            message: `生图 ${okKeep}/${items.length}`,
             done: okKeep,
             total: items.length,
           });
@@ -1958,7 +1994,7 @@ export class PromoService implements OnModuleInit {
           await opts?.onProgress?.({
             percent: Math.min(95, Math.round((done / items.length) * 90) + 5),
             step: 'generating',
-            message: `生图 ${done}/${items.length}`,
+            message: `生图 ${ok}/${items.length}`,
             done: ok,
             total: items.length,
           });
@@ -2243,13 +2279,16 @@ export class PromoService implements OnModuleInit {
             await downloadExtToItem(it, String((it as any)._extUrl));
             delete (it as any)._extUrl;
           }
-          await opts?.onProgress?.({
-            percent: Math.min(98, 92 + Math.round(((pi + 1) / Math.max(1, pendingSlots.length)) * 6)),
-            step: 'external_outfit',
-            message: `外部 Agent 生图 ${pi + 1}/${pendingSlots.length}`,
-            done: items.filter((x) => x.status === 'done').length,
-            total: items.length,
-          });
+          {
+            const okNow = items.filter((x) => x.status === 'done').length;
+            await opts?.onProgress?.({
+              percent: Math.min(98, 92 + Math.round(((pi + 1) / Math.max(1, pendingSlots.length)) * 6)),
+              step: 'external_outfit',
+              message: `生图 ${okNow}/${items.length}`,
+              done: okNow,
+              total: items.length,
+            });
+          }
         }
         if (outfitEngine === 'external' && pendingSlots.length && extFailAll) {
           throw new Error(
@@ -2474,6 +2513,18 @@ export class PromoService implements OnModuleInit {
     row.jobId = opts.frameworkJobId || row.jobId;
     row.legacyJobId = opts.legacyJobId;
     row.status = opts.status;
+    // 局部重生：本轮 items 若漏了未改动旧槽，合并回去，避免 total 被截成本次张数
+    if (regenOnly && priorByIndex.size) {
+      const have = new Set(images.map((x) => x.index));
+      for (const [idx, prior] of priorByIndex) {
+        if (have.has(idx)) continue;
+        if (!prior || prior.status === 'failed') continue;
+        if (!(prior.objectKey || (prior as any).externalUrl || (prior as any).url || prior.mediaId)) continue;
+        images.push({ ...prior, index: idx });
+        have.add(idx);
+      }
+      images.sort((a, b) => a.index - b.index);
+    }
     row.images = images;
     await repo.save(row);
     try {
@@ -2784,7 +2835,8 @@ export class PromoService implements OnModuleInit {
         compare: i.compare || null,
       };
     });
-    const done = images.filter((i) => i.status === 'done' && i.url).length;
+    // done：当前成功可展示槽；重生中 status≠done，不计入
+    const done = images.filter((i) => i.status === 'done' && (i.url || i.mediaId)).length;
     const tpl = findTemplate(row.templateId);
     const kind = (row as any).kind || (row.params as any)?.kind || (row.params as any)?.mediaKind || 'image';
     const jobType = kind === 'video' || kind === 'promo_video' ? 'promo_video' : 'promo_image';
@@ -2815,7 +2867,12 @@ export class PromoService implements OnModuleInit {
       legacyJobId: row.legacyJobId,
       status: row.status,
       done,
-      total: images.length || Number((row.params as any)?.count) || 0,
+      // 槽位总数以组为准：局部重生不得把 total 缩成「本次重生张数」
+      total: Math.max(
+        images.length,
+        Number((row.params as any)?.count) || 0,
+        done,
+      ),
       // 视频时长（秒）：params.seconds；供 gallery 展示，避免 moov 未就绪时播放器显示 0:00
       seconds:
         kind === 'video' || kind === 'promo_video'
