@@ -59,7 +59,7 @@
 |----|------|
 | **目标** | 一商品多组 `promo_set`；详情缩略；gallery 列表/重生成/删组/文案复制/存相册 |
 | **图** | 多模板（细节/平铺/模特场景/多色/小红书封面/风格参考）；可走自建 IMAGE_GEN 或外部穿搭 Agent（`OUTFIT_ENGINE`） |
-| **视频** | **已落地**：场景模板 + 可编辑分镜 → `promo_video`；默认 LKB `sinan-video-generator`（`rsync`+poll）；**一律 `generateAudio=true`**；上游 SUCCEEDED 直链入库，**不转存自有 OSS**；小程序播放经同域 `/api/media/external-play` HMAC 中转（合法域名不含 LKB 桶） |
+| **视频** | **已落地**：场景模板 + 可编辑分镜 → `promo_video`；默认 LKB `sinan-video-generator`（`rsync`+poll）；**一律 `generateAudio=true`**；上游 SUCCEEDED 直链入库；自有上传亦用 xy-tradex 桶；小程序播放上游/自有绝对 URL（downloadFile 白名单已含该桶） |
 | **验收** | ① 多次生成多组 ② 视频可在 gallery/详情播放 ③ 同模板进行中不双开 ④ 多色每色一张（非拼贴） |
 
 设计细节：[PROMO_REF_IMAGE_DESIGN.md](./PROMO_REF_IMAGE_DESIGN.md)、[PROMO_EXTERNAL_OUTFIT.md](./PROMO_EXTERNAL_OUTFIT.md)、[生图模板设计.md](./生图模板设计.md)、TECH §4.2 / §6。
@@ -92,7 +92,7 @@ Tab「任务」按业主可读标题（`job-display-title`）；宣传任务按 
 
 - 自有上传：`OSS_PROVIDER=aliyun`，当前公开读。
 - **LKB 视频 / 外部穿搭结果**：上游 http(s) 直链写入 `promo_sets.images[].url|externalUrl`（及 media `provider=external`），**默认不下载、不转存自有 OSS**。
-- 视频播放：非自有域名时 API 返回 `/api/media/external-play?u&e&s` 同域中转。
+- 视频播放：API 返回绝对 URL（xy-tradex 直链）；`/api/media/external-play` 仅应急保留，默认不改写。
 
 ---
 

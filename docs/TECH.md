@@ -15,7 +15,7 @@ NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
   ├─ products + publish + product-access
   ├─ promo（图/视频、LKB、外部穿搭、promo_sets）
   ├─ jobs（scheduler + handlers：promo_image/promo_video/…）
-  ├─ media + OssClient + external-play（外部视频同域中转）
+  ├─ media + OssClient（播放直链；external-play 应急保留未默认启用）
   ├─ vision（封面/发品识图）
   └─ customers / levels / shares / inquiries
            │
@@ -195,7 +195,7 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
   视频：视频模板 → video-script（可编 beats）→ generate(mediaKind=video)
       → promo_sets(kind=video) + jobs(promo_video)
       → LKB rsync + poll → SUCCEEDED 直链入库（不转存自有 OSS）
-      → 播放 URL 经 /api/media/external-play 同域中转（非自有桶）
+      → 播放 URL 为上游/自有桶绝对直链（xy-tradex；不转存副本）
   → 轮询；regenerate；caption；存相册
 ```
 
@@ -263,9 +263,9 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 合法域名（mp 后台）：
 - request = `xingma.visitworld.me`
-- uploadFile / **downloadFile** 均需：`chathub.oss-cn-hangzhou.aliyuncs.com`（自有 OSS 图/旧视频）
-- **downloadFile 还必须含** `xingma.visitworld.me`：LKB 等外部成片不转存自有 OSS，播放/存相册走同域中转 `GET /api/media/external-play?u&e&s`（HMAC）。`<video src>` 与 `wx.downloadFile` 都查 downloadFile 列表；Mac 微信/真机无「不校验合法域名」时尤甚。
-- `<image>` 展示网络图一般不要求 downloadFile；外部宣传**视频**必须同域或已白名单的桶域名。
+- uploadFile / **downloadFile** 均需：`xy-tradex.oss-cn-shenzhen.aliyuncs.com`（自有 OSS + LKB 成片同桶直链）
+- 可选保留 `xingma.visitworld.me`（本站下载 / 应急 `/api/media/external-play`）。默认播放已改回直链，不再改写为 external-play。
+- `<image>` 展示网络图一般不要求 downloadFile；`<video src>` / `wx.downloadFile` 查 downloadFile 列表。
 
 ### OSS 读链接（当前：公开读）
 
@@ -281,9 +281,9 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 |------|------|
 | LKB 视频 SUCCEEDED | 持久化上游 videoUrl → images[].url/externalUrl；media `provider=external`；不 put 自有 OSS |
 | 外部穿搭出图 | http(s) 直链入库；非 URL 才回退下载+OSS |
-| 播视频 | `itemPlayUrl(..., { proxyExternal: true })` → 非本站/自有 OSS host 时改写为 `GET /api/media/external-play?u&e&s`（HMAC 流式转发，无 JWT） |
+| 播视频 | `itemPlayUrl` 原样返回 http(s) 直链（`https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/...`）；**不**改写为 external-play |
 
-实现：`media.service`（`buildExternalPlayUrl` / `verifyExternalPlayToken` / `isAlreadyPlayableHost`）、`media-external-play.controller.ts`、`promo.service` itemPlayUrl。
+应急：`media.service`（`buildExternalPlayUrl` / `verifyExternalPlayToken` / `isAlreadyPlayableHost`）+ `media-external-play.controller.ts` 仍保留，默认未接入 itemPlayUrl。
 
 ---
 
@@ -358,7 +358,7 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 ### 8.2 宣传视频（LKB）— 已落地
 
-见 §4.2：rsync+poll、`generateAudio=true`、直链不转存 OSS、external-play 播放。模板含 product_showcase / street_walk / multi_color_outfit / cafe_lifestyle / detail_macro。密钥 `VIDEO_LKB_*` / `.secrets/lkb-video-agent.key`。兜底 `VIDEO_ENGINE=xytoken`。
+见 §4.2：rsync+poll、`generateAudio=true`、直链不转存 OSS、上游/自有桶直链播放（xy-tradex）。模板含 product_showcase / street_walk / multi_color_outfit / cafe_lifestyle / detail_macro。密钥 `VIDEO_LKB_*` / `.secrets/lkb-video-agent.key`。兜底 `VIDEO_ENGINE=xytoken`。
 
 ### 8.3 仍可迭代
 
@@ -379,7 +379,7 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 | 邀请 | `src/invites/` `pages/invite/accept` `pages/settings`（邀请记录单行 UI） |
 | 询价处理 | `src/inquiries/` `pages/inquiry/` `pages/customer/` |
 | 客户目录 | `pages/product/catalog/` `pages/product/view/` |
-| 外部视频中转 | `src/media/media-external-play.controller.ts` `media.service.ts` |
+| 外部视频中转（应急） | `src/media/media-external-play.controller.ts` `media.service.ts`（默认播放直链） |
 | LKB 视频 | `src/promo/lkb-video.client.ts` |
 
 

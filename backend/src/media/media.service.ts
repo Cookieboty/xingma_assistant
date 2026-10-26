@@ -177,9 +177,9 @@ export class MediaService {
         const appHost = new URL(appBase.startsWith('http') ? appBase : `https://${appBase}`).host.toLowerCase();
         if (host === appHost) return true;
       }
-      // 业务自有桶（mp downloadFile 已配）
-      if (host === 'chathub.oss-cn-hangzhou.aliyuncs.com') return true;
-      if (host.endsWith('.oss-cn-hangzhou.aliyuncs.com') && host.startsWith('chathub.')) return true;
+      // 业务自有桶（mp downloadFile 已配 xy-tradex 深圳）
+      if (host === 'xy-tradex.oss-cn-shenzhen.aliyuncs.com') return true;
+      if (host.endsWith('.oss-cn-shenzhen.aliyuncs.com') && host.startsWith('xy-tradex.')) return true;
       return false;
     } catch {
       return false;
@@ -187,8 +187,8 @@ export class MediaService {
   }
 
   /**
-   * 外部视频（如 LKB xy-tradex OSS）→ 同域 HMAC 中转 URL。
-   * 不落盘、不转存自有 OSS；仅供 <video>/downloadFile（需 downloadFile 含本站域名）。
+   * 外部视频同域 HMAC 中转 URL（应急保留；默认播放已改回上游直链）。
+   * 不落盘、不转存自有 OSS。正常路径不再由 itemPlayUrl 调用。
    */
   buildExternalPlayUrl(upstreamUrl: string, ttlSec = 6 * 3600): string {
     const u = String(upstreamUrl || '').trim();

@@ -3,7 +3,7 @@
  * 流程：检查/申请 scope.writePhotosAlbum → downloadFile → saveImageToPhotosAlbum
  */
 
-const OSS_HINT_DOMAIN = 'chathub.oss-cn-hangzhou.aliyuncs.com';
+const OSS_HINT_DOMAIN = 'xy-tradex.oss-cn-shenzhen.aliyuncs.com';
 
 function ensureAlbumAuth() {
   return new Promise((resolve, reject) => {
@@ -85,7 +85,7 @@ function formatDownloadErr(err, url) {
     (url && /oss-cn-hangzhou\.aliyuncs\.com/i.test(url));
   if (looksDomain || /fail/.test(lower)) {
     if (/domain|合法域名|not in domain/i.test(msg) || (url && /aliyuncs\.com/i.test(url))) {
-      return `下载失败：请将 downloadFile 合法域名配置为 ${OSS_HINT_DOMAIN} 与业务域名 xingma.visitworld.me（外部视频走 /api/media/external-play 同域中转）`;
+      return `下载失败：请将 downloadFile 合法域名配置为 ${OSS_HINT_DOMAIN}（自有/上游 OSS）与业务域名 xingma.visitworld.me`;
     }
   }
   return msg.length > 80 ? msg.slice(0, 80) : msg;

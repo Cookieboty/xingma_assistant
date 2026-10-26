@@ -116,9 +116,9 @@ npm install && npm run build && npm run start:dev
 | 客户详情 / 公开目录 | `pages/product/view/` `pages/product/catalog/`；`utils/profile.js` |
 | 分享策略 | `products/product-access.service.ts` `shares/`；`pages/share/landing/` |
 | 宣传图 / 外部穿搭 | `backend/src/promo/`；`pages/product/promo/`；`PROMO_*` |
-| 宣传视频 / LKB | `promo/lkb-video.client.ts` `promo.service.ts`（直链不转 OSS + external-play 中转）；`promo.templates` 视频模板 |
+| 宣传视频 / LKB | `promo/lkb-video.client.ts` `promo.service.ts`（直链入库 + 直链播放）；`promo.templates` 视频模板 |
 | 任务中心 | `jobs/` `job-display-title.ts`；`pages/jobs/` |
-| OSS / 媒体 / 直链 | `media/oss.client.ts` `media.service.ts`；视频同域中转 `GET /api/media/external-play`；promo 槽位 `externalUrl`/`url` |
+| OSS / 媒体 / 直链 | `media/oss.client.ts` `media.service.ts`（桶 xy-tradex 深圳）；播放直链（应急 `GET /api/media/external-play`）；promo 槽位 `externalUrl`/`url` |
 | 询价处理流 | `inquiries/`；`pages/inquiry/` `pages/customer/`；`utils/customer-tab-badge.js` |
 | 部署 | `docs/部署.md` + TECH「部署注意」 |
 

@@ -161,18 +161,15 @@ export class PromoService implements OnModuleInit {
 
   /**
    * 槽位播放 URL：外部直链优先，否则 OSS/本地 objectKey。
-   * 视频且上游非自有 OSS/本站时，经 /api/media/external-play 同域中转
-   * （小程序 <video>/downloadFile 合法域名不含 LKB 桶如 xy-tradex.oss-cn-shenzhen）。
+   * 上游绝对 URL 原样返回（不转存自有 OSS、不改写为 external-play）。
+   * 微信 downloadFile 白名单已含 xy-tradex.oss-cn-shenzhen 等上游桶时可直链播放；
+   * /api/media/external-play 仍保留作应急中转，本路径默认不再调用。
    */
   private itemPlayUrl(
     it: { objectKey?: string | null; externalUrl?: string | null; url?: string | null },
-    opts?: { proxyExternal?: boolean },
   ): string | null {
     const ext = String(it?.externalUrl || it?.url || '').trim();
     if (/^https?:\/\//i.test(ext)) {
-      if (opts?.proxyExternal && !this.media.isAlreadyPlayableHost(ext)) {
-        return this.media.buildExternalPlayUrl(ext);
-      }
       return ext;
     }
     const key = String(it?.objectKey || '').trim();
@@ -1063,7 +1060,7 @@ export class PromoService implements OnModuleInit {
         {
           index: 0,
           status: 'done',
-          url: this.itemPlayUrl(item, { proxyExternal: true }),
+          url: this.itemPlayUrl(item),
           mediaId: item.savedMediaId || null,
           mimeType: 'video/mp4',
           ms: item.ms,
@@ -2594,8 +2591,6 @@ export class PromoService implements OnModuleInit {
   private setDto(row: PromoSetEntity) {
     const kindEarly =
       (row as any).kind || (row.params as any)?.kind || (row.params as any)?.mediaKind || 'image';
-    const proxyExternal =
-      kindEarly === 'video' || kindEarly === 'promo_video';
     const images = (row.images || []).map((i) => {
       const regenerating = i.status === 'pending' || i.status === 'running';
       return {
@@ -2605,7 +2600,7 @@ export class PromoService implements OnModuleInit {
         sceneId: i.sceneId,
         mediaId: i.mediaId || null,
         // 重生中的槽位先藏旧图，列表立刻出现「生成中」占位
-        url: !regenerating ? this.itemPlayUrl(i, { proxyExternal }) : null,
+        url: !regenerating ? this.itemPlayUrl(i) : null,
         error: i.error,
         ms: i.ms,
         saved: !!i.mediaId,
