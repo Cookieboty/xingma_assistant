@@ -58,6 +58,9 @@ function enrichSet(s, prev) {
   const isVideo = kind === 'video' || kind === 'promo_video';
   const videoUrl = isVideo ? ((items.find((i) => i && i.url) || {}).url || '') : '';
   const thumbUrls = withUrl.slice(0, 4).map((i) => i.url);
+  const secondsRaw = Number(s.seconds || s.durationSec || (s.params && s.params.seconds) || 0);
+  const durationSec = secondsRaw > 0 ? Math.round(secondsRaw) : 0;
+  const durationLabel = isVideo && durationSec ? `约 ${durationSec} 秒` : '';
   return Object.assign({}, s, {
     items,
     done,
@@ -65,6 +68,8 @@ function enrichSet(s, prev) {
     busy,
     isVideo,
     videoUrl,
+    durationSec,
+    durationLabel,
     thumbUrls,
     albumSelectedCount,
     albumAllSelected,

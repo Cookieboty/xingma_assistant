@@ -91,7 +91,11 @@ function mapPromoSetCard(s) {
     statusLabel: STATUS_LABEL[s.status] || s.status || '',
     statusClass,
     metaText: isVideo
-      ? (total ? `${done}/${total}` : '')
+      ? (() => {
+          const sec = Math.round(Number(s.seconds || s.durationSec || (s.params && s.params.seconds) || 0) || 0);
+          const base = total ? `${done}/${total}` : '';
+          return sec > 0 ? (base ? `${base} · 约${sec}秒` : `约${sec}秒`) : base;
+        })()
       : (total ? `${done}/${total} 张` : ''),
   };
 }

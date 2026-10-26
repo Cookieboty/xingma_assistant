@@ -9,6 +9,7 @@
       <view class="muted small">
         <text class="st {{detailSet.busy ? 'run' : (detailSet.status==='failed' ? 'err' : 'ok')}}">{{detailSet.statusLabel}}</text>
         · {{detailSet.isVideo ? (detailSet.done + '/' + detailSet.total + ' 条') : (detailSet.done + ' / ' + detailSet.total + ' 张')}}
+        <text wx:if="{{detailSet.durationLabel}}"> · {{detailSet.durationLabel}}</text>
       </view>
       <view class="muted small" wx:if="{{detailSet.progressText}}">{{detailSet.progressText}}</view>
     </view>
@@ -31,7 +32,9 @@
           show-center-play-btn
           object-fit="contain"
           poster=""
+          duration="{{detailSet.durationSec || 0}}"
         ></video>
+        <view class="muted small" wx:if="{{detailSet.durationLabel}}" style="margin-top:8rpx;">时长 {{detailSet.durationLabel}}</view>
         <view class="album-bar" style="margin-top:12rpx;">
           <text
             class="check {{detailSet.items[0].albumSelected ? 'on' : ''}}"

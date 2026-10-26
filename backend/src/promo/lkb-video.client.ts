@@ -169,13 +169,17 @@ export class LkbVideoClient {
       throw new Error(`LKB 成功但无视频 URL: ${JSON.stringify(done).slice(0, 400)}`);
     }
     const downloaded = await this.downloadUrl(videoUrl);
+    const secondsOut = extractDurationSec(done) || duration;
+    this.logger.log(
+      `lkb video ${videoId} url_ok seconds=${secondsOut} (req=${duration})`,
+    );
     return {
       buffer: downloaded.buffer,
       mime: downloaded.mime,
       via: `lkb:${this.agentCode}`,
       videoId,
       videoUrl,
-      seconds: duration,
+      seconds: secondsOut,
       size: this.defaultSize,
       taskType,
     };
@@ -227,10 +231,17 @@ export class LkbVideoClient {
       const status = String(last?.status || last?.data?.status || '').toUpperCase();
       this.logger.log(`lkb video ${videoId} status=${status || '-'}`);
       if (status === 'SUCCEEDED' || status === 'SUCCESS' || status === 'COMPLETED' || status === 'DONE') {
-        return last?.data || last;
+        // 整包返回：result.artifacts / token_usage 在顶层；勿只回 last.data（会丢 result）
+        return last;
       }
       if (status === 'FAILED' || status === 'ERROR' || status === 'CANCELLED' || status === 'CANCELED') {
-        const err = last?.errorMessage || last?.errorCode || last?.error || last;
+        const err =
+          last?.errorMessage ||
+          last?.errorCode ||
+          last?.error ||
+          last?.data?.errorMessage ||
+          last?.data?.errorCode ||
+          last;
         throw new Error(`LKB 视频失败: ${JSON.stringify(err).slice(0, 400)}`);
       }
       // PENDING / RUNNING / 空 → 继续
@@ -295,11 +306,13 @@ export function extractVideoUrl(json: any): string | null {
     if (/^https?:\/\//i.test(s)) return s;
     return null;
   };
+  // LKB SUCCEEDED: result.artifacts[].uri（实测）；兼容 output / responsePayload 变体
   const artifacts =
-    json?.result?.output?.artifacts ||
     json?.result?.artifacts ||
+    json?.result?.output?.artifacts ||
     json?.responsePayload?.output?.artifacts ||
     json?.output?.artifacts ||
+    json?.data?.result?.artifacts ||
     json?.data?.output?.artifacts ||
     [];
   if (Array.isArray(artifacts)) {
@@ -347,4 +360,53 @@ export function extractVideoUrl(json: any): string | null {
     return null;
   };
   return walk(json, 0);
+}
+
+/** 从 LKB SUCCEEDED 响应抠时长（秒）。优先 token_usage.media_usage.parameters.duration */
+export function extractDurationSec(json: any): number | undefined {
+  const tryNum = (v: unknown): number | undefined => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return undefined;
+    // 毫秒误当秒：> 60 且整除 1000 量级时折算
+    if (n > 60 && n < 600_000) {
+      const asSec = n / 1000;
+      if (asSec >= 2 && asSec <= 60) return Math.round(asSec);
+    }
+    if (n > 60) return undefined;
+    return Math.round(n);
+  };
+  const paths = [
+    json?.token_usage?.items?.[0]?.media_usage?.parameters?.duration,
+    json?.token_usage?.items?.[0]?.media_usage?.parameters?.durationSec,
+    json?.token_usage?.items?.[0]?.media_usage?.parameters?.durationMs,
+    json?.result?.duration,
+    json?.result?.durationSec,
+    json?.result?.durationMs,
+    json?.result?.seconds,
+    json?.result?.output?.duration,
+    json?.videoGeneration?.duration,
+    json?.duration,
+    json?.durationSec,
+    json?.durationMs,
+    json?.seconds,
+  ];
+  for (const p of paths) {
+    const hit = tryNum(p);
+    if (hit != null) return clampDuration(hit);
+  }
+  // artifacts metadata
+  const arts = json?.result?.artifacts || json?.result?.output?.artifacts || [];
+  if (Array.isArray(arts)) {
+    for (const a of arts) {
+      const hit =
+        tryNum(a?.duration) ||
+        tryNum(a?.durationSec) ||
+        tryNum(a?.durationMs) ||
+        tryNum(a?.metadata?.duration) ||
+        tryNum(a?.metadata?.durationSec) ||
+        tryNum(a?.metadata?.durationMs);
+      if (hit != null) return clampDuration(hit);
+    }
+  }
+  return undefined;
 }

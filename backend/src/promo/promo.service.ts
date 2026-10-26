@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleIni
 import { DataSource } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { MediaAsset } from '../common/entities/media-asset.entity';
 import { PromoSetEntity, PromoSetImage, ImageGenCallRecord, OutfitCompareRecord } from '../common/entities/promo-set.entity';
@@ -793,7 +794,7 @@ export class PromoService implements OnModuleInit {
     const sizeId = tpl.sizes.includes(String(input.sizeId || '')) ? String(input.sizeId) : tpl.defaultSize;
     const upstreamSize =
       SIZES[sizeId]?.upstream || (engine === 'lkb' ? this.lkbVideo.defaultSize : this.videoGen.defaultSize);
-    const seconds = clampDuration(
+    let seconds = clampDuration(
       Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
     );
     const model = tpl.model === 'none' ? null : MODELS.find((m) => m.id === input.modelId) || null;
@@ -940,9 +941,24 @@ export class PromoService implements OnModuleInit {
       }
       const ext = r.mime.includes('webm') ? '.webm' : r.mime.includes('quicktime') ? '.mov' : '.mp4';
       const objectKey = `${keyDir}/01${ext}`;
-      fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
-      await this.oss.putObjectSafe(r.buffer, objectKey, r.mime || 'video/mp4');
-      Object.assign(item, { status: 'done', objectKey, via: r.via, ms: Date.now() - t0 });
+      const absVideo = path.join(this.storageRoot(), objectKey);
+      fs.writeFileSync(absVideo, r.buffer);
+      let uploadBuf = r.buffer;
+      // WeChat <video> shows 0:00 when moov is after mdat; remux with faststart when possible
+      if (ext === '.mp4') {
+        const remuxed = await this.ensureMp4Faststart(absVideo);
+        if (remuxed?.length) uploadBuf = remuxed;
+      }
+      await this.oss.putObjectSafe(uploadBuf, objectKey, r.mime || 'video/mp4');
+      Object.assign(item, {
+        status: 'done',
+        objectKey,
+        via: r.via,
+        ms: Date.now() - t0,
+      });
+      if (typeof r.seconds === 'number' && r.seconds > 0) {
+        seconds = clampDuration(r.seconds);
+      }
       this.saveJob(legacy);
       await opts?.onProgress?.({ percent: 85, step: 'upload', message: '上传完成', done: 1, total: 1 });
     } catch (e: any) {
@@ -1620,13 +1636,16 @@ export class PromoService implements OnModuleInit {
         try {
           it.status = 'running';
           this.saveJob(legacy);
-          // 羊毛衫：prepared 挂拍/细节/宫格（勿丢）；多色时当前色挂拍优先置顶
+          // 羊毛衫：prepared 挂拍/细节/宫格；多色时只用「该色」参考 + 细节（禁止混入其它色挂拍）
           const prepPaths = garmentPrep.refs.map((r) => r.localPath);
           let garmentRefs = prepPaths;
           if (isMultiColor && refPaths[it.index]) {
             const colorPath = refPaths[it.index];
-            const rest = prepPaths.filter((p) => p !== colorPath);
-            garmentRefs = [colorPath, ...rest];
+            const detailOnly = garmentPrep.refs
+              .filter((r) => r.kind === 'detail' || r.kind === 'grid_cell')
+              .map((r) => r.localPath)
+              .filter((p) => p && p !== colorPath);
+            garmentRefs = [colorPath, ...detailOnly];
           }
           const refsForShot = stylePaths.length
             ? [...garmentRefs, ...stylePaths]
@@ -1755,125 +1774,99 @@ export class PromoService implements OnModuleInit {
         done: items.filter((x) => x.status === 'done').length,
         total: items.length,
       });
-      const garmentKeysForExt =
-        garmentPrep.refs
-          .map((r) => r.objectKey)
-          .filter((k): k is string => !!k)
-          .slice(0, 9) ||
-        refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
-      // 宫格无 objectKey：退回用户所选商品图签名 URL
-      const keys =
-        garmentKeysForExt.length > 0
-          ? garmentKeysForExt
-          : refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
-      const garmentUrls = keys.map((k) => this.oss.publicUrl(k)).filter((u) => /^https?:\/\//i.test(u));
       const styleUrls = styleKeysRaw
         .map((k) => this.oss.publicUrl(k))
         .filter((u) => /^https?:\/\//i.test(u));
-      // 外部 Agent 仅 garmentImages：成衣在前、风格样例在后（合计 ≤9），instruction 写明角色
-      const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
       const styleKwZh = styleKeywordsToPromptZh(
         (input as any).styleKeywords,
         String((input as any).styleKeywordsText || '').trim() || undefined,
       );
       const styleNote = styleUrls.length
-        ? `前 ${Math.min(garmentUrls.length, combinedImages.length)} 张是成衣参考（保真），后 ${Math.min(styleUrls.length, Math.max(0, combinedImages.length - garmentUrls.length))} 张是风格样例（只学构图光影氛围，禁止抄样例衣服/人脸/品牌logo）`
+        ? `前若干张是成衣参考（保真），后 ${styleUrls.length} 张是风格样例（只学构图光影氛围，禁止抄样例衣服/人脸/品牌logo）`
         : '';
-      // 外部引擎原先忽略 templateId/buildPrompt，导致换模板观感几乎一样；把模板差异写进 instruction
-      const pending = items.filter((x) => !(x.status === 'done' && x.objectKey));
-      const lead = pending[0] || items[0];
-      const leadPose = (tpl.poses || []).find((o) => o.id === lead?.poseId);
-      const leadScene = (tpl.scenes || []).find((o) => o.id === lead?.sceneId);
-      const templateBrief = (() => {
+      const regenNote = String((input as any).regenNonce || '').trim()
+        ? `重新生成 ${String((input as any).regenNonce).trim()}：必须与上一版有可见差异（机位/构图/姿势微变/光影），禁止复刻同一张；成衣保真不变。`
+        : '';
+
+      const buildTemplateBrief = (it: JobItem, colorLabel?: string) => {
+        const pose = (tpl.poses || []).find((o) => o.id === it?.poseId);
+        const scene = (tpl.scenes || []).find((o) => o.id === it?.sceneId);
         const bits: string[] = [`模板：${tpl.name}`, `templateId=${tpl.id}`];
         if (tpl.id === 'detail_closeup') bits.push('细节特写：微距织纹/领口/袖口，浅景深，不要全身、不要真人出镜');
         else if (tpl.id === 'flatlay') bits.push('平铺/挂拍静物：整件成衣完整入镜，不要真人模特');
         else if (tpl.id === 'model_scene') bits.push('模特上身场景图：真人穿着成衣，生活场景，衣服保真');
-        else if (tpl.id === 'multi_color') bits.push('多色展示：同一姿势场景，按颜色各出一张，姿态构图保持一致只换颜色');
-        else if (tpl.id === 'xhs_cover') bits.push('小红书封面风：竖版氛围感，上方留白（不要写字），可有可无模特');
+        else if (tpl.id === 'multi_color') {
+          bits.push('多色展示：同一姿势场景，本张只出「一个」颜色，姿态构图与其它色保持一致只换颜色');
+          if (colorLabel) bits.push(`本张颜色：${colorLabel}（必须与本张成衣参考图颜色一致，禁止混用其它色）`);
+        } else if (tpl.id === 'xhs_cover') bits.push('小红书封面风：竖版氛围感，上方留白（不要写字），可有可无模特');
         else if (tpl.id === 'style_ref') bits.push('风格参考：成衣保真，构图光影学风格样例，禁止抄样例衣服/人脸/logo');
         else if (tpl.model === 'none') bits.push('不要出真人模特，做静物/挂拍/细节');
         else if (tpl.model === 'required') bits.push('必须出真人模特上身展示成衣');
         else bits.push('模特可选');
         if (model) bits.push(`模特：${model.name}（${model.desc || ''}）`);
-        if (leadPose?.name) bits.push(`姿势/呈现：${leadPose.name}`);
-        if (leadScene?.name) bits.push(`场景：${leadScene.name}`);
-        if (items.length > 1) bits.push(`共需 ${items.length} 张不同构图/微变体，勿完全重复`);
+        if (pose?.name) bits.push(`姿势/呈现：${pose.name}`);
+        if (scene?.name) bits.push(`场景：${scene.name}`);
         return bits.filter(Boolean).join('；');
-      })();
-      const promptLead = String(lead?.prompt || lead?.promptZh || '').trim();
-      const regenNote = String((input as any).regenNonce || '').trim()
-        ? `重新生成 ${String((input as any).regenNonce).trim()}：必须与上一版有可见差异（机位/构图/姿势微变/光影），禁止复刻同一张；成衣保真不变。`
-        : '';
-      const instruction = [
-        templateBrief,
-        poseTextZh ? `姿势描述：${poseTextZh}` : '',
-        sceneTextZh ? `场景描述：${sceneTextZh}` : '',
-        feature ? `商品特征：${feature}` : '',
-        styleKwZh,
-        styleNote,
-        promptLead ? `生图要求：${promptLead}` : '',
-        regenNote,
-      ]
-        .filter(Boolean)
-        .join('\n')
-        .slice(0, 2400);
-      const ext = await this.externalOutfit.invoke({
-        garmentImages: combinedImages.length ? combinedImages : garmentUrls,
-        instruction: instruction || undefined,
-      });
-      await opts?.appendEvent?.('external_outfit', ext.ok ? '外部 Agent 成功' : '外部 Agent 失败', {
-        ok: ext.ok,
-        ms: ext.ms,
-        requestId: ext.requestId,
-        agentCode: ext.agentCode,
-        imageCount: ext.imageUrls.length,
-        error: ext.error,
-        engine: outfitEngine,
-      });
+      };
 
-      if (outfitEngine === 'external') {
-        // 纯外部：把结果图拉回本地作为主图槽
-        if (!ext.ok || !ext.imageUrls.length) {
-          throw new Error(ext.error || '外部穿搭 Agent 未返回结果图');
+      const garmentUrlForSlot = (idx: number): string[] => {
+        // multi_color：严格 1:1 只用该色参考图；其它模板仍可传整组成衣
+        if (isMultiColor) {
+          const r = refs[idx];
+          if (r?.objectKey) {
+            const u = this.oss.publicUrl(r.objectKey);
+            if (/^https?:\/\//i.test(u)) return [u];
+          }
+          // fallback：garmentPrep 同序
+          const prep = garmentPrep.refs[idx];
+          if (prep?.objectKey) {
+            const u = this.oss.publicUrl(prep.objectKey);
+            if (/^https?:\/\//i.test(u)) return [u];
+          }
+          return [];
         }
-        for (let i = 0; i < items.length; i++) {
-          const it = items[i];
-          if (it.status === 'done' && it.objectKey) continue;
-          const url = ext.imageUrls[Math.min(i, ext.imageUrls.length - 1)];
-          try {
-            const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
-            const extName = url.toLowerCase().includes('.png') ? '.png' : '.jpg';
-            const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${extName}`;
-            fs.writeFileSync(path.join(this.storageRoot(), objectKey), buf);
-            await this.oss.putObjectSafe(buf, objectKey, extName === '.png' ? 'image/png' : 'image/jpeg');
-            it.status = 'done';
-            it.objectKey = objectKey;
-            it.via = 'external_outfit';
-            it.compare = {
-              engine: 'external',
-              external: {
-                status: 'ok',
-                imageUrls: ext.imageUrls,
-                requestId: ext.requestId,
-                ms: ext.ms,
-                agentCode: ext.agentCode,
-              },
-              self: { status: 'skipped' },
-            };
-          } catch (e: any) {
+        const keys =
+          garmentPrep.refs
+            .map((r) => r.objectKey)
+            .filter((k): k is string => !!k)
+            .slice(0, 9) ||
+          refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
+        const use = keys.length
+          ? keys
+          : refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
+        return use.map((k) => this.oss.publicUrl(k)).filter((u) => /^https?:\/\//i.test(u));
+      };
+
+      const applyExternalToItem = (
+        it: JobItem,
+        ext: Awaited<ReturnType<ExternalOutfitClient['invoke']>>,
+        urlIdx: number,
+      ) => {
+        if (outfitEngine === 'external') {
+          if (!ext.ok || !ext.imageUrls.length) {
             it.status = 'failed';
-            it.error = String(e?.message || e).slice(0, 500);
+            it.error = String(ext.error || '外部穿搭 Agent 未返回结果图').slice(0, 500);
             it.compare = {
               engine: 'external',
               external: { status: 'failed', error: it.error, requestId: ext.requestId, ms: ext.ms },
               self: { status: 'skipped' },
             };
+            return;
           }
-        }
-      } else {
-        // both：自建主图保留；两侧写入 compare 留痕
-        for (const it of items) {
+          // caller assigns image asynchronously
+          (it as any)._extUrl = ext.imageUrls[Math.min(urlIdx, ext.imageUrls.length - 1)];
+          it.compare = {
+            engine: 'external',
+            external: {
+              status: 'ok',
+              imageUrls: ext.imageUrls,
+              requestId: ext.requestId,
+              ms: ext.ms,
+              agentCode: ext.agentCode,
+            },
+            self: { status: 'skipped' },
+          };
+        } else {
           it.compare = {
             engine: 'both',
             self: {
@@ -1902,8 +1895,139 @@ export class PromoService implements OnModuleInit {
                 },
           };
         }
+      };
+
+      const downloadExtToItem = async (it: JobItem, url: string) => {
+        try {
+          const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
+          const extName = url.toLowerCase().includes('.png') ? '.png' : '.jpg';
+          const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${extName}`;
+          fs.writeFileSync(path.join(this.storageRoot(), objectKey), buf);
+          await this.oss.putObjectSafe(buf, objectKey, extName === '.png' ? 'image/png' : 'image/jpeg');
+          it.status = 'done';
+          it.objectKey = objectKey;
+          it.via = 'external_outfit';
+        } catch (e: any) {
+          it.status = 'failed';
+          it.error = String(e?.message || e).slice(0, 500);
+          if (it.compare?.external) {
+            (it.compare.external as any).status = 'failed';
+            (it.compare.external as any).error = it.error;
+          }
+        }
+      };
+
+      if (isMultiColor) {
+        // 关键：每个颜色单独调一次 Agent（1 色参考 + 该色 prompt），避免整组一锅炖只出第一色
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.status === 'done' && it.objectKey) continue;
+          const colorLabel = colorsAll[i] || '';
+          const garmentUrls = garmentUrlForSlot(i);
+          if (!garmentUrls.length) {
+            it.status = 'failed';
+            it.error = `多色展示第 ${i + 1} 色缺少参考图 URL`;
+            continue;
+          }
+          const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
+          const promptLead = String(it.prompt || it.promptZh || '').trim();
+          const instruction = [
+            buildTemplateBrief(it, colorLabel),
+            poseTextZh ? `姿势描述：${poseTextZh}` : '',
+            sceneTextZh ? `场景描述：${sceneTextZh}` : '',
+            feature ? `商品特征：${feature}` : '',
+            colorLabel ? `本张只生成颜色「${colorLabel}」，成衣颜色必须与唯一成衣参考图一致` : '',
+            styleKwZh,
+            styleNote,
+            promptLead ? `生图要求：${promptLead}` : '',
+            regenNote,
+          ]
+            .filter(Boolean)
+            .join('\n')
+            .slice(0, 2400);
+          const ext = await this.externalOutfit.invoke({
+            garmentImages: combinedImages,
+            instruction: instruction || undefined,
+          });
+          await opts?.appendEvent?.('external_outfit', ext.ok ? `外部 Agent 色${i + 1}成功` : `外部 Agent 色${i + 1}失败`, {
+            ok: ext.ok,
+            ms: ext.ms,
+            requestId: ext.requestId,
+            agentCode: ext.agentCode,
+            imageCount: ext.imageUrls.length,
+            error: ext.error,
+            engine: outfitEngine,
+            colorIndex: i,
+            colorLabel,
+            garmentImageCount: garmentUrls.length,
+          });
+          applyExternalToItem(it, ext, 0);
+          if (outfitEngine === 'external' && (it as any)._extUrl) {
+            await downloadExtToItem(it, String((it as any)._extUrl));
+            delete (it as any)._extUrl;
+          }
+          await opts?.onProgress?.({
+            percent: Math.min(98, 92 + Math.round(((i + 1) / items.length) * 6)),
+            step: 'external_outfit',
+            message: `外部 Agent 生图 ${i + 1}/${items.length}`,
+            done: items.filter((x) => x.status === 'done').length,
+            total: items.length,
+          });
+        }
+      } else {
+        // 非多色：整组一次调用（原逻辑）
+        const garmentUrls = garmentUrlForSlot(0);
+        const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
+        const pending = items.filter((x) => !(x.status === 'done' && x.objectKey));
+        const lead = pending[0] || items[0];
+        const promptLead = String(lead?.prompt || lead?.promptZh || '').trim();
+        const instruction = [
+          buildTemplateBrief(lead),
+          poseTextZh ? `姿势描述：${poseTextZh}` : '',
+          sceneTextZh ? `场景描述：${sceneTextZh}` : '',
+          feature ? `商品特征：${feature}` : '',
+          styleKwZh,
+          styleNote,
+          promptLead ? `生图要求：${promptLead}` : '',
+          items.length > 1 ? `共需 ${items.length} 张不同构图/微变体，勿完全重复` : '',
+          regenNote,
+        ]
+          .filter(Boolean)
+          .join('\n')
+          .slice(0, 2400);
+        const ext = await this.externalOutfit.invoke({
+          garmentImages: combinedImages.length ? combinedImages : garmentUrls,
+          instruction: instruction || undefined,
+        });
+        await opts?.appendEvent?.('external_outfit', ext.ok ? '外部 Agent 成功' : '外部 Agent 失败', {
+          ok: ext.ok,
+          ms: ext.ms,
+          requestId: ext.requestId,
+          agentCode: ext.agentCode,
+          imageCount: ext.imageUrls.length,
+          error: ext.error,
+          engine: outfitEngine,
+        });
+
+        if (outfitEngine === 'external') {
+          if (!ext.ok || !ext.imageUrls.length) {
+            throw new Error(ext.error || '外部穿搭 Agent 未返回结果图');
+          }
+          for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            if (it.status === 'done' && it.objectKey) continue;
+            applyExternalToItem(it, ext, i);
+            if ((it as any)._extUrl) {
+              await downloadExtToItem(it, String((it as any)._extUrl));
+              delete (it as any)._extUrl;
+            }
+          }
+        } else {
+          for (const it of items) applyExternalToItem(it, ext, 0);
+        }
       }
     }
+
 
     const ok = items.filter((i) => i.status === 'done').length;
     legacy.status = ok === items.length ? 'done' : ok ? 'partial' : 'failed';
@@ -2210,6 +2334,35 @@ export class PromoService implements OnModuleInit {
     this.logger.log(`job ${job.id} ${job.status} ${ok}/${job.items.length}`);
   }
 
+
+  /** Put moov before mdat so WeChat <video> can read duration (avoids 0:00). */
+  private async ensureMp4Faststart(absPath: string): Promise<Buffer | null> {
+    if (!absPath.toLowerCase().endsWith('.mp4')) return null;
+    if (!fs.existsSync(absPath)) return null;
+    const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
+    const tmp = `${absPath}.faststart.tmp.mp4`;
+    try {
+      const r = spawnSync(
+        ffmpeg,
+        ['-y', '-i', absPath, '-c', 'copy', '-movflags', '+faststart', tmp],
+        { encoding: 'utf8', timeout: 120_000 },
+      );
+      if (r.status !== 0 || !fs.existsSync(tmp)) {
+        this.logger.warn(
+          `mp4 faststart skip: ${String(r.stderr || r.error || 'ffmpeg failed').slice(0, 200)}`,
+        );
+        try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* ignore */ }
+        return null;
+      }
+      fs.renameSync(tmp, absPath);
+      return fs.readFileSync(absPath);
+    } catch (e: any) {
+      this.logger.warn(`mp4 faststart error: ${String(e?.message || e).slice(0, 200)}`);
+      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* ignore */ }
+      return null;
+    }
+  }
+
   private jobFile(tenantId: string, productId: string, jobId: string) {
     if (!/^pj_[a-f0-9]+$/.test(jobId)) throw new NotFoundException('任务不存在');
     return path.join(this.stateDir(tenantId, productId), `${jobId}.json`);
@@ -2418,6 +2571,15 @@ export class PromoService implements OnModuleInit {
       status: row.status,
       done,
       total: images.length || Number((row.params as any)?.count) || 0,
+      // 视频时长（秒）：params.seconds；供 gallery 展示，避免 moov 未就绪时播放器显示 0:00
+      seconds:
+        kind === 'video' || kind === 'promo_video'
+          ? Number((row.params as any)?.seconds) || null
+          : null,
+      durationSec:
+        kind === 'video' || kind === 'promo_video'
+          ? Number((row.params as any)?.seconds) || null
+          : null,
       items: images,
       createdAt: row.createdAt?.getTime?.() ?? row.createdAt,
       updatedAt: row.updatedAt?.getTime?.() ?? row.updatedAt,
