@@ -33,9 +33,6 @@ Page({
     if (q && q.profile === '1') this.setData({ showProfile: true });
   },
   onShow() {
-    try {
-      wx.showShareMenu({ withShareTicket: true, menus: ['shareAppMessage'] });
-    } catch (e) { /* ignore */ }
     this.load();
   },
   async load() {
@@ -329,8 +326,8 @@ Page({
       });
       wx.hideLoading();
       this.setData({ latestInvite: inv });
-      this.load();
-      wx.showToast({ title: '已生成', icon: 'success' });
+      await this.load();
+      wx.showToast({ title: '已生成，列表点邀请复制', icon: 'none' });
     } catch (e) {
       wx.hideLoading();
       wx.showToast({ title: (e && e.message) || '失败', icon: 'none' });
@@ -341,26 +338,8 @@ Page({
     if (!code) return;
     wx.setClipboardData({
       data: String(code),
-      success: () => wx.showToast({ title: '已复制邀请码', icon: 'none' }),
+      success: () => wx.showToast({ title: '已复制邀请码，发给同事', icon: 'none' }),
     });
-  },
-  /** 微信转发邀请：落地页带 code，同事打开即可加入（不提供存相册） */
-  onShareAppMessage(res) {
-    let code = (this.data.latestInvite && this.data.latestInvite.code) || '';
-    let imageUrl = (this.data.latestInvite && this.data.latestInvite.wxacodeUrl) || '';
-    if (res && res.from === 'button' && res.target && res.target.dataset) {
-      code = res.target.dataset.code || code;
-      imageUrl = res.target.dataset.url || imageUrl;
-    }
-    code = String(code || '').trim().toUpperCase();
-    const path = code
-      ? `/pages/invite/accept/accept?code=${encodeURIComponent(code)}`
-      : '/pages/invite/accept/accept';
-    return {
-      title: code ? `邀请你加入档口（码 ${code}）` : '邀请你加入档口',
-      path,
-      imageUrl: imageUrl || undefined,
-    };
   },
   async revokeInvite(e) {
     const id = e.currentTarget.dataset.id;

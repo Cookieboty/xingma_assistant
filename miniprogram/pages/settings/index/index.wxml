@@ -67,41 +67,22 @@
 
   <view class="card" wx:if="{{canInvite}}">
     <view class="section">员工邀请</view>
-    <view class="muted small" style="margin-top:8rpx;">默认邀请码最多 3 人使用；用满即失效。请用微信转发邀请同事加入（页上不展示码图）。</view>
+    <view class="muted small" style="margin-top:8rpx;">生成后在列表点「邀请」复制邀请码；同事打开小程序邀请页粘贴即可加入。</view>
     <view class="form" style="margin-top:16rpx;">
       <view class="btn-primary mini" bindtap="createInvite">生成邀请</view>
     </view>
 
-    <view wx:if="{{latestInvite}}" class="invite-box">
-      <view class="invite-code" bindtap="copyInviteCode" data-code="{{latestInvite.code}}">{{latestInvite.code}}</view>
-      <view class="muted small">已用 {{latestInvite.useCount || 0}}/{{latestInvite.maxUses || 3}} · 点下方微信转发邀请同事加入</view>
-      <button
-        class="btn-primary mini invite-share-btn"
-        open-type="share"
-        data-code="{{latestInvite.code}}"
-        data-url="{{latestInvite.wxacodeUrl}}"
-        style="margin-top:16rpx;"
-      >微信转发邀请</button>
-      <view class="muted small" style="margin-top:8rpx;">也可复制邀请码，同事在邀请页手动填写</view>
-    </view>
-
-    <view class="section" style="margin-top:24rpx;">邀请记录</view>
-    <view class="row item invite-record" wx:for="{{invites}}" wx:key="id">
+    <view class="row item invite-record" wx:for="{{invites}}" wx:key="id" style="margin-top:16rpx;">
       <view class="invite-meta">
         <text class="invite-code-text">{{item.code}}</text>
         <text class="muted" wx:if="{{item.status!=='active'}}"> · {{item.statusLabel}}</text>
         <text class="muted" wx:elif="{{item.maxUses}}"> · 已用{{item.useCount || 0}}/{{item.maxUses}}</text>
       </view>
       <view class="ops" wx:if="{{item.status==='active'}}">
-        <button
-          class="link invite-share-link"
-          open-type="share"
-          data-code="{{item.code}}"
-          data-url="{{item.wxacodeUrl}}"
-        >邀请</button>
+        <text class="link" data-code="{{item.code}}" bindtap="copyInviteCode">邀请</text>
         <text class="link danger" data-id="{{item.id}}" bindtap="revokeInvite">撤销</text>
       </view>
     </view>
-    <view class="muted" wx:if="{{!invites.length}}">暂无邀请</view>
+    <view class="muted" wx:if="{{!invites.length}}" style="margin-top:16rpx;">暂无邀请</view>
   </view>
 </view>
