@@ -1,6 +1,14 @@
 <view class="container">
+  <!-- 详情入口但组已不存在：不回退到兄弟列表 -->
+  <block wx:if="{{viewMode === 'detail' && setMissing && !detailSet}}">
+    <view class="card muted empty">
+      <view>该任务对应的素材组不存在或已删除</view>
+      <view class="muted small" style="margin-top:8rpx;">不会展示同商品其他任务。请返回任务中心重试或重新生成。</view>
+    </view>
+  </block>
+
   <!-- 详情：单组素材 -->
-  <block wx:if="{{viewMode === 'detail' && detailSet}}">
+  <block wx:elif="{{viewMode === 'detail' && detailSet}}">
     <view class="card head">
       <view class="section-title">
         <text class="type-badge">{{detailSet.typeLabel}}</text>

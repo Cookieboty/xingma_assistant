@@ -69,12 +69,15 @@ function enrich(j) {
   const isGenType = isUserVisibleJobType(j.type);
   // 「查看」：生图/视频进素材组
   const canView = true;
+  // 生图/视频：始终展示 done/total（含局部重生后仍为整组 N）；其它类型仅忙时提示
   const busyHint =
-    j.status === 'running' || j.status === 'queued'
-      ? doneTotal || (progress.step && progress.step !== 'queued' && progress.step !== 'running'
-        ? progress.step
-        : '')
-      : '';
+    isPromo && doneTotal
+      ? doneTotal
+      : j.status === 'running' || j.status === 'queued'
+        ? doneTotal || (progress.step && progress.step !== 'queued' && progress.step !== 'running'
+          ? progress.step
+          : '')
+        : '';
   const errHint = j.status === 'failed' ? (j.error || progress.message || '') : '';
   return Object.assign({}, j, {
     title,
@@ -215,7 +218,11 @@ Page({
   },
 
   /**
-   * 业主「查看」：promo 生图/视频 → 素材组详情（可下载）；无 setId 也进该商品素材列表。
+   * 业主「查看」：只打开「这一条」任务/素材组。
+   * - 失败/取消 → 任务详情（重新生成）
+   * - 生图/视频且有 setId → 该组详情（不带 setId 绝不进商品全部素材列表，避免看到兄弟任务）
+   * - 其余 → 单任务详情
+   * 全部素材列表仅商品页「素材」等入口故意进入。
    */
   openView(e) {
     const ds = e.currentTarget.dataset || {};
@@ -228,7 +235,7 @@ Page({
     const pid = productId || row.productId || '';
     const sid = setId || row.setId || '';
     const gen = isGen || row.isGenType;
-    // 失败/取消：进任务详情（有「重新生成」）；成功/进行中仍进素材组
+    // 失败/取消：进任务详情（有「重新生成」）
     const needJobOps = row.status === 'failed' || row.status === 'cancelled';
     if (needJobOps && id) {
       wx.navigateTo({ url: `/pages/jobs/detail/detail?id=${id}` });
@@ -240,12 +247,7 @@ Page({
       });
       return;
     }
-    if (gen && pid) {
-      wx.navigateTo({
-        url: `/pages/product/promo-gallery/promo-gallery?id=${pid}`,
-      });
-      return;
-    }
+    // 无 setId：绝不再打开商品级素材列表（会露出兄弟组）
     if (!id) return;
     wx.navigateTo({ url: `/pages/jobs/detail/detail?id=${id}` });
   },

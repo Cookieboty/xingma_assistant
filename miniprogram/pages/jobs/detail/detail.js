@@ -76,11 +76,23 @@ function enrichJob(j) {
       ? '重跑'
       : (j.type === 'promo_image' || j.type === 'promo_video' ? '重新生成' : '重试'),
     isOrphan: !!(j.orphanPromoSet || String(j.id || '').indexOf('orphan_') === 0),
-    canOpenGallery: !!(isGenType && productId),
+    canOpenGallery: !!(isGenType && productId && setId),
     busy,
     doneTotal,
     percent: Number(progress.percent) || 0,
-    progressMessage: progress.message || '',
+    progressMessage: (() => {
+      const msg = String(progress.message || '').trim();
+      if (!msg) return '';
+      // 已有 done/total 时，隐藏「生图 1/2」这类会把 total 显示成重生张数的文案
+      if (doneTotal && /(\d+)\s*\/\s*(\d+)/.test(msg)) {
+        const m = msg.match(/(\d+)\s*\/\s*(\d+)/);
+        const shown = String(doneTotal);
+        if (m && shown && !shown.startsWith(m[1] + '/') && shown.split('/')[1] !== m[2]) {
+          return '';
+        }
+      }
+      return msg;
+    })(),
     progressStep: progress.step || '',
     error: j.error || (j.status === 'failed' ? progress.message : '') || '',
     createdText: fmtTime(j.createdAt),
@@ -122,18 +134,12 @@ Page({
       if (job.id && job.id !== id && String(id).indexOf('orphan_') === 0) {
         this.setData({ id: job.id });
       }
-      // 失败/取消：留在任务详情，展示「重新生成」（不再强跳素材页导致无按钮）
-      // 排队/在做/完成的生图视频：仍进素材组槽位页
+      // 失败/取消：留在任务详情，展示「重新生成」
+      // 排队/在做/完成：仅当有 setId 时进「该组」素材详情；无 setId 留在本页（禁止跳商品全部素材列表）
       const needOps = job.status === 'failed' || job.status === 'cancelled';
       if (!needOps && job.isGenType && job.productId && job.setId) {
         wx.redirectTo({
           url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}&setId=${job.setId}`,
-        });
-        return;
-      }
-      if (!needOps && job.isGenType && job.productId) {
-        wx.redirectTo({
-          url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}`,
         });
         return;
       }
@@ -149,10 +155,13 @@ Page({
 
   openGallery() {
     const job = this.data.job || {};
-    if (!job.productId) return;
-    const sid = job.setId ? `&setId=${job.setId}` : '';
+    // 必须带 setId，否则会进商品全部素材列表（兄弟任务）
+    if (!job.productId || !job.setId) {
+      wx.showToast({ title: '无法定位该组素材', icon: 'none' });
+      return;
+    }
     wx.navigateTo({
-      url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}${sid}`,
+      url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}&setId=${job.setId}`,
     });
   },
 

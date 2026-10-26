@@ -102,16 +102,28 @@ function enrichSet(s, prev) {
 }
 
 
-function syncDetailFromSets(sets, focusSetId, viewMode) {
+function syncDetailFromSets(sets, focusSetId, viewMode, focusLocked) {
   if (viewMode !== 'detail' || !focusSetId) return { sets, detailSet: null };
   const detailSet = (sets || []).find((s) => s.id === focusSetId) || null;
-  return { sets, detailSet, viewMode: detailSet ? 'detail' : 'list', focusSetId: detailSet ? focusSetId : '' };
+  // 从任务「查看」带 setId 进来：找不到组也绝不回退到全部素材列表（会露出兄弟任务）
+  if (!detailSet && focusLocked) {
+    return { sets, detailSet: null, viewMode: 'detail', focusSetId, setMissing: true };
+  }
+  return {
+    sets,
+    detailSet,
+    viewMode: detailSet ? 'detail' : 'list',
+    focusSetId: detailSet ? focusSetId : '',
+    setMissing: false,
+  };
 }
 
 Page({
   data: {
     id: '',
     focusSetId: '',
+    focusLocked: false, // true=任务查看带 setId，禁止回退兄弟列表
+    setMissing: false,
     viewMode: 'list', // list | detail
     detailSet: null,
     product: null,
@@ -126,6 +138,8 @@ Page({
     this.setData({
       id: q.id || '',
       focusSetId: setId,
+      focusLocked: !!setId,
+      setMissing: false,
       viewMode: setId ? 'detail' : 'list',
     });
   },
@@ -162,20 +176,42 @@ Page({
       const list = Array.isArray(setsRaw) ? setsRaw : setsRaw.items || [];
       const sets = list.map((s) => enrichSet(s, prevMap[s.id]));
       const focusSetId = this.data.focusSetId;
+      const focusLocked = !!this.data.focusLocked;
       let viewMode = this.data.viewMode || 'list';
       let detailSet = null;
+      let setMissing = false;
       if (viewMode === 'detail' && focusSetId) {
         detailSet = sets.find((s) => s.id === focusSetId) || null;
         if (!detailSet) {
-          // set 已删或不存在 → 回列表
-          viewMode = 'list';
+          if (focusLocked) {
+            // 任务入口：保持单组详情态，不展示兄弟组
+            setMissing = true;
+            viewMode = 'detail';
+          } else {
+            viewMode = 'list';
+          }
         }
       } else if (viewMode === 'detail' && this.data.detailSet) {
         detailSet = sets.find((s) => s.id === this.data.detailSet.id) || null;
-        if (!detailSet) viewMode = 'list';
+        if (!detailSet) {
+          if (focusLocked && focusSetId) {
+            setMissing = true;
+            viewMode = 'detail';
+          } else {
+            viewMode = 'list';
+          }
+        }
       }
       const anyBusy = sets.some((s) => s.busy);
-      this.setData({ product, sets, loading: false, viewMode, detailSet, focusSetId: focusSetId || (detailSet && detailSet.id) || '' });
+      this.setData({
+        product,
+        sets,
+        loading: false,
+        viewMode,
+        detailSet,
+        setMissing,
+        focusSetId: focusSetId || (detailSet && detailSet.id) || '',
+      });
       if (anyBusy) {
         this.timer = setTimeout(() => this.load({ silent: true }), 4000);
       }
@@ -273,7 +309,7 @@ Page({
       items[idx] = Object.assign({}, it, { albumSelected: !it.albumSelected });
       return enrichSet(Object.assign({}, s, { items, expanded: s.expanded }), null);
     });
-    const sync = syncDetailFromSets(sets, this.data.focusSetId, this.data.viewMode);
+    const sync = syncDetailFromSets(sets, this.data.focusSetId, this.data.viewMode, this.data.focusLocked);
     this.setData(Object.assign({ sets }, sync));
   },
 
@@ -287,7 +323,7 @@ Page({
         : it));
       return enrichSet(Object.assign({}, s, { items, expanded: s.expanded }), null);
     });
-    const sync = syncDetailFromSets(sets, this.data.focusSetId, this.data.viewMode);
+    const sync = syncDetailFromSets(sets, this.data.focusSetId, this.data.viewMode, this.data.focusLocked);
     this.setData(Object.assign({ sets }, sync));
   },
 
@@ -440,7 +476,7 @@ Page({
         percent: 5,
       }), null);
     });
-    const sync = syncDetailFromSets(optimistic, setId, this.data.viewMode === 'detail' ? 'detail' : 'detail');
+    const sync = syncDetailFromSets(optimistic, setId, this.data.viewMode === 'detail' ? 'detail' : 'detail', this.data.focusLocked);
     this.setData(Object.assign({ actingId: setId, sets: optimistic, focusSetId: setId, viewMode: 'detail' }, sync));
     wx.showLoading({ title: '提交中…', mask: true });
     try {
