@@ -67,15 +67,14 @@
 
   <view class="card" wx:if="{{canInvite}}">
     <view class="section">员工邀请</view>
-    <view class="muted small" style="margin-top:8rpx;">默认邀请码最多 3 人使用；用满即失效。同一二维码在额度用完前可反复转发。</view>
+    <view class="muted small" style="margin-top:8rpx;">默认邀请码最多 3 人使用；用满即失效。请用微信转发邀请同事加入（页上不展示码图）。</view>
     <view class="form" style="margin-top:16rpx;">
       <view class="btn-primary mini" bindtap="createInvite">生成邀请</view>
     </view>
 
     <view wx:if="{{latestInvite}}" class="invite-box">
       <view class="invite-code" bindtap="copyInviteCode" data-code="{{latestInvite.code}}">{{latestInvite.code}}</view>
-      <view class="muted small">已用 {{latestInvite.useCount || 0}}/{{latestInvite.maxUses || 3}} · 点下方转发邀请同事扫码加入</view>
-      <image wx:if="{{latestInvite.wxacodeUrl}}" src="{{latestInvite.wxacodeUrl}}" mode="aspectFit" class="qr-preview" show-menu-by-longpress="{{true}}" />
+      <view class="muted small">已用 {{latestInvite.useCount || 0}}/{{latestInvite.maxUses || 3}} · 点下方微信转发邀请同事加入</view>
       <button
         class="btn-primary mini invite-share-btn"
         open-type="share"
