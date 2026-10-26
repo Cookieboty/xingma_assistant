@@ -129,7 +129,7 @@
       <view class="btn-primary" style="margin-top:24rpx;" wx:if="{{mediaKind === 'video'}}" bindtap="submitFromScript">
         {{submitting ? '提交中…' : '确认生成视频'}}
       </view>
-      <view class="muted small" style="margin-top:8rpx;" wx:if="{{mediaKind === 'video'}}">配乐默认「轻柔氛围」。也可点底栏「下一步」先改配乐再生成</view>
+      <view class="muted small" style="margin-top:8rpx;" wx:if="{{mediaKind === 'video'}}">配乐默认「轻柔氛围」。需要改的话点 <text class="link" bindtap="goOptionalBgm">改配乐</text>（可选）</view>
     </view>
 
     <view class="card" wx:if="{{stepKey === 'bgm'}}">
@@ -254,8 +254,9 @@
     </view>
 
     <view class="footer">
-      <view class="btn-ghost half" bindtap="prev">上一步</view>
-      <view class="btn-primary half" bindtap="next">{{footerPrimaryLabel}}</view>
+      <view class="btn-ghost {{hideFooterNext ? '' : 'half'}}" bindtap="prev">上一步</view>
+      <!-- 视频分镜步：仅保留卡片内「确认生成视频」，隐藏底栏「下一步」避免双 CTA -->
+      <view class="btn-primary half" wx:if="{{!hideFooterNext}}" bindtap="next">{{footerPrimaryLabel}}</view>
     </view>
   </block>
 

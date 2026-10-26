@@ -49,7 +49,7 @@ Page({
     styleKeywordsText: '',
     styleAnalyzing: false,
     styleKeywordChips: [],
-    job: null, submitting: false, saving: false, singlePoseScene: false, footerPrimaryLabel: '下一步',
+    job: null, submitting: false, saving: false, singlePoseScene: false, footerPrimaryLabel: '下一步', hideFooterNext: false,
     quickMode: false, fullSteps: [],
     voiceTarget: '', voiceListening: false, voiceHint: '按住说话',
     savingAlbum: false, albumSelectedCount: 0, albumAllSelected: false, albumSaveLabel: '保存到相册',
@@ -795,8 +795,10 @@ Page({
   /** 分镜页一键提交：校验 script 后直接 generate（跳过可选配乐步） */
 
   syncFooterLabel() {
-    const { stepIdx, steps, mediaKind, submitting, styleUploading } = this.data;
+    const { stepIdx, steps, mediaKind, submitting, styleUploading, stepKey } = this.data;
     const last = stepIdx >= (steps || []).length - 1;
+    // 视频分镜步已有卡片内「确认生成视频」：隐藏底栏「下一步」，只留一个明确 CTA
+    const hideFooterNext = mediaKind === 'video' && stepKey === 'script';
     let footerPrimaryLabel = '下一步';
     if (last) {
       if (submitting) footerPrimaryLabel = '提交中…';
@@ -804,9 +806,10 @@ Page({
       else if (mediaKind === 'video') footerPrimaryLabel = '确认生成视频';
       else footerPrimaryLabel = '开始生成';
     }
-    if (this.data.footerPrimaryLabel !== footerPrimaryLabel) {
-      this.setData({ footerPrimaryLabel });
-    }
+    const patch = {};
+    if (this.data.footerPrimaryLabel !== footerPrimaryLabel) patch.footerPrimaryLabel = footerPrimaryLabel;
+    if (this.data.hideFooterNext !== hideFooterNext) patch.hideFooterNext = hideFooterNext;
+    if (Object.keys(patch).length) this.setData(patch);
   },
 
   async submitFromScript() {
@@ -815,6 +818,18 @@ Page({
     const err = this.validate('script');
     if (err) return wx.showToast({ title: err, icon: 'none' });
     return this.submit();
+  },
+
+  /** 分镜页次要入口：进可选配乐步（不占主 CTA） */
+  goOptionalBgm() {
+    if (this.data.mediaKind !== 'video' || this.data.stepKey !== 'script') return;
+    const err = this.validate('script');
+    if (err) return wx.showToast({ title: err, icon: 'none' });
+    const steps = this.data.steps || [];
+    const bgmIdx = steps.indexOf('bgm');
+    if (bgmIdx < 0) return wx.showToast({ title: '当前模板无配乐步', icon: 'none' });
+    this.setData({ stepIdx: bgmIdx, stepKey: 'bgm' });
+    this.syncFooterLabel();
   },
 
   async submit() {
