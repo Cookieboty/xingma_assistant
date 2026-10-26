@@ -1,20 +1,10 @@
 /**
  * 员工/业主邀请落地：小程序码 scene=c=CODE 或 query invite/code
  * 微信登录 → 带 inviteCode 换 JWT → 绑定成员 → 进工作台
+ * 分享进线会显示「房子」回首页：hideHomeButton + pendingInvite 保活，避免丢码变客户
  */
 const { request } = require('../../../utils/request');
-
-function parseScene(scene) {
-  if (!scene) return '';
-  let s = String(scene);
-  try {
-    s = decodeURIComponent(s);
-  } catch (e) { /* */ }
-  const m = s.match(/(?:^|[&?])c=([A-Za-z0-9]+)/);
-  if (m) return m[1].toUpperCase();
-  if (/^[A-Za-z0-9]{6,16}$/.test(s)) return s.toUpperCase();
-  return '';
-}
+const inviteUtil = require('../../../utils/invite');
 
 Page({
   data: {
@@ -24,17 +14,29 @@ Page({
     roleLabel: '',
   },
   onLoad(q) {
-    let code = (q && (q.invite || q.code || q.c)) || '';
-    if (!code && q && q.scene) code = parseScene(q.scene);
-    code = String(code || '').trim().toUpperCase();
+    this._hideHome();
+    let code = inviteUtil.extractInviteCode(q || '');
+    if (!code) code = inviteUtil.readPendingInviteCode();
+    code = inviteUtil.normalizeCode(code);
+    if (code) inviteUtil.savePendingInviteCode(code);
     this.setData({ code });
     this.run(code);
   },
+  onShow() {
+    this._hideHome();
+  },
+  _hideHome() {
+    try {
+      if (typeof wx.hideHomeButton === 'function') wx.hideHomeButton();
+    } catch (e) { /* */ }
+  },
   async run(code) {
+    code = inviteUtil.normalizeCode(code);
     if (!code) {
-      this.setData({ loading: false, error: '缺少邀请码，请扫描业主生成的小程序码' });
+      this.setData({ loading: false, error: '缺少邀请码，请打开业主发来的邀请卡片，或手动输入邀请码' });
       return;
     }
+    inviteUtil.savePendingInviteCode(code);
     wx.showLoading({ title: '加入中', mask: true });
     try {
       const app = getApp();
@@ -54,6 +56,13 @@ Page({
         });
         app.setSession(session);
       } else {
+        // 清掉可能残留的客户会话，避免旧 token 干扰（登录接口本身会重签）
+        try {
+          app.globalData.token = '';
+          app.globalData.role = '';
+          wx.removeStorageSync('token');
+          wx.removeStorageSync('role');
+        } catch (e) { /* */ }
         const wxCode = await new Promise((resolve, reject) => {
           wx.login({
             success: (r) => (r.code ? resolve(r.code) : reject(new Error('wx.login 无 code'))),
@@ -63,15 +72,16 @@ Page({
         session = await request({
           url: '/api/auth/login',
           method: 'POST',
-          data: { code: wxCode, inviteCode: code },
+          data: { code: wxCode, inviteCode: code, preferRole: 'staff' },
         });
         app.setSession(session);
       }
       wx.hideLoading();
       if (session.role !== 'owner' && session.role !== 'staff') {
-        this.setData({ loading: false, error: '绑定失败，仍为客户角色，请联系业主重发邀请' });
+        this.setData({ loading: false, error: '绑定失败，仍为客户角色。请确认邀请码有效，或让业主重新转发邀请卡片' });
         return;
       }
+      inviteUtil.clearPendingInviteCode();
       const roleLabel = session.role === 'owner' ? '业主' : '员工';
       this.setData({ loading: false, roleLabel, error: '' });
       wx.showToast({ title: `已加入（${roleLabel}）`, icon: 'success' });
@@ -84,14 +94,16 @@ Page({
     }
   },
   onCodeInput(e) {
-    this.setData({ code: String((e.detail && e.detail.value) || '').trim().toUpperCase() });
+    this.setData({ code: inviteUtil.normalizeCode((e.detail && e.detail.value) || '') });
   },
   retry() {
-    const code = String(this.data.code || '').trim().toUpperCase();
+    const code = inviteUtil.normalizeCode(this.data.code || '');
     this.setData({ loading: true, error: '', code });
     this.run(code);
   },
   goHome() {
+    // 用户主动回首页：清掉 pending，避免 index onShow 又 reLaunch 回本页死循环
+    inviteUtil.clearPendingInviteCode();
     wx.reLaunch({ url: '/pages/index/index' });
   },
 });

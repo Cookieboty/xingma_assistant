@@ -55,16 +55,26 @@ function request(options) {
   });
 }
 
-/** 真实登录：wx.login 取 code → 后端 jscode2session → JWT（角色由后端成员表判定） */
-function wxLogin(preferRole) {
+/** 真实登录：wx.login 取 code → 后端 jscode2session → JWT（角色由后端成员表判定）
+ * opts.inviteCode：员工邀请兑换，登录时绑定为 owner/staff
+ */
+function wxLogin(preferRole, opts) {
   const app = getApp();
+  const inviteCode = opts && opts.inviteCode
+    ? String(opts.inviteCode).trim().toUpperCase()
+    : '';
   return new Promise((resolve, reject) => {
     wx.login({
       success: (r) => (r.code ? resolve(r.code) : reject(new Error('wx.login 未返回 code'))),
       fail: (err) => reject(new Error((err && err.errMsg) || 'wx.login 失败')),
     });
   })
-    .then((code) => request({ url: '/api/auth/login', method: 'POST', data: preferRole ? { code, preferRole } : { code } }))
+    .then((code) => {
+      const data = { code };
+      if (preferRole) data.preferRole = preferRole;
+      if (inviteCode) data.inviteCode = inviteCode;
+      return request({ url: '/api/auth/login', method: 'POST', data });
+    })
     .then((session) => {
       app.setSession(session);
       return session;
