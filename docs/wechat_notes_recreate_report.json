@@ -1,0 +1,389 @@
+{
+  "at": "2026-10-26T12:15:33.189Z",
+  "batch": "2026102017581854",
+  "tenantId": "tenant_dev_001",
+  "wipe": {
+    "before": {
+      "products": 0,
+      "media": 0,
+      "promo": 0,
+      "jobs": 0
+    }
+  },
+  "products": [
+    {
+      "styleNo": "51137",
+      "name": "扣子开衫",
+      "imageCount": 8,
+      "skuColors": [
+        "马鞍棕",
+        "洋红紫",
+        "深麻灰",
+        "平上青",
+        "黑色",
+        "伦敦雾"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125",
+        "130"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/51137/08.jpg"
+      ]
+    },
+    {
+      "styleNo": "69322",
+      "name": "9G翻领长袖 彩纱",
+      "imageCount": 10,
+      "skuColors": [
+        "兰棕",
+        "沙海蓝",
+        "花石灰",
+        "靓褐"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125",
+        "130"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/08.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/09.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/69322/10.jpg"
+      ]
+    },
+    {
+      "styleNo": "72516",
+      "name": "5G拉链开衫",
+      "imageCount": 8,
+      "skuColors": [
+        "灰色",
+        "米驼"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72516/08.jpg"
+      ]
+    },
+    {
+      "styleNo": "72733",
+      "name": "7G 背心 麻花",
+      "imageCount": 9,
+      "skuColors": [
+        "上青",
+        "奶白",
+        "淡黄",
+        "白灰"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/08.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72733/09.jpg"
+      ]
+    },
+    {
+      "styleNo": "72768",
+      "name": "7G圆领长袖 菱形 加厚",
+      "imageCount": 9,
+      "skuColors": [
+        "浅浅灰",
+        "米色"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/08.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72768/09.jpg"
+      ]
+    },
+    {
+      "styleNo": "72769",
+      "name": "7G圆领长袖 人字纹 加厚",
+      "imageCount": 8,
+      "skuColors": [
+        "上青",
+        "米驼",
+        "浅浅灰"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72769/08.jpg"
+      ]
+    },
+    {
+      "styleNo": "72773",
+      "name": "7G T领长袖 麻花 加厚",
+      "imageCount": 15,
+      "skuColors": [
+        "浅军绿",
+        "淡黄",
+        "童浅兰",
+        "卡其",
+        "咖啡色",
+        "上青",
+        "灰色",
+        "枣红",
+        "奶白"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/08.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/09.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/10.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/11.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/12.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/13.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/14.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72773/15.jpg"
+      ]
+    },
+    {
+      "styleNo": "72778",
+      "name": "7G圆领长袖 花纱麻花 加厚",
+      "imageCount": 9,
+      "skuColors": [
+        "夹花驼AB",
+        "夹花灰AB",
+        "AB驼棕"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/08.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/72778/09.jpg"
+      ]
+    },
+    {
+      "styleNo": "76877",
+      "name": "18G精纺圆领长袖 单面 袖子夹条",
+      "imageCount": 9,
+      "skuColors": [
+        "黑",
+        "上青",
+        "白"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/08.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/76877/09.jpg"
+      ]
+    },
+    {
+      "styleNo": "79922",
+      "name": "9G半拉长袖 麻花 加厚",
+      "imageCount": 10,
+      "skuColors": [
+        "咖啡色",
+        "奶白",
+        "灰色",
+        "卡其"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/08.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/09.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/79922/10.jpg"
+      ]
+    },
+    {
+      "styleNo": "81029",
+      "name": "单面元领短袖 净色平板单小元领",
+      "imageCount": 26,
+      "skuColors": [
+        "珍珠杏",
+        "烟紫",
+        "欧柏绿",
+        "洋红紫",
+        "橄榄绿",
+        "白色",
+        "兰色",
+        "红焦糖",
+        "中麻灰",
+        "新翠绿",
+        "太空岩",
+        "暗橙红",
+        "伦敦雾",
+        "沙漠驼",
+        "平上青",
+        "黑色",
+        "马鞍棕",
+        "深麻灰"
+      ],
+      "sizes": [
+        "105",
+        "110",
+        "115",
+        "120",
+        "125",
+        "130"
+      ],
+      "sampleUrl": "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/01.jpg",
+      "coverUrls": [
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/01.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/02.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/03.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/04.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/05.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/06.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/07.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/08.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/09.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/10.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/11.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/12.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/13.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/14.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/15.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/16.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/17.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/18.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/19.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/20.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/21.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/22.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/23.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/24.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/25.jpg",
+        "https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/tenants/tenant_dev_001/products/81029/26.jpg"
+      ]
+    }
+  ],
+  "verify": {
+    "broken": [],
+    "ok": 121,
+    "brokenCount": 0
+  }
+}
