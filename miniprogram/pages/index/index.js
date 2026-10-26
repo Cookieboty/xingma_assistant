@@ -16,19 +16,24 @@ Page({
   },
   onShow() {
     this._captureInvite();
-    const pending = inviteUtil.readPendingInviteCode();
-    if (pending) {
-      // 分享进线后点「房子」落到首页：立刻带回邀请落地页，勿当客户登录
-      wx.reLaunch({
-        url: `/pages/invite/accept/accept?code=${encodeURIComponent(pending)}`,
-      });
-      return;
-    }
     const app = getApp();
     const role = app.globalData.role || '';
     const base = app.globalData.baseUrl || '';
     const showDevLogin = /127\.0\.0\.1|localhost/.test(base);
     const isStaff = role === 'owner' || role === 'staff';
+    let pending = inviteUtil.readPendingInviteCode();
+    // 已是档口成员：清掉残留邀请码，避免每次进首页被踢去 accept
+    if (pending && isStaff && app.globalData.token) {
+      inviteUtil.clearPendingInviteCode();
+      pending = '';
+    }
+    // 分享进线后点「房子」落到首页：立刻带回邀请落地页，勿当客户登录
+    if (pending && !isStaff) {
+      wx.reLaunch({
+        url: `/pages/invite/accept/accept?code=${encodeURIComponent(pending)}`,
+      });
+      return;
+    }
     this.setData({
       role,
       roleLabel: this.labelOf(role),

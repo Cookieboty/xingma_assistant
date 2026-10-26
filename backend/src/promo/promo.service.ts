@@ -642,7 +642,8 @@ export class PromoService implements OnModuleInit {
       Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
     );
     const bgm = findVideoBgm(input.bgmId);
-    const generateAudio = input.generateAudio === true || (input.generateAudio !== false && bgm.generateAudio);
+    // 生视频一律请上游出音；UI「无配乐」仍记 bgmId=none，但不压制 generateAudio
+    const generateAudio = true;
     const modelId =
       tpl.model === 'none' ? null : input.modelId ? String(input.modelId) : null;
     if (tpl.model === 'required' && !modelId) {
@@ -796,8 +797,8 @@ export class PromoService implements OnModuleInit {
     const colors = ((input.colors as string[]) || []).filter(Boolean);
     const beats = Array.isArray(input.beats) ? (input.beats as VideoBeat[]) : undefined;
     const bgm = findVideoBgm(input.bgmId as string | undefined);
-    const generateAudio =
-      input.generateAudio === true || (input.generateAudio !== false && bgm.generateAudio);
+    // 生视频一律请上游出音；UI「无配乐」仍记 bgmId=none，但不压制 generateAudio
+    const generateAudio = true;
     let scriptResolved = script;
     if (!scriptResolved && beats && beats.length) {
       scriptResolved = syncScriptFromBeats({

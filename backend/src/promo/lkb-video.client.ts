@@ -152,7 +152,8 @@ export class LkbVideoClient {
         resolution: req.resolution || this.defaultResolution,
         ratio: req.ratio || this.defaultRatio,
         duration,
-        generateAudio: req.generateAudio === true,
+        // 生视频必须带音轨；上游 Seedance/LKB 默认可静音，强制 true（忽略 none BGM）
+        generateAudio: true,
         watermark: req.watermark === true,
         returnLastFrame: false,
       },

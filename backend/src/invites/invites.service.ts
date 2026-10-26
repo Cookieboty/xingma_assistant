@@ -284,6 +284,22 @@ export class InvitesService {
     }
 
     const role = (invite.role === 'owner' ? 'owner' : 'staff') as InviteRole;
+    // 已是活跃成员再点邀请卡：不重复消耗次数，直接回成员身份
+    const already = await this.tenants.findMember(tenantId, openid);
+    if (already) {
+      const keepRole = (already.role === 'owner' || role === 'owner' ? 'owner' : role) as InviteRole;
+      const member =
+        keepRole !== already.role
+          ? await this.tenants.ensureMember(tenantId, openid, keepRole)
+          : already;
+      await this.tenants.setMemberInviteSource(tenantId, member.id, {
+        inviteId: invite.id,
+        inviteCode: invite.code,
+      });
+      this.logger.log(`invite re-entry code=${code} tenant=${tenantId} role=${member.role}`);
+      return { member, inviteCode: code, role: member.role as InviteRole };
+    }
+
     const member = await this.tenants.ensureMember(tenantId, openid, role);
     await this.tenants.setMemberInviteSource(tenantId, member.id, {
       inviteId: invite.id,

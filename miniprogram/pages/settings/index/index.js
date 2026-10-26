@@ -66,6 +66,11 @@ Page({
         ...inv,
         statusLabel: inviteStatusLabel(inv && inv.status),
       }));
+      // 刷新后恢复「最新有效邀请」，避免转发按钮丢 code 落到无码 accept
+      const latestInvite =
+        invites.find((inv) => inv && inv.status === 'active') ||
+        this.data.latestInvite ||
+        null;
       const nickname = (me && me.nickname) || '';
       const avatarUrl = stableMediaUrl((me && me.avatarUrl) || '') || '';
       const phone = (me && me.phone) || '';
@@ -81,6 +86,7 @@ Page({
         contactQrUrl: stableMediaUrl((tenant && tenant.contactQrUrl) || '') || '',
         members,
         invites,
+        latestInvite,
       });
     } catch (e) {
       wx.showToast({ title: e.message || '加载失败', icon: 'none' });
