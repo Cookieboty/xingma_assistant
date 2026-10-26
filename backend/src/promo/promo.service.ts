@@ -1634,11 +1634,25 @@ export class PromoService implements OnModuleInit {
       : '';
     for (const it of items) {
       if (this.itemHasResult(it)) continue;
-      const enrichedPrompt = [it.prompt, garmentPrep.garmentConstraintEn, garmentPrep.refRolesPromptEn, regenNudgeEn]
+      const slotNudgeEn =
+        count > 1
+          ? `Independent variant ${it.index + 1}/${count} (slot-${it.index + 1}): change camera angle, crop, pose micro-gesture, expression or lighting vs sibling slots; never clone the same frame; keep garment identity/color/knit texture identical.`
+          : '';
+      const slotNudgeZh =
+        count > 1
+          ? `独立变体 ${it.index + 1}/${count}（槽位${it.index + 1}）：须在机位/构图/姿势微动作/表情/光影上与同组其它张明显不同，禁止复刻同一构图；成衣款式颜色织纹不变。`
+          : '';
+      const enrichedPrompt = [
+        it.prompt,
+        garmentPrep.garmentConstraintEn,
+        garmentPrep.refRolesPromptEn,
+        slotNudgeEn,
+        regenNudgeEn,
+      ]
         .filter(Boolean)
         .join(' ');
       it.prompt = enrichedPrompt;
-      it.promptZh = [promptZhBase, regenNudgeZh].filter(Boolean).join('\n');
+      it.promptZh = [promptZhBase, slotNudgeZh, regenNudgeZh].filter(Boolean).join('\n');
     }
 
     // 风格样例：仅 style_ref；其它模板强制忽略（即便 params 残留）
@@ -1741,9 +1755,11 @@ export class PromoService implements OnModuleInit {
             },
           };
           try {
-            const seed = regenNonce
-              ? Math.abs(Array.from(regenNonce).reduce((a, ch) => ((a * 33) + ch.charCodeAt(0)) | 0, it.index + 1))
-              : undefined;
+            // 每槽独立 seed：首生多张与重生成都要可见差异（仅 regenNonce 时旧逻辑会让同次多槽无 seed → 易撞图）
+            const seedKey = `${regenNonce || legacy.id}:${it.index}`;
+            const seed = Math.abs(
+              Array.from(seedKey).reduce((a, ch) => ((a * 33) + ch.charCodeAt(0)) | 0, it.index + 17),
+            );
             const r = await this.gen.generate({
               prompt,
               size: legacy.size,
@@ -2037,55 +2053,76 @@ export class PromoService implements OnModuleInit {
           });
         }
       } else {
-        // 非多色：整组一次调用（原逻辑）
+        // 非多色：每槽单独调 Agent（与 multi_color 一致）。
+        // 旧逻辑整组一次调用后按 urlIdx 分发；上游常只回 1 张 → Math.min 夹到同一 URL，多槽变成克隆。
         const garmentUrls = garmentUrlForSlot(0);
         const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
-        const pending = items.filter((x) => !this.itemHasResult(x));
-        const lead = pending[0] || items[0];
-        const promptLead = String(lead?.prompt || lead?.promptZh || '').trim();
-        const instruction = [
-          buildTemplateBrief(lead),
-          poseTextZh ? `姿势描述：${poseTextZh}` : '',
-          sceneTextZh ? `场景描述：${sceneTextZh}` : '',
-          feature ? `商品特征：${feature}` : '',
-          styleKwZh,
-          styleNote,
-          promptLead ? `生图要求：${promptLead}` : '',
-          items.length > 1 ? `共需 ${items.length} 张不同构图/微变体，勿完全重复` : '',
-          regenNote,
-        ]
-          .filter(Boolean)
-          .join('\n')
-          .slice(0, 2400);
-        const ext = await this.externalOutfit.invoke({
-          garmentImages: combinedImages.length ? combinedImages : garmentUrls,
-          instruction: instruction || undefined,
-        });
-        await opts?.appendEvent?.('external_outfit', ext.ok ? '外部 Agent 成功' : '外部 Agent 失败', {
-          ok: ext.ok,
-          ms: ext.ms,
-          requestId: ext.requestId,
-          agentCode: ext.agentCode,
-          imageCount: ext.imageUrls.length,
-          error: ext.error,
-          engine: outfitEngine,
-        });
-
-        if (outfitEngine === 'external') {
-          if (!ext.ok || !ext.imageUrls.length) {
-            throw new Error(ext.error || '外部穿搭 Agent 未返回结果图');
+        // external：只生未出结果的槽；both：自建已出图也要再调外部做同图对比
+        const pendingSlots =
+          outfitEngine === 'both'
+            ? items.slice()
+            : items.filter((x) => !this.itemHasResult(x));
+        let extFailAll = true;
+        for (let pi = 0; pi < pendingSlots.length; pi++) {
+          const it = pendingSlots[pi];
+          if (outfitEngine === 'external' && this.itemHasResult(it)) continue;
+          const promptLead = String(it.prompt || it.promptZh || '').trim();
+          const slotNote =
+            items.length > 1
+              ? `本张是第 ${it.index + 1}/${items.length} 张独立变体（slot-${it.index + 1}）：请在机位/构图/姿势微动作/表情/光影上与同组其它张明显不同，禁止复刻同一构图；成衣保真不变。`
+              : '';
+          const instruction = [
+            buildTemplateBrief(it),
+            poseTextZh ? `姿势描述：${poseTextZh}` : '',
+            sceneTextZh ? `场景描述：${sceneTextZh}` : '',
+            feature ? `商品特征：${feature}` : '',
+            styleKwZh,
+            styleNote,
+            promptLead ? `生图要求：${promptLead}` : '',
+            slotNote,
+            regenNote,
+          ]
+            .filter(Boolean)
+            .join('\n')
+            .slice(0, 2400);
+          const ext = await this.externalOutfit.invoke({
+            garmentImages: combinedImages.length ? combinedImages : garmentUrls,
+            instruction: instruction || undefined,
+          });
+          await opts?.appendEvent?.(
+            'external_outfit',
+            ext.ok ? `外部 Agent 槽${it.index + 1}成功` : `外部 Agent 槽${it.index + 1}失败`,
+            {
+              ok: ext.ok,
+              ms: ext.ms,
+              requestId: ext.requestId,
+              agentCode: ext.agentCode,
+              imageCount: ext.imageUrls.length,
+              error: ext.error,
+              engine: outfitEngine,
+              slotIndex: it.index,
+              pendingOrdinal: pi,
+            },
+          );
+          if (ext.ok && ext.imageUrls.length) extFailAll = false;
+          // 每次调用只取本响应第 0 张，避免再按组内下标复用同一结果
+          applyExternalToItem(it, ext, 0);
+          if (outfitEngine === 'external' && (it as any)._extUrl) {
+            await downloadExtToItem(it, String((it as any)._extUrl));
+            delete (it as any)._extUrl;
           }
-          for (let i = 0; i < items.length; i++) {
-            const it = items[i];
-            if (this.itemHasResult(it)) continue;
-            applyExternalToItem(it, ext, i);
-            if ((it as any)._extUrl) {
-              await downloadExtToItem(it, String((it as any)._extUrl));
-              delete (it as any)._extUrl;
-            }
-          }
-        } else {
-          for (const it of items) applyExternalToItem(it, ext, 0);
+          await opts?.onProgress?.({
+            percent: Math.min(98, 92 + Math.round(((pi + 1) / Math.max(1, pendingSlots.length)) * 6)),
+            step: 'external_outfit',
+            message: `外部 Agent 生图 ${pi + 1}/${pendingSlots.length}`,
+            done: items.filter((x) => x.status === 'done').length,
+            total: items.length,
+          });
+        }
+        if (outfitEngine === 'external' && pendingSlots.length && extFailAll) {
+          throw new Error(
+            pendingSlots.find((x) => x.error)?.error || '外部穿搭 Agent 未返回结果图',
+          );
         }
       }
     }
