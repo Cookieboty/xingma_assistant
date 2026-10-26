@@ -1,4 +1,4 @@
-# 羊毛衫档口小程序 — 技术说明（TECH）
+# 星马档口助手 — 技术说明（TECH）
 
 > 与当前仓库实现对齐。密钥**只写变量名，不写值**。下列接口与表均为已落地。
 
@@ -11,11 +11,11 @@
            │ HTTPS + JWT + X-Wx-Appid
            ▼
 NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
-  ├─ login/auth/wechat/tenants
+  ├─ login/auth/wechat/tenants/invites
   ├─ products + publish + product-access
-  ├─ promo（模板/生图/promo_sets）
-  ├─ jobs（scheduler + handlers）
-  ├─ media + OssClient
+  ├─ promo（图/视频、LKB、外部穿搭、promo_sets）
+  ├─ jobs（scheduler + handlers：promo_image/promo_video/…）
+  ├─ media + OssClient + external-play（外部视频同域中转）
   ├─ vision（封面/发品识图）
   └─ customers / levels / shares / inquiries
            │
@@ -34,7 +34,7 @@ NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
 
 ## 2. 数据表（migrations）
 
-按序执行：
+按序执行 `001`…`017`：
 
 | 文件 | 内容 |
 |------|------|
@@ -48,14 +48,21 @@ NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
 | `008_product_groups.sql` | `product_groups`；`products.group_id`；种子本季/过季 |
 | `009_member_invites.sql` | `member_invites`（邀请码/角色/次数/过期/小程序码 key） |
 | `010_share_limit_slots.sql` | `share_events.slot_limit` + `share_event_bindings`（限制分享前 N 位） |
+| `011_tenant_allow_customer_download.sql` | `tenants.allow_customer_download` |
+| `012_inquiry_contact.sql` | 询价 phone / contact_name / remark |
+| `013_inquiry_staff_read.sql` | staff_read_at / handled_note |
+| `014_audit_logs_and_soft_delete.sql` | audit_logs + 软删 |
+| `015_media_asset_meta.sql` | media_assets.meta、products.ref_analysis |
+| `016_member_invite_source.sql` | tenant_members.invite_id / invite_code |
+| `017_inquiry_handler.sql` | 询价处理人 assignee_openid / assignee_name |
 
 ### 关键字段速记
 
 **products**：`style_no`（租户内唯一）、`cover_media_ids`（JSON 图序）、`share_policy`、`allow_customer_download`、`price_display`、`status`（`on_sale|off_sale|draft`）、`level_id`、`group_id`
 
-**jobs**：`type`（`publish_product|promo_image|cover_reselect|…`）、`status`、`progress` JSON、`payload`/`result`、`attempts`/`max_attempts`、`next_run_at`
+**jobs**：`type`（`publish_product|promo_image|promo_video|cover_reselect|media_analyze|…`）、`status`、`progress` JSON、`payload`/`result`、`attempts`/`max_attempts`、`next_run_at`
 
-**promo_sets**：`template_id`、`params`、`caption`、`job_id`、`status`（`generating|done|partial|failed`）、`images` JSON
+**promo_sets**：`template_id`、`params`（含 kind=image|video、generateAudio、beats/bgmId）、`caption`、`job_id`、`status`、`images` JSON（可含 objectKey 或 externalUrl/url 直链）
 
 **media_assets**：`object_key`、`provider`、`product_id`、`promo_set_id`
 
@@ -154,7 +161,7 @@ NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
 | `/shares` | POST 创建；GET `:shareId/open` 首访绑定 |
 | `/customers` | 列表/等级/跟进/例外规则 |
 | `/levels/customer|product` | 等级 CRUD |
-| `/inquiries` | 询价 |
+| `/inquiries` | 询价；`POST :id/claim` / `POST :id/handled`；`unread-summary` / `mark-read` |
 | `/media/upload-credential` `/media/sign` | 上传凭证与签名 |
 
 ---
@@ -179,19 +186,22 @@ NestJS API (:3000，生产 Nginx → https://xingma.visitworld.me/api/*)
 
 batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
-### 4.2 宣传素材组
+### 4.2 宣传素材组（图 + 视频）
 
 ```
 详情「宣传素材」→ promo-gallery →「新建」→ promo 向导
-  → POST …/promo/generate
-  → 写 promo_sets(status=generating) + jobs(type=promo_image)
-  → handler 调 IMAGE_GEN_* → 回写 images/caption/media
-  → 列表轮询；可整组/单张 regenerate；caption 复制；勾选存相册
+  图：POST …/promo/generate → promo_sets + jobs(promo_image)
+      → IMAGE_GEN 和/或 OUTFIT Agent → images/caption
+  视频：视频模板 → video-script（可编 beats）→ generate(mediaKind=video)
+      → promo_sets(kind=video) + jobs(promo_video)
+      → LKB rsync + poll → SUCCEEDED 直链入库（不转存自有 OSS）
+      → 播放 URL 经 /api/media/external-play 同域中转（非自有桶）
+  → 轮询；regenerate；caption；存相册
 ```
 
-详情页缩略：`GET …/promo/sets` 取 thumb 展示，点击带 setId 进 gallery。
-
-风格样例（已实现）：向导「选参考图」卡内可选上传 0～4 张 + 强弱弱/中/强；API `styleRefObjectKeys` / `styleStrength`；见 [PROMO_REF_IMAGE_DESIGN.md](./PROMO_REF_IMAGE_DESIGN.md)。 另有专用模板 `style_ref`（风格样例必传 + 关键词识图）；见 [生图模板设计.md](./生图模板设计.md)。
+- 生视频 **`generateAudio=true` 恒开**（`bgmId=none` 仅留痕）。
+- 风格参考模板 `style_ref`：见 [PROMO_REF_IMAGE_DESIGN.md](./PROMO_REF_IMAGE_DESIGN.md)、[生图模板设计.md](./生图模板设计.md)。
+- 外部穿搭直链：见 [PROMO_EXTERNAL_OUTFIT.md](./PROMO_EXTERNAL_OUTFIT.md)。
 
 ### 4.3 限制分享 / 公开分享
 
@@ -207,10 +217,12 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 ### 4.5 员工/业主邀请
 
 ```
-业主 设置→生成邀请(role) → member_invites + getwxacodeunlimit(scene=c=CODE)
-邀请人扫码 → pages/invite/accept → wx.login + POST /auth/login{inviteCode}
-  → acceptByCode → tenant_members(role) → JWT owner|staff → 工作台
+设置→生成邀请 → member_invites + wxacode(scene=c=CODE)
+扫码/转发 → app 捕获 code → invite/accept（或首页跳转）
+  → login{inviteCode} → tenant_members → 工作台
 ```
+
+设置页「邀请记录」：**单行 nowrap**；码 + 中文状态/已用；右侧「邀请」「撤销」紧挨（小 gap）。勿与客户商品分享混淆。
 
 ### 4.4 封面选择（禁下图）
 
@@ -244,7 +256,7 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 | 项 | 位置 / 值 |
 |----|-----------|
 | baseUrl / appId | `miniprogram/app.js` → 生产 `https://xingma.visitworld.me` / `wx394d23ea099d8a01` |
-| Tab | 商品 list、客户 list、任务 jobs/list |
+| Tab | 商品 / 客户 / 任务 / 设置 |
 | 请求封装 | `utils/request.js`（带 token、`X-Wx-Appid`、静默 login） |
 | 存相册 | `utils/saveAlbum.js` |
 | SKU UI | `components/sku-list` |
@@ -262,6 +274,16 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 - 新上传（服务端 put / PostObject）带 `x-oss-object-acl: public-read`。
 - 若改回私有桶：设 `OSS_PUBLIC_READ=0`、`OSS_OBJECT_ACL=private`，读链接恢复短时签名 GET（`OSS_SIGNED_URL_EXPIRES`，默认 1h）。
 - `MEDIA_SERVE_LOCAL=1` 时可强制回退同域 `/media/`（微信未配 OSS 域名时）。
+
+### 外部结果直链（不转存 OSS）
+
+| 场景 | 行为 |
+|------|------|
+| LKB 视频 SUCCEEDED | 持久化上游 videoUrl → images[].url/externalUrl；media `provider=external`；不 put 自有 OSS |
+| 外部穿搭出图 | http(s) 直链入库；非 URL 才回退下载+OSS |
+| 播视频 | `itemPlayUrl(..., { proxyExternal: true })` → 非本站/自有 OSS host 时改写为 `GET /api/media/external-play?u&e&s`（HMAC 流式转发，无 JWT） |
+
+实现：`media.service`（`buildExternalPlayUrl` / `verifyExternalPlayToken` / `isAlreadyPlayableHost`）、`media-external-play.controller.ts`、`promo.service` itemPlayUrl。
 
 ---
 
@@ -328,36 +350,19 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 
 ---
 
-## 8. 目标态设计（未实现或仅占位）
+## 8. 已落地补充 & 仍可迭代
 
-### 8.1 客户昵称 / 头像
+### 8.1 客户资料 / 订阅 / 业主二维码
 
-- **表**：`customer_profiles.nickname` / `avatar_url` 已存在  
-- **缺口**：landing 或详情引导 `getUserProfile` / 头像昵称填写 → `PATCH` 客户资料 API（若缺则补 staff/self 可写接口）  
-- **约束**：拒绝授权不阻断 `open` 与看商品  
+均已落地（软完善资料、订阅可配、设置页联系二维码）。拒绝授权不阻断看货。
 
-### 8.2 订阅消息
+### 8.2 宣传视频（LKB）— 已落地
 
-- 在 mp 后台申请模板；后端存 `touser` openid + template_id  
-- 任务 `succeeded` 时可选下发（员工）；需用户先 `requestSubscribeMessage`  
-- 失败只记日志，不影响 job 状态  
+见 §4.2：rsync+poll、`generateAudio=true`、直链不转存 OSS、external-play 播放。模板含 product_showcase / street_walk / multi_color_outfit / cafe_lifestyle / detail_macro。密钥 `VIDEO_LKB_*` / `.secrets/lkb-video-agent.key`。兜底 `VIDEO_ENGINE=xytoken`。
 
-### 8.3 业主二维码
+### 8.3 仍可迭代
 
-- `tenants` 或业主成员扩展 `qr_media_id` / URL  
-- 设置页上传走现有 media  
-- 客户详情「联系业主」读该字段；空则占位  
-
-### 8.4 宣传视频组（v2：LKB 单段竖屏）
-
-- 业主 **task** = 一次视频动作（`promo_sets.params.kind=video`）；底层 `promo_video` job 不单独暴露为业主任务。  
-- 流程：选商品图 → 可选卖点/特征 → `POST …/promo/video-script` 自动短分镜（可编辑）→ `POST …/promo/generate` → 一条 9:16、约 8–12s → gallery。  
-- **成片不转存自有 OSS**：LKB `SUCCEEDED` 的 `result.artifacts[].uri` 直链写入 `promo_sets.images[].externalUrl` / `media_assets`（`provider=external`，`objectKey`=完整 URL）；时长取上游 `parameters.duration`。非 LKB 引擎仍可本地落盘+OSS。  
-- 播放：列表/详情 `itemPlayUrl` 对外部视频返回同域 ` /api/media/external-play`（HMAC，不落盘）；避免小程序因 LKB 桶（如 `xy-tradex.oss-cn-shenzhen.aliyuncs.com`）未进 downloadFile 白名单而在 Mac/真机无法播。  
-- 上游默认 **LKB** `sinan-video-generator`：`POST /api/invocations/rsync` + poll；`videoGeneration`：`FREE` 或 `FIRST_LAST_FRAME`（有商品图作 `first_frame`），`ratio=9:16`，`resolution=720p`，**`generateAudio=true`**（忽略 none BGM）。密钥：`backend/.secrets/lkb-video-agent.key`（或 `VIDEO_LKB_AGENT_KEY` / `LKB_AGENT_CALL_KEY`），**不入仓**。  
-- 视频模板：挂拍静物 / 街头漫步 / 多色换装 / 咖啡馆生活感 / 织纹特写；参考图上限 9；街头/生活感/多色可选手模；分镜 beats 可编辑。  
-- 兜底：`VIDEO_ENGINE=xytoken` 走原 Seedance `/v1/videos`。  
-- 一期单段，不做多镜拼接。OUTFIT 仍走外部穿搭 Agent，与视频密钥分离。  
+配乐按曲目选择（今日仅布尔出音 + bgmId 留痕）；外部穿搭并排预览增强；多镜拼接长视频。
 
 ---
 
@@ -371,7 +376,11 @@ batch：内存 Map，TTL≈2h；主路径可不停留在确认页。
 | 任务标题 | `src/jobs/job-display-title.ts` |
 | OSS | `src/media/oss.client.ts` |
 | 访问控制 | `src/products/product-access.service.ts` |
-| 邀请 | `src/invites/` `pages/invite/accept` `pages/settings` |
+| 邀请 | `src/invites/` `pages/invite/accept` `pages/settings`（邀请记录单行 UI） |
+| 询价处理 | `src/inquiries/` `pages/inquiry/` `pages/customer/` |
+| 客户目录 | `pages/product/catalog/` `pages/product/view/` |
+| 外部视频中转 | `src/media/media-external-play.controller.ts` `media.service.ts` |
+| LKB 视频 | `src/promo/lkb-video.client.ts` |
 
 
 

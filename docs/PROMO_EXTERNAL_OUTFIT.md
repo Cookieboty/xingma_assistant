@@ -82,13 +82,14 @@ OUTFIT_ENGINE=both
 ```
 
 - 默认仍以 `self` 结果作为主图槽位（`objectKey` / 列表展示）。
-- `external.imageUrls` 一并返回给前端，便于并排预览（前端 UI 可后补）。
+- `OUTFIT_ENGINE=external`（或 both 的 external 侧）：上游返回的 **http(s) 直链直接入库/展示**，与 LKB 视频相同策略——**不下载、不转存自有 OSS**（`images[].url` / media `provider=external`）。
+- `external.imageUrls` 一并返回给前端，便于并排预览。
 - 外部失败不阻断 self（`both` 模式）；`external` 单引擎失败则任务失败。
 
 ## 7. 验收清单
 
 - [ ] 本机放入 Token，不出现在 git diff
 - [ ] `OUTFIT_ENGINE=self`：行为与羊毛衫专用流程一致
-- [ ] `OUTFIT_ENGINE=external`：仅外部，结果 URL 入库
+- [ ] `OUTFIT_ENGINE=external`：仅外部，结果 URL 直链入库（无强制 OSS 转存）
 - [ ] `OUTFIT_ENGINE=both`：同参考图双跑，`compare` 两侧都有记录
 - [ ] 未配置 Key 时 external/both 有明确中文错误，不 500 堆栈泄露
