@@ -184,16 +184,6 @@ Page({
   async retry(e) {
     const id = e.currentTarget.dataset.id;
     const row = (this.data.list || []).find((j) => j.id === id) || {};
-    if (row.orphanPromoSet || String(id || '').indexOf('orphan_') === 0) {
-      const pid = row.productId || '';
-      const sid = row.setId || String(id || '').replace(/^orphan_/, '');
-      if (pid && sid) {
-        wx.navigateTo({
-          url: `/pages/product/promo-gallery/promo-gallery?id=${pid}&setId=${sid}`,
-        });
-        return;
-      }
-    }
     try {
       await request({ url: `/api/jobs/${id}/retry`, method: 'POST', data: {} });
       wx.showToast({ title: row.retryLabel === '重新生成' ? '已开始重新生成' : '已重新排队', icon: 'none' });
@@ -238,6 +228,12 @@ Page({
     const pid = productId || row.productId || '';
     const sid = setId || row.setId || '';
     const gen = isGen || row.isGenType;
+    // 失败/取消：进任务详情（有「重新生成」）；成功/进行中仍进素材组
+    const needJobOps = row.status === 'failed' || row.status === 'cancelled';
+    if (needJobOps && id) {
+      wx.navigateTo({ url: `/pages/jobs/detail/detail?id=${id}` });
+      return;
+    }
     if (gen && pid && sid) {
       wx.navigateTo({
         url: `/pages/product/promo-gallery/promo-gallery?id=${pid}&setId=${sid}`,

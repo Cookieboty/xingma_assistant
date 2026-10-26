@@ -75,6 +75,8 @@ function enrichJob(j) {
     retryLabel: j.status === 'cancelled'
       ? '重跑'
       : (j.type === 'promo_image' || j.type === 'promo_video' ? '重新生成' : '重试'),
+    isOrphan: !!(j.orphanPromoSet || String(j.id || '').indexOf('orphan_') === 0),
+    canOpenGallery: !!(isGenType && productId),
     busy,
     doneTotal,
     percent: Number(progress.percent) || 0,
@@ -116,14 +118,20 @@ Page({
     try {
       const jobRaw = await request({ url: `/api/jobs/${id}` });
       const job = enrichJob(jobRaw || {});
-      // 业主：生图/视频任务详情 = 素材组槽位页，不展示框架 job 堆
-      if (job.isGenType && job.productId && job.setId) {
+      // orphan 重试后后端返回真实 jobId：同步到本页，避免继续打 orphan_
+      if (job.id && job.id !== id && String(id).indexOf('orphan_') === 0) {
+        this.setData({ id: job.id });
+      }
+      // 失败/取消：留在任务详情，展示「重新生成」（不再强跳素材页导致无按钮）
+      // 排队/在做/完成的生图视频：仍进素材组槽位页
+      const needOps = job.status === 'failed' || job.status === 'cancelled';
+      if (!needOps && job.isGenType && job.productId && job.setId) {
         wx.redirectTo({
           url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}&setId=${job.setId}`,
         });
         return;
       }
-      if (job.isGenType && job.productId) {
+      if (!needOps && job.isGenType && job.productId) {
         wx.redirectTo({
           url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}`,
         });
@@ -139,11 +147,25 @@ Page({
     }
   },
 
+  openGallery() {
+    const job = this.data.job || {};
+    if (!job.productId) return;
+    const sid = job.setId ? `&setId=${job.setId}` : '';
+    wx.navigateTo({
+      url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}${sid}`,
+    });
+  },
+
   async retry() {
     const id = this.data.id;
+    const job = this.data.job || {};
     try {
-      await request({ url: `/api/jobs/${id}/retry`, method: 'POST', data: {} });
-      wx.showToast({ title: '已重新排队', icon: 'none' });
+      const res = await request({ url: `/api/jobs/${id}/retry`, method: 'POST', data: {} });
+      if (res && res.id && res.id !== id) {
+        this.setData({ id: res.id });
+      }
+      const label = job.retryLabel === '重新生成' || job.isGenType ? '已开始重新生成' : '已重新排队';
+      wx.showToast({ title: label, icon: 'none' });
       this.load();
     } catch (err) {
       wx.showToast({ title: err.message || '重试失败', icon: 'none' });
