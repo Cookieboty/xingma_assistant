@@ -1,6 +1,6 @@
 /**
  * 员工/业主邀请落地：小程序码 scene=c=CODE 或 query invite/code
- * 微信登录 → 带 inviteCode 换 JWT → 绑定成员 → 补齐缺失资料（已有字段跳过）→ 进工作台
+ * 微信登录 → 带 inviteCode 换 JWT → 绑定成员 → 强制补齐头像+昵称（缺一不可；手机选填）→ 进工作台
  */
 const { request } = require('../../../utils/request');
 const inviteUtil = require('../../../utils/invite');
@@ -112,9 +112,8 @@ Page({
     const miss = missingProfileFields(me);
     const needAvatar = miss.indexOf('avatar') >= 0;
     const needNickname = miss.indexOf('nickname') >= 0;
-    const needPhone = miss.indexOf('phone') >= 0;
-    // 邀请加入：头像+昵称必填（已有则跳过）；手机也要求，已有则跳过
-    if (!needAvatar && !needNickname && !needPhone) {
+    // 邀请加入：头像+昵称强制（缺一不可）；手机选填，不挡进入
+    if (!needAvatar && !needNickname) {
       this.enterWorkbench();
       return;
     }
@@ -122,7 +121,7 @@ Page({
       needProfile: true,
       needAvatar,
       needNickname,
-      needPhone,
+      needPhone: false,
       nickname: (me && me.nickname) || '',
       avatarUrl: stableMediaUrl((me && me.avatarUrl) || '') || '',
       phone: (me && me.phone) || '',
@@ -169,30 +168,24 @@ Page({
   },
   async saveProfileAndEnter() {
     if (this.data.saving) return;
-    const needAvatar = this.data.needAvatar;
-    const needNickname = this.data.needNickname;
-    const needPhone = this.data.needPhone;
     const nickname = (this.data.nickname || '').trim();
     const avatarUrl = (this.data.avatarUrl || '').trim();
     const phone = (this.data.phone || '').trim();
-    if (needAvatar && !avatarUrl) {
+    // 头像+昵称缺一不可（已有字段也会带上，保证两端都齐）
+    if (!avatarUrl) {
       wx.showToast({ title: '请选择微信头像', icon: 'none' });
       return;
     }
-    if (needNickname && !nickname) {
+    if (!nickname) {
       wx.showToast({ title: '请填写昵称', icon: 'none' });
-      return;
-    }
-    if (needPhone && !phone) {
-      wx.showToast({ title: '请授权或填写手机号', icon: 'none' });
       return;
     }
     this.setData({ saving: true });
     try {
       const payload = {};
-      if (needNickname || nickname) payload.nickname = nickname;
-      if (needAvatar || avatarUrl) payload.avatarUrl = avatarUrl;
-      if (needPhone || phone) payload.phone = phone;
+      payload.nickname = nickname;
+      payload.avatarUrl = avatarUrl;
+      if (phone) payload.phone = phone;
       payload.uploadAvatarIfTemp = true;
       await saveProfileWithAvatarUpload(payload);
       this.setData({ needProfile: false, saving: false });

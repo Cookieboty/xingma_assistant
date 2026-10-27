@@ -5,12 +5,10 @@
 const { request, ensureSilentSession } = require('../../../utils/request');
 const {
   hasContactInfo,
+  hasAvatarAndNickname,
   isContactPrompted,
   markContactPrompted,
-  isProfileComplete,
-  isProfilePrompted,
   markProfilePrompted,
-  missingProfileFields,
   saveProfileWithAvatarUpload,
   stableMediaUrl,
 } = require('../../../utils/profile');
@@ -170,7 +168,7 @@ Page({
     });
   },
 
-  /** 预填联系方式；首次打开软提示完善资料（头像+昵称+手机，可跳过） */
+  /** 预填联系方式；缺头像或昵称则强制完善（缺一不可，不可跳过）；手机选填 */
   async loadProfileForInquiry() {
     try {
       const me = await request({ url: '/api/auth/me' });
@@ -186,52 +184,34 @@ Page({
         profileDraftNick: name,
         profileDraftPhone: phone,
       });
-      // 缺啥补啥：已有头像/昵称不重复催；仅缺项弹层（可跳过，不挡看货）
-      const miss = missingProfileFields(me);
-      if (isProfileComplete(me)) {
+      if (hasAvatarAndNickname(me)) {
         markProfilePrompted();
-        markContactPrompted();
-      } else if (!isProfilePrompted() && miss.length) {
-        const needAvatar = miss.indexOf('avatar') >= 0;
-        const needNickname = miss.indexOf('nickname') >= 0;
-        const needPhone = miss.indexOf('phone') >= 0;
-        let title = '完善资料';
-        let desc = '只补还缺的项；可跳过，看货不受影响';
-        if (miss.length === 1 && needPhone) {
-          title = '补一下手机号';
-          desc = '方便档口联系你；可用微信一键授权，也可跳过';
-        } else if (!needAvatar && !needNickname && needPhone) {
-          title = '补一下手机号';
-          desc = '头像昵称已有；还差手机号（可跳过）';
-        }
+        if (hasContactInfo(me)) markContactPrompted();
+      } else {
+        // 强制：遮罩挡交互直至头像+昵称都齐；手机不强制
         this.setData({
           showProfileSheet: true,
           showSoftTip: false,
-          needProfileAvatar: needAvatar,
-          needProfileNickname: needNickname,
-          needProfilePhone: needPhone,
-          profileSheetTitle: title,
-          profileSheetDesc: desc,
+          needProfileAvatar: true,
+          needProfileNickname: true,
+          needProfilePhone: false,
+          profileSheetTitle: '完善微信资料',
+          profileSheetDesc: '请授权微信头像和昵称（缺一不可），方便档口认出你',
         });
-      } else if (!hasContactInfo(me) && !isContactPrompted()) {
+        return;
+      }
+      if (!hasContactInfo(me) && !isContactPrompted()) {
         this.setData({ showSoftTip: true });
       } else if (hasContactInfo(me)) {
         markContactPrompted();
       }
     } catch (e) {
-      /* 不阻断看货 */
+      /* 档案拉取失败时不挡看货；下次进入再试强制资料 */
     }
   },
+  /** 兼容旧绑定：强制模式下不可跳过 */
   skipProfileSheet() {
-    markProfilePrompted();
-    this.setData({ showProfileSheet: false });
-    // 仍无联系方式时给询价轻提示
-    if (!hasContactInfo({
-      phone: this.data.profilePhone || this.data.profileDraftPhone,
-      nickname: this.data.profileName || this.data.profileDraftNick,
-    }) && !isContactPrompted()) {
-      this.setData({ showSoftTip: true });
-    }
+    wx.showToast({ title: '请先完善头像和昵称', icon: 'none' });
   },
   onProfileChooseAvatar(e) {
     const url = (e.detail && e.detail.avatarUrl) || '';
@@ -278,8 +258,12 @@ Page({
     const nickname = (this.data.profileDraftNick || '').trim();
     const phone = (this.data.profileDraftPhone || '').trim();
     const avatarUrl = (this.data.profileAvatarUrl || '').trim();
-    if (!nickname && !phone && !avatarUrl) {
-      wx.showToast({ title: '可先填一项，或点跳过', icon: 'none' });
+    if (!avatarUrl) {
+      wx.showToast({ title: '请选择微信头像', icon: 'none' });
+      return;
+    }
+    if (!nickname) {
+      wx.showToast({ title: '请填写微信昵称', icon: 'none' });
       return;
     }
     if (phone && !/^1\d{10}$/.test(phone) && !/^\+?\d{6,20}$/.test(phone)) {
@@ -289,9 +273,9 @@ Page({
     this.setData({ profileSaving: true });
     try {
       const saved = await saveProfileWithAvatarUpload({
-        nickname: nickname || undefined,
+        nickname,
         phone: phone || undefined,
-        avatarUrl: avatarUrl || undefined,
+        avatarUrl,
         uploadAvatarIfTemp: true,
       });
       markProfilePrompted();
@@ -299,14 +283,19 @@ Page({
       const nextNick = (saved && saved.nickname) || nickname;
       const nextPhone = (saved && saved.phone) || phone;
       const nextAvatar = (saved && saved.avatarUrl) || avatarUrl;
+      if (!hasAvatarAndNickname({ nickname: nextNick, avatarUrl: nextAvatar })) {
+        this.setData({ profileSaving: false });
+        wx.showToast({ title: '头像和昵称都要填', icon: 'none' });
+        return;
+      }
       this.setData({
         showProfileSheet: false,
         profileSaving: false,
-    needProfileAvatar: false,
-    needProfileNickname: false,
-    needProfilePhone: false,
-    profileSheetTitle: '完善资料',
-    profileSheetDesc: '',
+        needProfileAvatar: false,
+        needProfileNickname: false,
+        needProfilePhone: false,
+        profileSheetTitle: '完善资料',
+        profileSheetDesc: '',
         profileName: nextNick,
         profilePhone: nextPhone,
         profileAvatarUrl: nextAvatar,

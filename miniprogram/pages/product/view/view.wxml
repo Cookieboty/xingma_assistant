@@ -82,11 +82,11 @@
   </view>
 
 
-  <!-- 首次打开软提示完善资料（可跳过，不挡看货） -->
+  <!-- 强制完善微信头像+昵称（缺一不可，不可跳过）；手机不在此强制 -->
   <view class="contact-mask" wx:if="{{showProfileSheet}}" catchtouchmove="noop">
     <view class="contact-sheet profile-sheet" catchtap="noop">
-      <view class="contact-sheet-title">{{profileSheetTitle || '完善资料'}}</view>
-      <view class="contact-sheet-desc">{{profileSheetDesc || '只补还缺的项；可跳过'}}</view>
+      <view class="contact-sheet-title">{{profileSheetTitle || '完善微信资料'}}</view>
+      <view class="contact-sheet-desc">{{profileSheetDesc || '请授权微信头像和昵称（缺一不可）'}}</view>
       <view class="profile-sheet-row">
         <button
           wx:if="{{needProfileAvatar}}"
@@ -103,7 +103,7 @@
             class="contact-input"
             type="nickname"
             maxlength="32"
-            placeholder="昵称 / 怎么称呼"
+            placeholder="点选微信昵称"
             value="{{profileDraftNick}}"
             bindblur="onProfileNick"
             bindinput="onProfileNick"
@@ -113,7 +113,7 @@
               class="contact-input profile-phone-input"
               type="number"
               maxlength="20"
-              placeholder="手机号"
+              placeholder="手机号（选填）"
               value="{{profileDraftPhone}}"
               bindinput="onProfilePhone"
             />
@@ -126,8 +126,7 @@
         </view>
       </view>
       <view class="contact-sheet-actions">
-        <view class="contact-btn ghost" bindtap="skipProfileSheet">跳过</view>
-        <view class="contact-btn primary" bindtap="saveProfileSheet">{{profileSaving ? '保存中…' : '保存'}}</view>
+        <view class="contact-btn primary" style="flex:1;" bindtap="saveProfileSheet">{{profileSaving ? '保存中…' : '保存并继续'}}</view>
       </view>
     </view>
   </view>

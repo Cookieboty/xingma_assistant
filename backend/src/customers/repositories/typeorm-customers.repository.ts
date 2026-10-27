@@ -44,6 +44,10 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
 
   async list(tenantId: string, opts?: { levelId?: string; q?: string }) {
     const qb = this.customers.createQueryBuilder('c').where('c.tenant_id = :tenantId', { tenantId });
+    // 列表：头像或昵称任一即可；两者皆无则不展示（不强制手机、不去重）
+    qb.andWhere(
+      "((c.avatar_url IS NOT NULL AND TRIM(c.avatar_url) <> '') OR (c.nickname IS NOT NULL AND TRIM(c.nickname) <> ''))",
+    );
     if (opts?.levelId) qb.andWhere('c.level_id = :levelId', { levelId: opts.levelId });
     if (opts?.q) {
       qb.andWhere('(c.nickname LIKE :q OR c.openid LIKE :q OR c.phone LIKE :q)', {

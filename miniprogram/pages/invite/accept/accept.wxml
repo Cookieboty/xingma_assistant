@@ -16,11 +16,10 @@
 
   <view class="card" wx:elif="{{needProfile}}">
     <view class="section">完善资料后进入</view>
-    <view class="muted">已有的项会跳过；同事要靠头像/昵称认出你</view>
+    <view class="muted">请授权微信头像和昵称（缺一不可）；手机选填</view>
 
-    <view class="profile-row" wx:if="{{needAvatar || needNickname}}" style="margin-top:20rpx;">
+    <view class="profile-row" style="margin-top:20rpx;">
       <button
-        wx:if="{{needAvatar}}"
         class="avatar-pick"
         open-type="chooseAvatar"
         bind:chooseavatar="onChooseAvatar"
@@ -28,9 +27,7 @@
         <image wx:if="{{avatarUrl}}" src="{{avatarUrl}}" class="avatar-preview" mode="aspectFill" />
         <view wx:else class="avatar-pick-inner"><text>选头像</text></view>
       </button>
-      <image wx:elif="{{avatarUrl}}" src="{{avatarUrl}}" class="avatar-preview" mode="aspectFill" />
       <input
-        wx:if="{{needNickname}}"
         class="input nick-input"
         type="nickname"
         placeholder="点选微信昵称"
@@ -38,11 +35,10 @@
         bindblur="onNickname"
         bindinput="onNickname"
       />
-      <view wx:elif="{{nickname}}" class="muted">昵称：{{nickname}}</view>
     </view>
 
     <view class="phone-row" wx:if="{{needPhone}}" style="margin-top:16rpx;">
-      <input class="input" placeholder="手机号" value="{{phone}}" bindinput="onPhoneInput" />
+      <input class="input" placeholder="手机号（选填）" value="{{phone}}" bindinput="onPhoneInput" />
       <button
         class="phone-wx-link"
         open-type="getPhoneNumber"
