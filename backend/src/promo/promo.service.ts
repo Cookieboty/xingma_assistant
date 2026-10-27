@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
@@ -326,21 +326,114 @@ export class PromoService implements OnModuleInit {
   }
 
   // ---------- 素材 ----------
+  private isPromoObjectKey(objectKey: string) {
+    return String(objectKey || '').includes('/promo/');
+  }
+
+  /**
+   * 本商品可用参考图：productId 命中 ∪ coverMediaIds（兼容 recreate / 未绑 productId 的旧图）。
+   * 宣传图（/promo/ 或 promoSetId）排除。
+   */
   private async productAssets(user: AuthContext, productId: string) {
     const product: any = await this.products.getDetail(user, productId);
     let assets: Array<{ id: string; objectKey: string; meta?: Record<string, unknown> | null }> = [];
     if (this.dataSource && process.env.DB_ENABLED === 'true') {
-      const rows = await this.dataSource
-        .getRepository(MediaAsset)
-        .find({ where: { tenantId: user.tenantId, productId, status: 'active', type: 'image' } });
-      const order: string[] = product.coverMediaIds || [];
+      const repo = this.dataSource.getRepository(MediaAsset);
+      const coverIds: string[] = ((product.coverMediaIds || []) as string[]).filter(Boolean);
+      const [byProduct, byCover] = await Promise.all([
+        repo.find({ where: { tenantId: user.tenantId, productId, status: 'active', type: 'image' } }),
+        coverIds.length
+          ? repo.find({ where: { tenantId: user.tenantId, id: In(coverIds), status: 'active', type: 'image' } })
+          : Promise.resolve([] as MediaAsset[]),
+      ]);
+      const byId = new Map<string, MediaAsset>();
+      for (const r of byProduct) {
+        if (this.isPromoObjectKey(r.objectKey) || r.promoSetId) continue;
+        byId.set(r.id, r);
+      }
+      for (const r of byCover) {
+        if (this.isPromoObjectKey(r.objectKey) || r.promoSetId) continue;
+        if (r.productId !== productId) {
+          r.productId = productId;
+          try {
+            await repo.save(r);
+          } catch (e: any) {
+            this.logger.warn(`rebind media.productId ${r.id}→${productId}: ${e?.message || e}`);
+          }
+        }
+        byId.set(r.id, r);
+      }
+      const rows = [...byId.values()];
+      const order: string[] = coverIds;
       rows.sort((a, b) => {
-        const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
+        const ia = order.indexOf(a.id),
+          ib = order.indexOf(b.id);
         return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib) || a.objectKey.localeCompare(b.objectKey);
       });
       assets = rows.map((r) => ({ id: r.id, objectKey: r.objectKey, meta: (r as any).meta || null }));
     }
     return { product, assets };
+  }
+
+  /**
+   * 解析 referenceAssetIds。
+   * 归属：productId / coverMediaIds / objectKey 落在 products/{styleNo}/（非 promo）。
+   * healStale：recreate 后旧 media 已删时，按序用本商品现图顶替（整组失效才 heal）。
+   * 真正外键/他品图：抛清晰错误。
+   */
+  private async resolveReferenceAssets(
+    user: AuthContext,
+    product: any,
+    assets: Array<{ id: string; objectKey: string; meta?: Record<string, unknown> | null }>,
+    refIds: string[],
+    opts?: { healStale?: boolean },
+  ): Promise<Array<{ id: string; objectKey: string; meta?: Record<string, unknown> | null }>> {
+    const byId = new Map(assets.map((a) => [a.id, a]));
+    const missing = refIds.filter((id) => !byId.has(id));
+    if (missing.length && this.dataSource && process.env.DB_ENABLED === 'true') {
+      const repo = this.dataSource.getRepository(MediaAsset);
+      const rows = await repo.find({
+        where: { tenantId: user.tenantId, id: In(missing), status: 'active', type: 'image' },
+      });
+      const styleNo = String(product.styleNo || '').trim();
+      const coverSet = new Set(((product.coverMediaIds || []) as string[]).filter(Boolean));
+      const stylePrefix = styleNo ? `tenants/${user.tenantId}/products/${styleNo}/` : '';
+      for (const r of rows) {
+        if (this.isPromoObjectKey(r.objectKey) || r.promoSetId) continue;
+        // objectKey 落在本款目录（promo/ 已排除）即可认作本商品图（recreate 后 productId 偶发未回写）
+        const underStyle =
+          !!stylePrefix && r.objectKey.startsWith(stylePrefix) && !this.isPromoObjectKey(r.objectKey);
+        const belongs = r.productId === product.id || coverSet.has(r.id) || underStyle;
+        if (!belongs) continue;
+        if (r.productId !== product.id) {
+          r.productId = product.id;
+          try {
+            await repo.save(r);
+          } catch (e: any) {
+            this.logger.warn(`rebind media.productId ${r.id}→${product.id}: ${e?.message || e}`);
+          }
+        }
+        byId.set(r.id, { id: r.id, objectKey: r.objectKey, meta: (r as any).meta || null });
+      }
+    }
+
+    const stillMissing = refIds.filter((id) => !byId.has(id));
+    if (stillMissing.length) {
+      const heal = opts?.healStale !== false;
+      const productOnly = assets.filter((a) => !this.isPromoObjectKey(a.objectKey));
+      if (heal && stillMissing.length === refIds.length && productOnly.length >= refIds.length) {
+        const healed = productOnly.slice(0, refIds.length);
+        this.logger.warn(
+          `heal stale referenceAssetIds productId=${product.id} styleNo=${product.styleNo} ` +
+            `n=${refIds.length} old=${refIds.join(',')} new=${healed.map((a) => a.id).join(',')}`,
+        );
+        return healed;
+      }
+      const shown = stillMissing.slice(0, 8).join(', ');
+      const more = stillMissing.length > 8 ? ` 等${stillMissing.length}个` : '';
+      throw new Error(`参考图不属于该商品（无效：${shown}${more}）。请重新选择本商品图片`);
+    }
+    return refIds.map((id) => byId.get(id)!);
   }
 
   private defaultFeature(p: any) {
@@ -933,9 +1026,10 @@ export class PromoService implements OnModuleInit {
     if (refIds.length < tpl.reference.min || refIds.length > tpl.reference.max) {
       throw new Error(`视频需选择 ${tpl.reference.min}-${tpl.reference.max} 张参考图`);
     }
-    const byId = new Map(assets.map((a) => [a.id, a]));
-    const refs = refIds.map((id) => byId.get(id));
-    if (refs.some((r) => !r)) throw new Error('参考图不属于该商品');
+    const refs = await this.resolveReferenceAssets(user, product, assets, refIds, { healStale: true });
+    if (refs.map((r) => r.id).join(',') !== refIds.join(',')) {
+      (input as any).referenceAssetIds = refs.map((r) => r.id);
+    }
 
     const feature = String(
       input.feature ?? this.readFeature(user.tenantId, productId)?.feature ?? this.defaultFeature(product),
@@ -1494,9 +1588,10 @@ export class PromoService implements OnModuleInit {
         (input as any).styleStrength = undefined;
       }
     }
-    const byId = new Map(assets.map((a) => [a.id, a]));
-    const refs = refIds.map((id) => byId.get(id));
-    if (refs.some((r) => !r)) throw new Error('参考图不属于该商品');
+    const refs = await this.resolveReferenceAssets(user, product, assets, refIds, { healStale: true });
+    if (refs.map((r) => r.id).join(',') !== refIds.join(',')) {
+      (input as any).referenceAssetIds = refs.map((r) => r.id);
+    }
 
     let model = null as (typeof MODELS)[number] | null;
     if (tpl.model !== 'none' && input.modelId) {
