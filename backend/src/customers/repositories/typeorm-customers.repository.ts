@@ -44,6 +44,8 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
 
   async list(tenantId: string, opts?: { levelId?: string; q?: string }) {
     const qb = this.customers.createQueryBuilder('c').where('c.tenant_id = :tenantId', { tenantId });
+    // 列表仅展示留了可用手机号的客户（无法联系的不占列表）
+    qb.andWhere("c.phone IS NOT NULL AND TRIM(c.phone) <> ''");
     if (opts?.levelId) qb.andWhere('c.level_id = :levelId', { levelId: opts.levelId });
     if (opts?.q) {
       qb.andWhere('(c.nickname LIKE :q OR c.openid LIKE :q OR c.phone LIKE :q)', {
