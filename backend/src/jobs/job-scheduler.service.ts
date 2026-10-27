@@ -10,7 +10,7 @@ import { isTransientLkbError, lkbTransientRetryDelayMs } from '../promo/lkb-vide
 
 /**
  * 进程内调度器：轮询 jobs 表领取 queued，交给已注册 handler 执行。
- * 并发上限 JOB_CONCURRENCY（默认 2），轮询间隔 JOB_POLL_MS（默认 1500）。
+ * 并发上限 JOB_CONCURRENCY（默认 4），轮询间隔 JOB_POLL_MS（默认 1500）。
  * 启动时回收全部孤儿 running；运行中按 JOB_STALE_MS（默认 45min）回收无进度更新的 running。
  */
 @Injectable()
@@ -25,7 +25,7 @@ export class JobSchedulerService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly jobs: JobsService) {}
 
   private get concurrency() {
-    return Math.max(1, parseInt(process.env.JOB_CONCURRENCY || '2', 10));
+    return Math.max(1, parseInt(process.env.JOB_CONCURRENCY || '4', 10));
   }
   private get pollMs() {
     return Math.max(500, parseInt(process.env.JOB_POLL_MS || '1500', 10));
