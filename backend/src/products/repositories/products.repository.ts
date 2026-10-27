@@ -28,4 +28,10 @@ export interface IProductsRepository {
     input: Partial<CreateSkuInput>,
   ): Promise<ProductSkuRec | null>;
   removeSku(tenantId: string, skuId: string): Promise<boolean>;
+  reviveSkuByCode(
+    tenantId: string,
+    productId: string,
+    skuCode: string,
+    input: CreateSkuInput,
+  ): Promise<ProductSkuRec | null>;
 }

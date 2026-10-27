@@ -36,4 +36,17 @@ export class LoginController {
   ) {
     return this.login.updateProfile(user, body || {});
   }
+
+  /**
+   * 微信手机号快速验证：前端 button open-type=getPhoneNumber 的 code → 换号并写入资料。
+   * 需非个人主体且已微信认证；额度不足/个人主体时前端应回退手填。
+   */
+  @Post('me/phone')
+  @UseGuards(JwtAuthGuard)
+  bindPhone(
+    @AuthUser() user: AuthContext,
+    @Body() body: { code?: string },
+  ) {
+    return this.login.bindPhoneFromWechat(user, body?.code || '');
+  }
 }

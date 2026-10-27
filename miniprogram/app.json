@@ -7,6 +7,7 @@
     "pages/jobs/detail/detail",
     "pages/product/detail/detail",
     "pages/product/view/view",
+    "pages/product/catalog/catalog",
     "pages/product/publish/publish",
     "pages/product/edit/edit",
     "pages/product/promo/promo",
@@ -48,6 +49,12 @@
         "text": "任务",
         "iconPath": "images/tab/task-normal.png",
         "selectedIconPath": "images/tab/task-active.png"
+      },
+      {
+        "pagePath": "pages/settings/index/index",
+        "text": "设置",
+        "iconPath": "images/tab/settings-normal.png",
+        "selectedIconPath": "images/tab/settings-active.png"
       }
     ]
   },

@@ -1,16 +1,20 @@
-# 羊毛衫档口商品与客户管理小程序
+# 星马档口助手（xingma_assistant）
 
-每位业主一个独立微信小程序 + 统一 SaaS 多租户后端（NestJS / MySQL / Redis）。
+每位业主一个独立微信小程序 + 统一 SaaS 多租户后端（NestJS / MySQL / OSS / jobs）。
+
+生产：`https://xingma.visitworld.me` · AppID `wx394d23ea099d8a01` · pm2 进程名 **`wool-api`**（只重启该进程）。
 
 ## 仓库结构
 
 ```
-wool-stall-miniapp/
-  docs/技术方案.md     # 完整技术方案
-  backend/             # NestJS API
-  miniprogram/         # 原生微信小程序
+xingma_assistant/
+  docs/           # INDEX / PRD / TECH / AGENTS + 专题稿
+  backend/        # NestJS API
+  miniprogram/    # 原生微信小程序（开发者工具打开此目录）
   README.md
 ```
+
+文档入口：[docs/INDEX.md](./docs/INDEX.md) → [PRD](./docs/PRD.md) → [TECH](./docs/TECH.md)。
 
 ## 快速启动
 
@@ -24,45 +28,37 @@ npm run build
 npm run start:dev
 ```
 
-服务地址：`http://127.0.0.1:3000`  
-健康检查：`GET /api/health`
-
-本地开发建议 `.env` 设 `DEV_FAKE_LOGIN=true`（不调微信，首页仅员工假登录；客户走分享静默鉴权）。
-连接 MySQL：见 [backend/README.md](./backend/README.md)；生产部署见 [docs/部署.md](./docs/部署.md)。
-
-**客户无登录**：客户不需要登录页、也不主动点登录；点开业主分享的商品卡片后，小程序在落地页后台 `wx.login` 换 openid/JWT 并跳转详情。
-
-## 生产配置
-
-- 域名 / API：`https://xingma.visitworld.me`（路径 `/api/*`）
-- 小程序 AppID：`wx394d23ea099d8a01`
-- AppSecret：仅服务器环境变量 `WECHAT_APP_SECRET`（或 tenants 表），**不入仓库**
+- 服务：`http://127.0.0.1:3000` · 健康检查 `GET /api/health`
+- 本地建议 `DEV_FAKE_LOGIN=true`（不调微信；员工假登录；客户走分享静默鉴权）
+- 连 MySQL：见 [backend/README.md](./backend/README.md)；生产见 [docs/部署.md](./docs/部署.md)
+- 密钥（微信 / OSS / IMAGE_GEN / LKB 视频 / 外部穿搭 Agent）只放服务器 `.env` 或 `backend/.secrets/`，**不入仓**
 
 ### 2. 小程序
 
-1. 打开微信开发者工具，导入目录 `miniprogram/`
-2. `project.config.json` 的 `appid` 已是 `wx394d23ea099d8a01`
-3. `app.js` 的 `globalData.baseUrl` 默认 `https://xingma.visitworld.me`；本地联调临时改为 `http://127.0.0.1:3000`，并勾选 详情 → 本地设置 → **不校验合法域名**
-4. 首页仅「微信登录（员工身份）」；客户路径无登录按钮。开发态员工假登录需 `DEV_FAKE_LOGIN=true`
+1. 微信开发者工具导入 `miniprogram/`
+2. AppID 已是 `wx394d23ea099d8a01`
+3. `app.js` → `globalData.baseUrl` 生产为 `https://xingma.visitworld.me`；本地联调可临时改 `http://127.0.0.1:3000`，并勾选「不校验合法域名」
+4. 员工：首页「微信登录」→ Tab 商品 / 客户 / 任务 / 设置
+5. 客户：**无登录页**；点开分享卡片 → `share/landing` 静默鉴权 → `product/view`
 
-### 3. 分享绑定演示路径（客户无感）
+### 3. 分享与员工邀请
 
-1. 以员工登录 → 打开商品详情 → 「限制分享」得到 `shareId`
-2. 客户打开 `pages/share/landing?shareId=xxx`（或模拟另一客户会话）→ 后台静默鉴权 → 立刻进商品详情
-3. 限制分享：前 N 位客户打开自动建档并占名额；名额满后拒绝。公开分享不限
-4. 无分享参数直接进首页时，提示「请通过分享卡片打开」，不逼登录
+| 路径 | 说明 |
+|------|------|
+| 商品分享 | 员工创建限制/公开分享 → 客户落地静默进 `product/view`；限制分享前 N 位占名额（默认 `SHARE_LIMIT_SLOTS=5`） |
+| 员工邀请 | 设置页生成邀请码/小程序码 → 扫码进 `invite/accept` 兑换成员；**不是**客户分享 |
 
-### 4. 本轮已落地能力（摘要）
+### 4. 已落地能力（摘要）
 
-- 商品/SKU 完整 CRUD、复制、批量上下架、搜索与过滤
-- 客户等级 / 商品等级配置 CRUD
-- 客户档案：改等级、批量改等级、跟进、例外规则
-- Repository 层：内存 + TypeORM（`DB_ENABLED` 切换）
-- 小程序：商品编辑/列表、设置等级、客户列表/详情对接 API
+- 商品/SKU CRUD、复制、批量上下架、分组、搜索（含款号）、公开/限量转发
+- 选图异步发品、封面禁尺码表、宣传图多模板（含风格参考 / 外部穿搭 Agent）
+- **宣传视频**：LKB `sinan-video-generator`（`rsync` + poll）；`generateAudio=true`；上游 SUCCEEDED 直链播放，**不转存自有 OSS**（穿搭图同策略）
+- 任务中心（业主按 promo_set 呈现）、询价处理流（认领 / 已处理 / 红点）
+- 客户公开目录 `product/catalog`（房子/「更多」进目录，不进管理端）
+- 首次分享落地软提示完善资料（头像+昵称+手机，可跳过）
 
-详见 [docs/技术方案.md](./docs/技术方案.md) §5 API 列表。
+详见 [docs/PRD.md](./docs/PRD.md)、[docs/TECH.md](./docs/TECH.md)。
 
-## 首期范围
+## 明确不做
 
-已做：员工登录 + 客户分享静默鉴权、商品鉴权与 CRUD、限制分享名额占用 / 公开分享、询价、媒体签名占位、等级配置、实体与 DDL。  
-不做：交易支付物流、读微信笔记/好友、跨档口大厅、聊天直达。
+交易支付物流、读微信笔记/好友客户端、跨档口大厅、IM 聊天直达。

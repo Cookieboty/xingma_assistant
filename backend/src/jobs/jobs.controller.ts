@@ -61,7 +61,7 @@ export class JobsController {
 
   /** 手动回收孤儿/陈旧 running → 重新排队（业主） */
   @Post('reclaim-orphans')
-  @Roles('owner')
+  @Roles('owner', 'staff')
   reclaimOrphans(
     @Query('onlyStale') onlyStale?: string,
     @Query('staleMs') staleMs?: string,

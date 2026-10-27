@@ -1,8 +1,12 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { Tenant } from '../common/entities/tenant.entity';
 import { TenantMember } from '../common/entities/tenant-member.entity';
+import { CustomerProfile } from '../common/entities/customer-profile.entity';
+import { AuditService } from '../common/audit.service';
+import { AuthContext } from '../common/interfaces/auth-context.interface';
+import { stableMediaUrl } from '../common/utils/media-url';
 
 export interface TenantInfo {
   id: string;
@@ -21,6 +25,8 @@ export interface MemberRec {
   tenantId: string;
   openid: string;
   role: 'owner' | 'staff';
+  inviteId?: string | null;
+  inviteCode?: string | null;
 }
 
 /**
@@ -36,6 +42,7 @@ export class TenantsService {
 
   constructor(
     private readonly config: ConfigService,
+    private readonly audit: AuditService,
     @Optional() private readonly ds?: DataSource,
   ) {
     // 兼容旧的开发占位 AppID
@@ -54,7 +61,7 @@ export class TenantsService {
           id: t.id,
           name: t.name,
           wxAppId: t.wxAppId,
-          contactQrUrl: (t as any).contactQrUrl || null,
+          contactQrUrl: stableMediaUrl((t as any).contactQrUrl) || null,
           allowCustomerDownload: !!(t as any).allowCustomerDownload,
         };
       }
@@ -73,7 +80,7 @@ export class TenantsService {
             id: t.id,
             name: t.name,
             wxAppId: t.wxAppId,
-            contactQrUrl: (t as any).contactQrUrl || null,
+            contactQrUrl: stableMediaUrl((t as any).contactQrUrl) || null,
             allowCustomerDownload: !!(t as any).allowCustomerDownload,
           }
         : null;
@@ -121,7 +128,7 @@ export class TenantsService {
     return false;
   }
 
-  /** 仅开发假登录 / 后台邀请使用：确保成员存在 */
+  /** 仅开发假登录 / 后台邀请使用：确保成员存在；已禁用的可被重新邀请激活 */
   async ensureMember(tenantId: string, openid: string, role: 'owner' | 'staff'): Promise<MemberRec> {
     const exist = await this.findMember(tenantId, openid);
     if (exist) {
@@ -139,12 +146,38 @@ export class TenantsService {
     }
     if (this.db) {
       const repo = this.db.getRepository(TenantMember);
+      const disabled = await repo.findOne({ where: { tenantId, openid } });
+      if (disabled) {
+        disabled.status = 'active';
+        disabled.role = role === 'owner' ? 'owner' : disabled.role === 'owner' ? 'owner' : role;
+        const m = await repo.save(disabled);
+        return { id: m.id, tenantId, openid: m.openid, role: m.role as MemberRec['role'] };
+      }
       const m = await repo.save(repo.create({ tenantId, openid, role, status: 'active', unionId: null, nickname: null }));
       return { id: m.id, tenantId, openid, role };
     }
     const rec: MemberRec = { id: `mem_${openid.slice(-16)}`, tenantId, openid, role };
     this.memMembers.set(`${tenantId}:${openid}`, rec);
     return rec;
+  }
+
+  /** 踢除/禁用员工：status=disabled，之后 findMember 不再命中，不能以员工登录 */
+  async disableMember(tenantId: string, memberId: string): Promise<{ ok: true; id: string }> {
+    if (this.db) {
+      const repo = this.db.getRepository(TenantMember);
+      const m = await repo.findOne({ where: { id: memberId, tenantId } });
+      if (!m) throw new Error('NOT_FOUND');
+      m.status = 'disabled';
+      await repo.save(m);
+      return { ok: true, id: m.id };
+    }
+    for (const [k, m] of this.memMembers) {
+      if (m.tenantId === tenantId && m.id === memberId) {
+        this.memMembers.delete(k);
+        return { ok: true, id: memberId };
+      }
+    }
+    throw new Error('NOT_FOUND');
   }
 
   async getMemberNickname(tenantId: string, openid: string): Promise<string | null> {
@@ -163,24 +196,70 @@ export class TenantsService {
   }
 
 
-  async listMembers(tenantId: string): Promise<Array<{ id: string; openid: string; role: string; nickname: string | null; status: string; createdAt?: Date }>> {
+  async listMembers(tenantId: string): Promise<Array<{ id: string; openid: string; role: string; nickname: string | null; avatarUrl?: string | null; phone?: string | null; status: string; createdAt?: Date; inviteId?: string | null; inviteCode?: string | null }>> {
     if (this.db) {
       const rows = await this.db.getRepository(TenantMember).find({
         where: { tenantId, status: 'active' },
         order: { createdAt: 'ASC' },
       });
-      return rows.map((m) => ({
-        id: m.id,
-        openid: m.openid,
-        role: m.role,
-        nickname: m.nickname,
-        status: m.status,
-        createdAt: m.createdAt,
-      }));
+      const openids = rows.map((m) => m.openid).filter(Boolean);
+      const profiles = openids.length
+        ? await this.db.getRepository(CustomerProfile).find({
+            where: { tenantId, openid: In(openids) },
+          })
+        : [];
+      const byOpen = new Map(profiles.map((c) => [c.openid, c]));
+      return rows.map((m) => {
+        const c = byOpen.get(m.openid);
+        return {
+          id: m.id,
+          openid: m.openid,
+          role: m.role,
+          nickname: m.nickname || c?.nickname || null,
+          avatarUrl: c?.avatarUrl ? stableMediaUrl(c.avatarUrl) : null,
+          phone: c?.phone || null,
+          status: m.status,
+          createdAt: m.createdAt,
+          inviteId: (m as any).inviteId ?? null,
+          inviteCode: (m as any).inviteCode ?? null,
+        };
+      });
     }
     return [...this.memMembers.values()]
       .filter((m) => m.tenantId === tenantId)
-      .map((m) => ({ id: m.id, openid: m.openid, role: m.role, nickname: null, status: 'active' }));
+      .map((m) => ({
+        id: m.id,
+        openid: m.openid,
+        role: m.role,
+        nickname: null,
+        status: 'active',
+        inviteId: m.inviteId ?? null,
+        inviteCode: m.inviteCode ?? null,
+      }));
+  }
+
+  /** 接受邀请后回写来源邀请码（可覆盖为最近一次） */
+  async setMemberInviteSource(
+    tenantId: string,
+    memberId: string,
+    opts: { inviteId: string; inviteCode: string },
+  ) {
+    const inviteId = String(opts.inviteId || '').trim() || null;
+    const inviteCode = String(opts.inviteCode || '').trim().toUpperCase() || null;
+    if (this.db) {
+      await this.db.getRepository(TenantMember).update(
+        { id: memberId, tenantId },
+        { inviteId, inviteCode },
+      );
+      return;
+    }
+    for (const m of this.memMembers.values()) {
+      if (m.tenantId === tenantId && m.id === memberId) {
+        m.inviteId = inviteId;
+        m.inviteCode = inviteCode;
+        break;
+      }
+    }
   }
 
   async getContactQr(tenantId: string): Promise<string | null> {
@@ -188,22 +267,36 @@ export class TenantsService {
     return info?.contactQrUrl || null;
   }
 
-  async setContactQr(tenantId: string, url: string | null) {
+  async setContactQr(tenantId: string, url: string | null, actor?: AuthContext | null) {
+    // 公网读：入库前剥签名；null/空串表示清除
+    const normalized =
+      url == null || String(url).trim() === '' ? null : stableMediaUrl(String(url).trim());
+    let result: { contactQrUrl: string | null | undefined };
     if (this.db) {
       const repo = this.db.getRepository(Tenant);
       const row = await repo.findOne({ where: { id: tenantId } });
       if (!row) throw new NotFoundException('租户不存在');
-      row.contactQrUrl = url;
+      row.contactQrUrl = normalized;
       await repo.save(row);
-      return { contactQrUrl: row.contactQrUrl };
+      result = { contactQrUrl: row.contactQrUrl };
+    } else {
+      const mem = this.memTenants.find((x) => x.id === tenantId);
+      if (!mem) throw new NotFoundException('租户不存在');
+      mem.contactQrUrl = normalized;
+      result = { contactQrUrl: mem.contactQrUrl };
     }
-    const mem = this.memTenants.find((x) => x.id === tenantId);
-    if (!mem) throw new NotFoundException('租户不存在');
-    mem.contactQrUrl = url;
-    return { contactQrUrl: mem.contactQrUrl };
+    await this.audit.record({
+      tenantId,
+      actor: actor || null,
+      action: 'tenant.contact_qr',
+      targetType: 'tenant',
+      targetId: tenantId,
+      detail: { cleared: url == null, hasUrl: !!url },
+    });
+    return result;
   }
 
-  async setAllowCustomerDownload(tenantId: string, allow: boolean) {
+  async setAllowCustomerDownload(tenantId: string, allow: boolean, actor?: AuthContext | null) {
     const value = !!allow;
     if (this.db) {
       const repo = this.db.getRepository(Tenant);
@@ -211,11 +304,19 @@ export class TenantsService {
       if (!row) throw new NotFoundException('租户不存在');
       (row as any).allowCustomerDownload = value;
       await repo.save(row);
-      return { allowCustomerDownload: value };
+    } else {
+      const mem = this.memTenants.find((x) => x.id === tenantId);
+      if (!mem) throw new NotFoundException('租户不存在');
+      mem.allowCustomerDownload = value;
     }
-    const mem = this.memTenants.find((x) => x.id === tenantId);
-    if (!mem) throw new NotFoundException('租户不存在');
-    mem.allowCustomerDownload = value;
+    await this.audit.record({
+      tenantId,
+      actor: actor || null,
+      action: 'tenant.allow_download',
+      targetType: 'tenant',
+      targetId: tenantId,
+      detail: { allow: value },
+    });
     return { allowCustomerDownload: value };
   }
 }

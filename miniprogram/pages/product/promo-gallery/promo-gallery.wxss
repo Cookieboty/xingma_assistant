@@ -206,3 +206,42 @@
 
 .video-wrap { margin-top: 16rpx; }
 .promo-video { width: 100%; height: 720rpx; background: #111; border-radius: 12rpx; }
+
+
+.set-row { cursor: pointer; }
+.list-thumbs {
+  display: flex;
+  gap: 10rpx;
+  margin-top: 12rpx;
+  flex-wrap: wrap;
+}
+.list-thumbs .thumb {
+  width: 120rpx;
+  height: 160rpx;
+  border-radius: 12rpx;
+  background: #f6f3f0;
+}
+.thumb-video { padding: 8rpx 0; }
+.detail-foot { margin-top: 24rpx; text-align: center; }
+.type-badge {
+  display: inline-block;
+  font-size: 20rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 6rpx;
+  background: #f0ebe6;
+  color: #8a5a3a;
+  margin-right: 8rpx;
+  vertical-align: middle;
+}
+
+.media-actions .media-btn.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.err-hint {
+  color: #c62828;
+  font-size: 24rpx;
+  line-height: 1.4;
+  word-break: break-all;
+}

@@ -8,11 +8,12 @@ export function buildJobDisplayTitle(
 ): string {
   const p = (payload || {}) as Record<string, any>;
   const templateId = String(p.templateId || '').trim();
-  // multi_color 历史可能缓存了「极简浅色里的女模特」类文案，一律重算
+  // promo_image 一律按当前 modelId/scenes 现算，避免缓存「女模特」与实选男模不一致
+  if (type === 'promo_image') return buildPromoTitle(p);
+
   const cached = String(p.displayTitle || '').trim();
   if (cached && templateId !== 'multi_color') return cached;
 
-  if (type === 'promo_image') return buildPromoTitle(p);
   if (type === 'promo_video') {
     const styleNo = String(p.styleNo || '').trim();
     const tpl = findTemplate(String(p.templateId || ''));
@@ -29,11 +30,18 @@ export function buildJobDisplayTitle(
 
 function modelWho(modelId?: string | null): string | null {
   if (!modelId) return null;
-  const id = String(modelId);
+  const id = String(modelId).trim();
+  if (!id) return null;
+  const m = MODELS.find((x) => x.id === id);
+  // 优先按 MODELS 配置的性别（name 含 女/男），与实选模特一致
+  if (m) {
+    if (/女/.test(m.name) || id.startsWith('f_')) return '女模特';
+    if (/男/.test(m.name) || id.startsWith('m_')) return '男模特';
+    return m.name;
+  }
   if (id.startsWith('m_')) return '男模特';
   if (id.startsWith('f_')) return '女模特';
-  const m = MODELS.find((x) => x.id === id);
-  return m?.name || null;
+  return null;
 }
 
 function buildMultiColorTitle(p: Record<string, any>): string {

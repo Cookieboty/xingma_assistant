@@ -57,6 +57,10 @@ function enrichSet(s, prev) {
   const kind = s.kind || s.type || 'image';
   const isVideo = kind === 'video' || kind === 'promo_video';
   const videoUrl = isVideo ? ((items.find((i) => i && i.url) || {}).url || '') : '';
+  const thumbUrls = withUrl.slice(0, 4).map((i) => i.url);
+  const secondsRaw = Number(s.seconds || s.durationSec || (s.params && s.params.seconds) || 0);
+  const durationSec = secondsRaw > 0 ? Math.round(secondsRaw) : 0;
+  const durationLabel = isVideo && durationSec ? `约 ${durationSec} 秒` : '';
   return Object.assign({}, s, {
     items,
     done,
@@ -64,16 +68,29 @@ function enrichSet(s, prev) {
     busy,
     isVideo,
     videoUrl,
+    durationSec,
+    durationLabel,
+    thumbUrls,
     albumSelectedCount,
     albumAllSelected,
     albumSaveLabel: albumSelectedCount
       ? (isVideo ? `保存视频(${albumSelectedCount})` : `下载到相册(${albumSelectedCount})`)
       : (isVideo ? '保存视频到相册' : '下载到相册'),
-    regenLabel: (!albumSelectedCount
-      ? '重新生成'
-      : (albumAllSelected
-        ? '重新生成整组'
-        : (albumSelectedCount === 1 ? '重新生成选中' : `重新生成(${albumSelectedCount})`))),
+    regenLabel: '重新生成',
+    // 失败整组可点；视频整组可点；图片需勾选（或点失败槽）
+    canRegen:
+      !busy &&
+      (s.status === 'failed' ||
+        isVideo ||
+        albumSelectedCount > 0 ||
+        items.some((i) => i && i.failed)),
+    failedWhole: s.status === 'failed' || (items.length > 0 && items.every((i) => i && i.failed)),
+    errorText: (() => {
+      if (s.status !== 'failed' && !items.some((i) => i && i.failed)) return '';
+      const fromItem = (items.find((i) => i && i.error) || {}).error || '';
+      const fromProg = (s.progress && s.progress.message) || '';
+      return String(fromItem || fromProg || s.error || '生成失败').slice(0, 200);
+    })(),
     statusLabel: STATUS_LABEL[s.status] || s.status,
     templateName: s.displayTitle || s.templateName || (isVideo ? '宣传视频' : '宣传图'),
     typeLabel: isVideo ? '视频' : '图',
@@ -84,10 +101,31 @@ function enrichSet(s, prev) {
   });
 }
 
+
+function syncDetailFromSets(sets, focusSetId, viewMode, focusLocked) {
+  if (viewMode !== 'detail' || !focusSetId) return { sets, detailSet: null };
+  const detailSet = (sets || []).find((s) => s.id === focusSetId) || null;
+  // 从任务「查看」带 setId 进来：找不到组也绝不回退到全部素材列表（会露出兄弟任务）
+  if (!detailSet && focusLocked) {
+    return { sets, detailSet: null, viewMode: 'detail', focusSetId, setMissing: true };
+  }
+  return {
+    sets,
+    detailSet,
+    viewMode: detailSet ? 'detail' : 'list',
+    focusSetId: detailSet ? focusSetId : '',
+    setMissing: false,
+  };
+}
+
 Page({
   data: {
     id: '',
     focusSetId: '',
+    focusLocked: false, // true=任务查看带 setId，禁止回退兄弟列表
+    setMissing: false,
+    viewMode: 'list', // list | detail
+    detailSet: null,
     product: null,
     sets: [],
     loading: true,
@@ -96,7 +134,14 @@ Page({
   },
 
   onLoad(q) {
-    this.setData({ id: q.id || '', focusSetId: q.setId || '' });
+    const setId = q.setId || '';
+    this.setData({
+      id: q.id || '',
+      focusSetId: setId,
+      focusLocked: !!setId,
+      setMissing: false,
+      viewMode: setId ? 'detail' : 'list',
+    });
   },
   onShow() {
     if (this.data.id) this.load();
@@ -129,25 +174,45 @@ Page({
         setsRaw = both[1];
       }
       const list = Array.isArray(setsRaw) ? setsRaw : setsRaw.items || [];
+      const sets = list.map((s) => enrichSet(s, prevMap[s.id]));
       const focusSetId = this.data.focusSetId;
-      const sets = list.map((s) => {
-        const enriched = enrichSet(s, prevMap[s.id]);
-        if (focusSetId && s.id === focusSetId) {
-          enriched.expanded = true;
+      const focusLocked = !!this.data.focusLocked;
+      let viewMode = this.data.viewMode || 'list';
+      let detailSet = null;
+      let setMissing = false;
+      if (viewMode === 'detail' && focusSetId) {
+        detailSet = sets.find((s) => s.id === focusSetId) || null;
+        if (!detailSet) {
+          if (focusLocked) {
+            // 任务入口：保持单组详情态，不展示兄弟组
+            setMissing = true;
+            viewMode = 'detail';
+          } else {
+            viewMode = 'list';
+          }
         }
-        return enriched;
-      });
-      const anyBusy = sets.some((s) => s.busy);
-      this.setData({ product, sets, loading: false });
-      if (focusSetId) {
-        // 仅首次从详情深链进来时锁定展开；之后刷新保留用户操作
-        this.setData({ focusSetId: '' });
-        setTimeout(() => {
-          wx.pageScrollTo({ selector: `#set-${focusSetId}`, duration: 300 });
-        }, 200);
+      } else if (viewMode === 'detail' && this.data.detailSet) {
+        detailSet = sets.find((s) => s.id === this.data.detailSet.id) || null;
+        if (!detailSet) {
+          if (focusLocked && focusSetId) {
+            setMissing = true;
+            viewMode = 'detail';
+          } else {
+            viewMode = 'list';
+          }
+        }
       }
+      const anyBusy = sets.some((s) => s.busy);
+      this.setData({
+        product,
+        sets,
+        loading: false,
+        viewMode,
+        detailSet,
+        setMissing,
+        focusSetId: focusSetId || (detailSet && detailSet.id) || '',
+      });
       if (anyBusy) {
-        // 安静轮询：只刷进度，沿用已展示图的签名 URL，避免闪烁
         this.timer = setTimeout(() => this.load({ silent: true }), 4000);
       }
     } catch (e) {
@@ -168,12 +233,14 @@ Page({
       },
     });
   },
-  toggleExpand(e) {
+  /** 列表点某一组 → 进入该组详情（下载/预览） */
+  openSetDetail(e) {
     const id = e.currentTarget.dataset.id;
-    const sets = this.data.sets.map((s) => (
-      s.id === id ? Object.assign({}, s, { expanded: !s.expanded }) : s
-    ));
-    this.setData({ sets });
+    if (!id) return;
+    const detailSet = (this.data.sets || []).find((s) => s.id === id) || null;
+    if (!detailSet) return;
+    this.setData({ viewMode: 'detail', focusSetId: id, detailSet });
+    try { wx.setNavigationBarTitle({ title: detailSet.templateName || '素材详情' }); } catch (err) { /* */ }
   },
 
   playVideo(e) {
@@ -242,7 +309,8 @@ Page({
       items[idx] = Object.assign({}, it, { albumSelected: !it.albumSelected });
       return enrichSet(Object.assign({}, s, { items, expanded: s.expanded }), null);
     });
-    this.setData({ sets });
+    const sync = syncDetailFromSets(sets, this.data.focusSetId, this.data.viewMode, this.data.focusLocked);
+    this.setData(Object.assign({ sets }, sync));
   },
 
   toggleSelectAllAlbum(e) {
@@ -255,7 +323,8 @@ Page({
         : it));
       return enrichSet(Object.assign({}, s, { items, expanded: s.expanded }), null);
     });
-    this.setData({ sets });
+    const sync = syncDetailFromSets(sets, this.data.focusSetId, this.data.viewMode, this.data.focusLocked);
+    this.setData(Object.assign({ sets }, sync));
   },
 
   async saveToAlbum(e) {
@@ -326,6 +395,10 @@ Page({
         method: 'DELETE',
       });
       wx.showToast({ title: '已删除', icon: 'none' });
+      if (this.data.viewMode === 'detail') {
+        this.setData({ viewMode: 'list', focusSetId: '', detailSet: null });
+        try { wx.setNavigationBarTitle({ title: '宣传素材' }); } catch (err) { /* */ }
+      }
       this.load();
     } catch (err) {
       wx.showToast({ title: err.message || '删除失败', icon: 'none' });
@@ -337,29 +410,46 @@ Page({
   async regenSelected(e) {
     const setId = e.currentTarget.dataset.id;
     if (!setId || this.data.actingId) return;
-    const set = this.data.sets.find((s) => s.id === setId);
-    if (!set) return;
+    const set = (this.data.sets || []).find((s) => s.id === setId) || this.data.detailSet;
+    if (!set || set.id !== setId) return;
     if (set.busy) {
       wx.showToast({ title: '该组正在生成中', icon: 'none' });
       return;
     }
     const items = set.items || [];
-    const selected = items.filter((i) => i && i.url && i.albumSelected);
-    if (!selected.length) {
-      wx.showToast({ title: '请先勾选要重新生成的图片', icon: 'none' });
-      return;
-    }
-    const allWithUrl = items.filter((i) => i && i.url);
-    const whole = selected.length === allWithUrl.length && allWithUrl.length > 0;
+    const failedWhole = !!(set.failedWhole || set.status === 'failed');
+    const isVideo = !!set.isVideo;
+    let whole = false;
     const indexes = [];
-    if (!whole) {
-      for (const im of selected) {
-        const index = Number(im.index);
-        if (!Number.isInteger(index) || index < 0) {
-          wx.showToast({ title: '图片序号缺失，请下拉刷新后重试', icon: 'none' });
+    if (failedWhole || isVideo) {
+      // 失败或视频：整组重新生成，不要求勾选
+      whole = true;
+    } else {
+      const selected = items.filter((i) => i && i.url && i.albumSelected);
+      if (!selected.length) {
+        const failedIdx = items
+          .filter((i) => i && i.failed)
+          .map((i) => Number(i.index))
+          .filter((n) => Number.isInteger(n) && n >= 0);
+        if (failedIdx.length) {
+          indexes.push(...failedIdx);
+        } else {
+          wx.showToast({ title: '请先勾选要重新生成的图片', icon: 'none' });
           return;
         }
-        indexes.push(index);
+      } else {
+        const allWithUrl = items.filter((i) => i && i.url);
+        whole = selected.length === allWithUrl.length && allWithUrl.length > 0;
+        if (!whole) {
+          for (const im of selected) {
+            const index = Number(im.index);
+            if (!Number.isInteger(index) || index < 0) {
+              wx.showToast({ title: '图片序号缺失，请下拉刷新后重试', icon: 'none' });
+              return;
+            }
+            indexes.push(index);
+          }
+        }
       }
     }
 
@@ -382,11 +472,12 @@ Page({
         status: 'generating',
         busy: true,
         expanded: true,
-        progressText: whole ? '整组重新生成中…' : `重新生成 ${indexes.length} 张…`,
+        progressText: whole ? '重新生成中…' : `重新生成 ${indexes.length} 张…`,
         percent: 5,
       }), null);
     });
-    this.setData({ actingId: setId, sets: optimistic, focusSetId: setId });
+    const sync = syncDetailFromSets(optimistic, setId, this.data.viewMode === 'detail' ? 'detail' : 'detail', this.data.focusLocked);
+    this.setData(Object.assign({ actingId: setId, sets: optimistic, focusSetId: setId, viewMode: 'detail' }, sync));
     wx.showLoading({ title: '提交中…', mask: true });
     try {
       await request({
@@ -395,7 +486,7 @@ Page({
         data: whole ? {} : { indexes },
       });
       wx.hideLoading();
-      wx.showToast({ title: whole ? '已开始整组重生' : '已开始重新生成', icon: 'none' });
+      wx.showToast({ title: whole ? '已开始重新生成' : `已开始重新生成 ${indexes.length} 张`, icon: 'none' });
       await this.load({ silent: true });
     } catch (err) {
       wx.hideLoading();

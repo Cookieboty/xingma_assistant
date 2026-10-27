@@ -50,7 +50,6 @@
         <view class="section-title">上架设置</view>
         <view class="field-label">状态</view>
         <view class="seg">
-          <view class="seg-item {{status==='draft'?'on':''}}" data-v="draft" bindtap="onStatusTap">草稿</view>
           <view class="seg-item {{status==='on_sale'?'on':''}}" data-v="on_sale" bindtap="onStatusTap">在售</view>
           <view class="seg-item {{status==='off_sale'?'on':''}}" data-v="off_sale" bindtap="onStatusTap">下架</view>
         </view>
@@ -60,9 +59,15 @@
           <view class="seg-item {{priceDisplay==='hide'?'on':''}}" data-v="hide" bindtap="onPriceDisplayTap">隐藏价格</view>
         </view>
         <view class="field-label">商品等级</view>
-        <picker mode="selector" range="{{productLevels}}" range-key="name" value="{{levelIndex}}" bindchange="onLevelChange">
-          <view class="picker">{{productLevels[levelIndex].name || '请选择'}}</view>
-        </picker>
+        <view class="seg">
+          <view
+            class="seg-item {{levelId===item.id?'on':''}}"
+            wx:for="{{levelRadios}}"
+            wx:key="id"
+            data-id="{{item.id}}"
+            bindtap="onLevelTap"
+          >{{item.name}}</view>
+        </view>
         <view class="field-label">所属分组</view>
         <picker mode="selector" range="{{groups}}" range-key="name" value="{{groupIndex}}" bindchange="onGroupChange">
           <view class="picker">{{groups[groupIndex].name || '请选择分组'}}</view>
@@ -84,7 +89,7 @@
   <block wx:else>
     <view class="card">
       <view class="section-title">商品图片</view>
-      <view class="section-hint">点图预览；角标删除；长按拖动调序（松手立即保存）；首张为列表封面；可多选追加</view>
+      <view class="section-hint">点图预览；角标删除；长按拖到目标格松手保存顺序（橙色框=插入位置，首张=列表封面）；可多选追加</view>
       <view class="img-grid">
         <view
           class="img-cell sortable {{draggingIndex===index?'is-dragging':''}} {{dragOverIndex===index && draggingIndex!==index?'is-over':''}}"
@@ -92,10 +97,11 @@
           wx:key="id"
           data-id="{{item.id}}"
           data-index="{{index}}"
+          bindtouchstart="onImgTouchStart"
           bindlongpress="onImgLongPress"
           catchtouchmove="onImgTouchMove"
-          bindtouchend="onImgTouchEnd"
-          bindtouchcancel="onImgTouchEnd"
+          catchtouchend="onImgTouchEnd"
+          catchtouchcancel="onImgTouchEnd"
         >
           <image src="{{item.url}}" mode="aspectFill" class="thumb" data-index="{{index}}" data-url="{{item.url}}" catchtap="previewImage" />
           <view class="img-del" data-id="{{item.id}}" catchtap="removeImage">×</view>
@@ -135,7 +141,6 @@
       <view class="section-title">上架设置</view>
       <view class="field-label">状态</view>
       <view class="seg">
-        <view class="seg-item {{status==='draft'?'on':''}}" data-v="draft" bindtap="onStatusTap">草稿</view>
         <view class="seg-item {{status==='on_sale'?'on':''}}" data-v="on_sale" bindtap="onStatusTap">在售</view>
         <view class="seg-item {{status==='off_sale'?'on':''}}" data-v="off_sale" bindtap="onStatusTap">下架</view>
       </view>
@@ -145,9 +150,15 @@
         <view class="seg-item {{priceDisplay==='hide'?'on':''}}" data-v="hide" bindtap="onPriceDisplayTap">隐藏价格</view>
       </view>
       <view class="field-label">商品等级</view>
-      <picker mode="selector" range="{{productLevels}}" range-key="name" value="{{levelIndex}}" bindchange="onLevelChange">
-        <view class="picker">{{productLevels[levelIndex].name || '请选择'}}</view>
-      </picker>
+      <view class="seg">
+        <view
+          class="seg-item {{levelId===item.id?'on':''}}"
+          wx:for="{{levelRadios}}"
+          wx:key="id"
+          data-id="{{item.id}}"
+          bindtap="onLevelTap"
+        >{{item.name}}</view>
+      </view>
       <view class="field-label">所属分组</view>
       <picker mode="selector" range="{{groups}}" range-key="name" value="{{groupIndex}}" bindchange="onGroupChange">
         <view class="picker">{{groups[groupIndex].name || '请选择分组'}}</view>

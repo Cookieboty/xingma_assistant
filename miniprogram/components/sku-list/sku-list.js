@@ -56,7 +56,7 @@ Component({
       }
       const skus = list.map((s) => Object.assign({}, s, { price: src }));
       this.triggerEvent('change', { skus });
-      wx.showToast({ title: `已填到全部 ${skus.length} 色，可再改`, icon: 'none' });
+      // 静默复制：成功后不弹 toast/tips
     },
   },
 });

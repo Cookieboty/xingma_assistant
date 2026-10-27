@@ -1,5 +1,6 @@
 const publishQueue = require('../../../utils/publish-upload-queue');
 const { request } = require('../../../utils/request');
+const { isUserVisibleJobType } = require('../../../utils/job-visibility');
 
 const STATUS_LABEL = {
   queued: '排队',
@@ -30,16 +31,19 @@ function enrich(j) {
   const statusLabel = STATUS_LABEL[j.status] || j.status;
   const tone = STATUS_TONE[j.status] || 'muted';
   // 失败一律可重试；取消后也可重跑（后端会重置 attempts）
+  const isPromo = j.type === 'promo_image' || j.type === 'promo_video';
+  const isOrphan = !!(j.orphanPromoSet || String(j.id || '').indexOf('orphan_') === 0);
   const canRetry = j.status === 'failed' || j.status === 'cancelled';
   const canCancel = j.status === 'queued' || j.status === 'running';
   const cancelLabel = j.status === 'running' ? '停止' : '取消';
-  const retryLabel = j.status === 'cancelled' ? '重跑' : '重试';
+  const retryLabel = j.status === 'cancelled' ? '重跑' : (isPromo ? '重新生成' : '重试');
   const productId =
     j.productId ||
     (j.payload && j.payload.productId) ||
     (j.result && (j.result.productId || (j.result.product && j.result.product.id))) ||
     '';
   const setId =
+    j.setId ||
     (j.payload && j.payload.setId) ||
     (j.result && j.result.setId) ||
     '';
@@ -55,22 +59,25 @@ function enrich(j) {
     j.title ||
     (j.payload && j.payload.displayTitle) ||
     (rawMsg && !looksLikeId && rawMsg !== '排队中' && rawMsg !== '执行中' ? rawMsg : '') ||
-    (j.type === 'promo_image' ? '宣传生图' : j.type === 'publish_product' ? '选图发品' : '任务');
+    (j.type === 'promo_image' ? '宣传生图' : j.type === 'promo_video' ? '宣传视频' : j.type === 'publish_product' ? '图片发品' : '任务');
   const productThumb = j.productThumb || '';
   const doneTotal =
     progress.done != null && progress.total != null
       ? `${progress.done}/${progress.total}`
       : '';
-  const isCreateType = j.type === 'publish_product';
-  const isGenType = j.type === 'promo_image' || j.type === 'cover_reselect' || j.type === 'promo_video';
-  // 「查看」：一律进任务明细（进度/错误/关联素材组）
+  const isCreateType = false;
+  const isGenType = isUserVisibleJobType(j.type);
+  // 「查看」：生图/视频进素材组
   const canView = true;
+  // 生图/视频：始终展示 done/total（含局部重生后仍为整组 N）；其它类型仅忙时提示
   const busyHint =
-    j.status === 'running' || j.status === 'queued'
-      ? doneTotal || (progress.step && progress.step !== 'queued' && progress.step !== 'running'
-        ? progress.step
-        : '')
-      : '';
+    isPromo && doneTotal
+      ? doneTotal
+      : j.status === 'running' || j.status === 'queued'
+        ? doneTotal || (progress.step && progress.step !== 'queued' && progress.step !== 'running'
+          ? progress.step
+          : '')
+        : '';
   const errHint = j.status === 'failed' ? (j.error || progress.message || '') : '';
   return Object.assign({}, j, {
     title,
@@ -80,6 +87,8 @@ function enrich(j) {
     canCancel,
     cancelLabel,
     retryLabel,
+    isOrphan,
+    orphanPromoSet: isOrphan,
     productId,
     setId,
     styleNo,
@@ -122,9 +131,9 @@ Page({
     ],
     typeChips: [
       { id: '', name: '全部类型' },
-      { id: 'publish_product', name: '发品' },
       { id: 'promo_image', name: '生图' },
-      { id: 'cover_reselect', name: '封面' },
+      { id: 'publish_product', name: '发品' },
+      { id: 'promo_video', name: '生视频' },
     ],
   },
 
@@ -160,7 +169,10 @@ Page({
       if (this.data.status) qs.push(`status=${this.data.status}`);
       if (this.data.type) qs.push(`type=${this.data.type}`);
       const res = await request({ url: `/api/jobs?${qs.join('&')}` });
-      const items = (res.items || []).map(enrich);
+      // 仅 user-facing（promo_image/promo_video）；「全部」含排队/在做/失败/最近完成，不藏 succeeded
+      // 系统 job（发品/分析图等）由后端 + 前端白名单共同隐藏
+      const raw = (res.items || []).filter((j) => isUserVisibleJobType(j.type));
+      const items = raw.map(enrich);
       this.setData({ list: items, total: res.total || items.length, loading: false });
       const busy = items.some((j) => j.status === 'queued' || j.status === 'running');
       if (busy) {
@@ -174,9 +186,10 @@ Page({
 
   async retry(e) {
     const id = e.currentTarget.dataset.id;
+    const row = (this.data.list || []).find((j) => j.id === id) || {};
     try {
       await request({ url: `/api/jobs/${id}/retry`, method: 'POST', data: {} });
-      wx.showToast({ title: '已重新排队', icon: 'none' });
+      wx.showToast({ title: row.retryLabel === '重新生成' ? '已开始重新生成' : '已重新排队', icon: 'none' });
       this.load();
     } catch (err) {
       wx.showToast({ title: err.message || '重试失败', icon: 'none' });
@@ -204,9 +217,37 @@ Page({
     }
   },
 
-  /** 统一「查看」：进任务明细（进度/错误/关联素材），不直接整商品素材页 */
+  /**
+   * 业主「查看」：只打开「这一条」任务/素材组。
+   * - 失败/取消 → 任务详情（重新生成）
+   * - 生图/视频且有 setId → 该组详情（不带 setId 绝不进商品全部素材列表，避免看到兄弟任务）
+   * - 其余 → 单任务详情
+   * 全部素材列表仅商品页「素材」等入口故意进入。
+   */
   openView(e) {
-    const id = e.currentTarget.dataset.id;
+    const ds = e.currentTarget.dataset || {};
+    const id = ds.id;
+    const productId = ds.productId || '';
+    const setId = ds.setId || '';
+    const isGen = ds.isGen === true || ds.isGen === 'true' || ds.isGen === 1 || ds.isGen === '1';
+    // 兜底：从当前列表项再取一次（dataset 偶发丢空串）
+    const row = (this.data.list || []).find((j) => j.id === id) || {};
+    const pid = productId || row.productId || '';
+    const sid = setId || row.setId || '';
+    const gen = isGen || row.isGenType;
+    // 失败/取消：进任务详情（有「重新生成」）
+    const needJobOps = row.status === 'failed' || row.status === 'cancelled';
+    if (needJobOps && id) {
+      wx.navigateTo({ url: `/pages/jobs/detail/detail?id=${id}` });
+      return;
+    }
+    if (gen && pid && sid) {
+      wx.navigateTo({
+        url: `/pages/product/promo-gallery/promo-gallery?id=${pid}&setId=${sid}`,
+      });
+      return;
+    }
+    // 无 setId：绝不再打开商品级素材列表（会露出兄弟组）
     if (!id) return;
     wx.navigateTo({ url: `/pages/jobs/detail/detail?id=${id}` });
   },

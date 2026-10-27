@@ -1,20 +1,14 @@
 /**
  * 员工/业主邀请落地：小程序码 scene=c=CODE 或 query invite/code
- * 微信登录 → 带 inviteCode 换 JWT → 绑定成员 → 进工作台
+ * 微信登录 → 带 inviteCode 换 JWT → 绑定成员 → 补齐缺失资料（已有字段跳过）→ 进工作台
  */
 const { request } = require('../../../utils/request');
-
-function parseScene(scene) {
-  if (!scene) return '';
-  let s = String(scene);
-  try {
-    s = decodeURIComponent(s);
-  } catch (e) { /* */ }
-  const m = s.match(/(?:^|[&?])c=([A-Za-z0-9]+)/);
-  if (m) return m[1].toUpperCase();
-  if (/^[A-Za-z0-9]{6,16}$/.test(s)) return s.toUpperCase();
-  return '';
-}
+const inviteUtil = require('../../../utils/invite');
+const {
+  missingProfileFields,
+  saveProfileWithAvatarUpload,
+  stableMediaUrl,
+} = require('../../../utils/profile');
 
 Page({
   data: {
@@ -22,19 +16,40 @@ Page({
     error: '',
     code: '',
     roleLabel: '',
+    needProfile: false,
+    needAvatar: false,
+    needNickname: false,
+    needPhone: false,
+    nickname: '',
+    avatarUrl: '',
+    phone: '',
+    phoneBinding: false,
+    saving: false,
   },
   onLoad(q) {
-    let code = (q && (q.invite || q.code || q.c)) || '';
-    if (!code && q && q.scene) code = parseScene(q.scene);
-    code = String(code || '').trim().toUpperCase();
+    this._hideHome();
+    let code = inviteUtil.extractInviteCode(q || '');
+    if (!code) code = inviteUtil.readPendingInviteCode();
+    code = inviteUtil.normalizeCode(code);
+    if (code) inviteUtil.savePendingInviteCode(code);
     this.setData({ code });
     this.run(code);
   },
+  onShow() {
+    this._hideHome();
+  },
+  _hideHome() {
+    try {
+      if (typeof wx.hideHomeButton === 'function') wx.hideHomeButton();
+    } catch (e) { /* */ }
+  },
   async run(code) {
+    code = inviteUtil.normalizeCode(code);
     if (!code) {
-      this.setData({ loading: false, error: '缺少邀请码，请扫描业主生成的小程序码' });
+      this.setData({ loading: false, error: '缺少邀请码，请打开业主发来的邀请卡片，或手动输入邀请码' });
       return;
     }
+    inviteUtil.savePendingInviteCode(code);
     wx.showLoading({ title: '加入中', mask: true });
     try {
       const app = getApp();
@@ -54,6 +69,12 @@ Page({
         });
         app.setSession(session);
       } else {
+        try {
+          app.globalData.token = '';
+          app.globalData.role = '';
+          wx.removeStorageSync('token');
+          wx.removeStorageSync('role');
+        } catch (e) { /* */ }
         const wxCode = await new Promise((resolve, reject) => {
           wx.login({
             success: (r) => (r.code ? resolve(r.code) : reject(new Error('wx.login 无 code'))),
@@ -63,35 +84,134 @@ Page({
         session = await request({
           url: '/api/auth/login',
           method: 'POST',
-          data: { code: wxCode, inviteCode: code },
+          data: { code: wxCode, inviteCode: code, preferRole: 'staff' },
         });
         app.setSession(session);
       }
       wx.hideLoading();
       if (session.role !== 'owner' && session.role !== 'staff') {
-        this.setData({ loading: false, error: '绑定失败，仍为客户角色，请联系业主重发邀请' });
+        this.setData({ loading: false, error: '绑定失败，仍为客户角色。请确认邀请码有效，或让业主重新转发邀请卡片' });
         return;
       }
+      inviteUtil.clearPendingInviteCode();
       const roleLabel = session.role === 'owner' ? '业主' : '员工';
       this.setData({ loading: false, roleLabel, error: '' });
-      wx.showToast({ title: `已加入（${roleLabel}）`, icon: 'success' });
-      setTimeout(() => {
-        wx.switchTab({ url: '/pages/product/list/list' });
-      }, 600);
+      await this.ensureProfileOrEnter();
     } catch (e) {
       wx.hideLoading();
       this.setData({ loading: false, error: (e && e.message) || '加入失败' });
     }
   },
+  async ensureProfileOrEnter() {
+    let me = null;
+    try {
+      me = await request({ url: '/api/auth/me' });
+    } catch (e) {
+      me = null;
+    }
+    const miss = missingProfileFields(me);
+    const needAvatar = miss.indexOf('avatar') >= 0;
+    const needNickname = miss.indexOf('nickname') >= 0;
+    const needPhone = miss.indexOf('phone') >= 0;
+    // 邀请加入：头像+昵称必填（已有则跳过）；手机也要求，已有则跳过
+    if (!needAvatar && !needNickname && !needPhone) {
+      this.enterWorkbench();
+      return;
+    }
+    this.setData({
+      needProfile: true,
+      needAvatar,
+      needNickname,
+      needPhone,
+      nickname: (me && me.nickname) || '',
+      avatarUrl: stableMediaUrl((me && me.avatarUrl) || '') || '',
+      phone: (me && me.phone) || '',
+    });
+  },
+  enterWorkbench() {
+    wx.showToast({ title: `已加入（${this.data.roleLabel || '员工'}）`, icon: 'success' });
+    setTimeout(() => {
+      wx.switchTab({ url: '/pages/product/list/list' });
+    }, 500);
+  },
+  onChooseAvatar(e) {
+    const url = e.detail && e.detail.avatarUrl;
+    if (!url) return;
+    this.setData({ avatarUrl: url });
+  },
+  onNickname(e) {
+    this.setData({ nickname: (e.detail && e.detail.value) || '' });
+  },
+  onPhoneInput(e) {
+    this.setData({ phone: (e.detail && e.detail.value) || '' });
+  },
+  async onGetPhoneNumber(e) {
+    const detail = (e && e.detail) || {};
+    if (!detail.code) {
+      wx.showToast({ title: '已取消或无法授权', icon: 'none' });
+      return;
+    }
+    this.setData({ phoneBinding: true });
+    try {
+      const me = await request({
+        url: '/api/auth/me/phone',
+        method: 'POST',
+        data: { code: detail.code },
+      });
+      const phone = (me && me.phone) || '';
+      if (phone) this.setData({ phone, needPhone: false });
+      wx.showToast({ title: '已获取手机号', icon: 'success' });
+    } catch (err) {
+      wx.showToast({ title: (err && err.message) || '获取失败', icon: 'none' });
+    } finally {
+      this.setData({ phoneBinding: false });
+    }
+  },
+  async saveProfileAndEnter() {
+    if (this.data.saving) return;
+    const needAvatar = this.data.needAvatar;
+    const needNickname = this.data.needNickname;
+    const needPhone = this.data.needPhone;
+    const nickname = (this.data.nickname || '').trim();
+    const avatarUrl = (this.data.avatarUrl || '').trim();
+    const phone = (this.data.phone || '').trim();
+    if (needAvatar && !avatarUrl) {
+      wx.showToast({ title: '请选择微信头像', icon: 'none' });
+      return;
+    }
+    if (needNickname && !nickname) {
+      wx.showToast({ title: '请填写昵称', icon: 'none' });
+      return;
+    }
+    if (needPhone && !phone) {
+      wx.showToast({ title: '请授权或填写手机号', icon: 'none' });
+      return;
+    }
+    this.setData({ saving: true });
+    try {
+      const payload = {};
+      if (needNickname || nickname) payload.nickname = nickname;
+      if (needAvatar || avatarUrl) payload.avatarUrl = avatarUrl;
+      if (needPhone || phone) payload.phone = phone;
+      payload.uploadAvatarIfTemp = true;
+      await saveProfileWithAvatarUpload(payload);
+      this.setData({ needProfile: false, saving: false });
+      this.enterWorkbench();
+    } catch (e) {
+      this.setData({ saving: false });
+      wx.showToast({ title: (e && e.message) || '保存失败', icon: 'none' });
+    }
+  },
   onCodeInput(e) {
-    this.setData({ code: String((e.detail && e.detail.value) || '').trim().toUpperCase() });
+    this.setData({ code: inviteUtil.normalizeCode((e.detail && e.detail.value) || '') });
   },
   retry() {
-    const code = String(this.data.code || '').trim().toUpperCase();
-    this.setData({ loading: true, error: '', code });
+    const code = inviteUtil.normalizeCode(this.data.code || '');
+    this.setData({ loading: true, error: '', code, needProfile: false });
     this.run(code);
   },
   goHome() {
+    inviteUtil.clearPendingInviteCode();
     wx.reLaunch({ url: '/pages/index/index' });
   },
 });

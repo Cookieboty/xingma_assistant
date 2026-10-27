@@ -81,11 +81,11 @@ Page({
     list: [],
     isStaff: false,
     q: '',
-    status: '',
+    status: 'on_sale',
     groupId: '',
     groups: [],
     currentGroupName: '本季款式',
-    statusLabel: { on_sale: '在售', off_sale: '下架', draft: '草稿' },
+    statusLabel: { on_sale: '在售', off_sale: '下架' },
     page: 1,
     total: 0,
     hasMore: true,
@@ -94,6 +94,8 @@ Page({
     groupPanelVisible: false,
     groupPanelMode: 'manage',
     moveProductId: '',
+    shareSheetVisible: false,
+    shareSheetProduct: { id: '', name: '', styleNo: '', coverUrl: '' },
   },
 
   onShow() {
@@ -116,7 +118,9 @@ Page({
   onSearchInput(e) { this.setData({ q: e.detail.value }); },
   onSearch() { this.reload(); },
   onStatusFilter(e) {
-    this.setData({ status: e.currentTarget.dataset.status || '' });
+    const s = e.currentTarget.dataset.status;
+    if (s !== 'on_sale' && s !== 'off_sale') return;
+    this.setData({ status: s });
     this.reload();
   },
   onGroupFilter(e) {
@@ -316,6 +320,100 @@ Page({
   goDetail(e) {
     wx.navigateTo({ url: `/pages/product/detail/detail?id=${e.currentTarget.dataset.id}` });
   },
+  /** 宣传素材（下载/保存）：与分享解耦，直达素材库 */
+  goMaterials(e) {
+    const id = e.currentTarget.dataset.id;
+    if (!id) return;
+    wx.navigateTo({ url: `/pages/product/promo-gallery/promo-gallery?id=${id}` });
+  },
+  /** 列表「转发」→ 公开 / 限量（与详情页策略对齐，不进详情） */
+  openShareSheet(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {};
+    const id = ds.id || '';
+    if (!id) return;
+    const product = {
+      id,
+      name: ds.name || '',
+      styleNo: ds.style || '',
+      coverUrl: ds.cover || '',
+    };
+    this._shareTarget = product;
+    this._sharePolicy = 'open';
+    this.setData({ shareSheetVisible: true, shareSheetProduct: product });
+    // 预热两种策略
+    this._prefetchShare(id, 'open').catch(() => {});
+    this._prefetchShare(id, 'limited').catch(() => {});
+  },
+  closeShareSheet() {
+    this.setData({ shareSheetVisible: false });
+  },
+  onShareSheetTap(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {};
+    const policy = ds.policy === 'limited' ? 'limited' : 'open';
+    this._sharePolicy = policy;
+    const p = this.data.shareSheetProduct || this._shareTarget || {};
+    if (p.id) {
+      this._shareTarget = p;
+      this._prefetchShare(p.id, policy).catch(() => {});
+    }
+  },
+  async _prefetchShare(productId, mode) {
+    if (!productId) return null;
+    const m = mode === 'limited' ? 'limited' : 'open';
+    const policy = m === 'limited' ? 'designated_only' : 'open';
+    if (!this._shareCache) this._shareCache = {};
+    const key = `${productId}::${m}`;
+    if (this._shareCache[key] && this._shareCache[key].shareId) {
+      return this._shareCache[key];
+    }
+    const data = { productId, sharePolicy: policy };
+    const res = await request({
+      url: '/api/shares',
+      method: 'POST',
+      data,
+    });
+    this._shareCache[key] = res;
+    return res;
+  },
+  onShareAppMessage() {
+    const tgt = this._shareTarget || this.data.shareSheetProduct || {};
+    const productId = tgt.id || '';
+    const mode = this._sharePolicy === 'limited' ? 'limited' : 'open';
+    const title = (tgt.name || tgt.styleNo || '商品分享').trim();
+    const imageUrl = tgt.coverUrl || '';
+    const fallback = productId
+      ? `/pages/share/landing/landing?productId=${productId}`
+      : '/pages/share/landing/landing';
+    const key = productId ? `${productId}::${mode}` : '';
+    const cached = key && this._shareCache && this._shareCache[key];
+    const syncPath = (cached && cached.shareId)
+      ? `/pages/share/landing/landing?shareId=${cached.shareId}`
+      : fallback;
+    // 发出后收起面板
+    setTimeout(() => {
+      try { this.setData({ shareSheetVisible: false }); } catch (e) { /* */ }
+    }, 400);
+    if (!productId) {
+      return { title: '商品分享', path: fallback };
+    }
+    return {
+      title,
+      path: syncPath,
+      imageUrl: imageUrl || undefined,
+      promise: this._prefetchShare(productId, mode)
+        .then((shareRes) => {
+          const sid = shareRes && shareRes.shareId;
+          return {
+            title,
+            path: sid
+              ? `/pages/share/landing/landing?shareId=${sid}`
+              : ((shareRes && shareRes.path) || fallback),
+            imageUrl: imageUrl || undefined,
+          };
+        })
+        .catch(() => ({ title, path: fallback, imageUrl: imageUrl || undefined })),
+    };
+  },
   goEdit(e) {
     const id = e.currentTarget.dataset.id;
     wx.navigateTo({
@@ -324,22 +422,5 @@ Page({
   },
   goPublish() {
     wx.navigateTo({ url: '/pages/product/publish/publish' });
-  },
-  goSettings() {
-    wx.navigateTo({ url: '/pages/settings/index/index' });
-  },
-  async toggleSale(e) {
-    const { id, status } = e.currentTarget.dataset;
-    const next = status === 'on_sale' ? 'off_sale' : 'on_sale';
-    try {
-      await request({
-        url: '/api/products/batch-status',
-        method: 'POST',
-        data: { ids: [id], status: next },
-      });
-      this.reload();
-    } catch (err) {
-      wx.showToast({ title: err.message || '失败', icon: 'none' });
-    }
   },
 });

@@ -17,6 +17,8 @@ import {
   JobRecord,
   JobStatus,
   JobType,
+  USER_VISIBLE_JOB_TYPES,
+  isUserVisibleJobType,
 } from './job.types';
 import { buildJobDisplayTitle } from './job-display-title';
 import { Product } from '../common/entities/product.entity';
@@ -73,11 +75,27 @@ export class JobsService {
     return this.ownerIds(user).includes(by);
   }
 
+  /**
+   * 档口同事可见可操作同租户 user-facing 任务（与素材页一致）。
+   * 系统/非白名单任务仍仅创建者可访问。
+   */
+  private canAccessJob(row: JobEntity | null, user: AuthContext): boolean {
+    if (!row || row.tenantId !== user.tenantId) return false;
+    if (this.isOwnedBy(row, user)) return true;
+    if (
+      (user.role === 'owner' || user.role === 'staff') &&
+      isUserVisibleJobType(row.type)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   private assertOwned(row: JobEntity | null, user: AuthContext): JobEntity {
-    if (!row || !this.isOwnedBy(row, user)) {
+    if (!this.canAccessJob(row, user)) {
       throw new NotFoundException('任务不存在');
     }
-    return row;
+    return row!;
   }
 
   async create(
@@ -92,12 +110,18 @@ export class JobsService {
       ...payload,
       displayTitle: (payload as any).displayTitle || displayTitle,
     };
+    const createTotal = Math.max(1, Number((payload as any)?.count) || 0) || undefined;
     const row = repo.create({
       id: newId('job'),
       tenantId: user.tenantId,
       type,
       status: 'queued',
-      progress: { percent: 0, step: 'queued', message: displayTitle },
+      progress: {
+        percent: 0,
+        step: 'queued',
+        message: displayTitle,
+        ...(createTotal ? { done: 0, total: createTotal } : {}),
+      },
       payload: enrichedPayload,
       result: null,
       error: null,
@@ -163,7 +187,27 @@ export class JobsService {
       };
       row.status = 'queued';
       row.payload = enrichedPayload;
-      row.progress = { percent: 0, step: 'queued', message: displayTitle };
+      {
+        const regenIdx = Array.isArray((payload as any)?.regenIndexes)
+          ? ((payload as any).regenIndexes as number[]).filter((n) => Number.isInteger(Number(n)))
+          : [];
+        const totalHint = Math.max(
+          1,
+          Number((payload as any)?.count) || 0,
+          regenIdx.length || 0,
+        );
+        // 局部重生：total 用整组 count；done 先按「未重生槽」估算，worker 会校准
+        const doneHint = regenIdx.length ? Math.max(0, totalHint - regenIdx.length) : 0;
+        row.progress = {
+          percent: 0,
+          step: 'queued',
+          message: regenIdx.length
+            ? `重新生成 ${regenIdx.length} 张（${doneHint}/${totalHint}）`
+            : displayTitle,
+          done: doneHint,
+          total: totalHint,
+        };
+      }
       row.result = null;
       row.error = null;
       row.lockedBy = null;
@@ -195,13 +239,10 @@ export class JobsService {
     if (!setId) return 0;
     const types = opts.types?.length ? opts.types : ['promo_image', 'promo_video'];
     const except = String(opts.exceptJobId || '').trim();
-    const owners = this.ownerIds(user);
-    if (!owners.length) return 0;
     const repo = this.jobs();
     const rows = await repo.find({
       where: {
         tenantId: user.tenantId,
-        createdBy: owners.length === 1 ? owners[0] : In(owners),
         type: types.length === 1 ? types[0] : In(types),
         status: In(['queued', 'running'] as JobStatus[]),
       },
@@ -230,11 +271,104 @@ export class JobsService {
   }
 
   async get(user: AuthContext, jobId: string) {
+    const orphanSetId = this.parseOrphanPromoSetId(jobId);
+    if (orphanSetId) {
+      return this.getOrphanPromoSetAsJob(user, orphanSetId);
+    }
     const row = this.assertOwned(
       await this.jobs().findOne({ where: { id: jobId, tenantId: user.tenantId } }),
       user,
     );
     const dto = this.toDto(row);
+    await this.enrichProductMeta(user.tenantId, [dto]);
+    return dto;
+  }
+
+  /** 列表合成的 orphan_<setId>：无真实 job 行时也能打开任务详情 */
+  private parseOrphanPromoSetId(jobId: string): string | null {
+    const id = String(jobId || '').trim();
+    if (!id.startsWith('orphan_')) return null;
+    const setId = id.slice('orphan_'.length).trim();
+    return setId || null;
+  }
+
+  private async getOrphanPromoSetAsJob(user: AuthContext, setId: string) {
+    if (!this.dataSource || process.env.DB_ENABLED !== 'true') {
+      throw new NotFoundException('任务不存在');
+    }
+    if (!(user.role === 'owner' || user.role === 'staff')) {
+      throw new NotFoundException('任务不存在');
+    }
+    const sets = this.dataSource.getRepository(PromoSetEntity);
+    const row = await sets.findOne({ where: { id: setId, tenantId: user.tenantId } });
+    if (!row) throw new NotFoundException('任务不存在');
+    // 已挂上真实 job：详情/重试走真实行，避免 orphan_ 残留
+    const linkedJobId = String(row.jobId || '').trim();
+    if (linkedJobId) {
+      try {
+        const jobRow = await this.jobs().findOne({
+          where: { id: linkedJobId, tenantId: user.tenantId },
+        });
+        if (jobRow && this.canAccessJob(jobRow, user)) {
+          const dto = this.toDto(jobRow);
+          await this.enrichProductMeta(user.tenantId, [dto]);
+          return dto;
+        }
+      } catch {
+        /* fall through synthetic */
+      }
+    }
+    const params = (row.params || {}) as any;
+    const kind = String(params.kind || params.mediaKind || '');
+    const isVideo = kind === 'video' || kind === 'promo_video';
+    const type = isVideo ? 'promo_video' : 'promo_image';
+    const productId = String(row.productId || '').trim();
+    const err =
+      (Array.isArray(row.images) &&
+        row.images.map((i: any) => i?.error).find((e: any) => e)) ||
+      (row.status === 'failed' ? '生成失败' : '') ||
+      '生成失败';
+    const displayTitle = buildJobDisplayTitle(type, {
+      ...params,
+      templateId: row.templateId,
+      styleNo: params.styleNo,
+    });
+    const orphanImgs = Array.isArray(row.images) ? row.images : [];
+    const orphanDone = orphanImgs.filter((i: any) => i && i.status === 'done').length;
+    const orphanTotal = Math.max(
+      orphanImgs.length,
+      Number(params.count) || 0,
+      orphanDone,
+    );
+    const dto: any = {
+      id: `orphan_${row.id}`,
+      type,
+      status: row.status === 'generating' ? 'running' : 'failed',
+      progress: {
+        percent: row.status === 'generating' ? 5 : 0,
+        step: row.status === 'generating' ? 'running' : 'failed',
+        message: String(err).slice(0, 120),
+        done: orphanDone,
+        total: orphanTotal || undefined,
+      },
+      payload: {
+        ...params,
+        productId,
+        setId: row.id,
+        templateId: row.templateId,
+        displayTitle,
+      },
+      result: { setId: row.id, productId },
+      error: row.status === 'failed' ? String(err).slice(0, 500) : null,
+      attempts: 0,
+      maxAttempts: 0,
+      createdAt: row.createdAt?.getTime?.() ?? row.createdAt,
+      updatedAt: row.updatedAt?.getTime?.() ?? row.updatedAt,
+      productId,
+      setId: row.id,
+      title: displayTitle,
+      orphanPromoSet: true,
+    };
     await this.enrichProductMeta(user.tenantId, [dto]);
     return dto;
   }
@@ -255,17 +389,27 @@ export class JobsService {
   ) {
     const take = Math.min(100, Math.max(1, Number(query?.limit) || 50));
     const skip = Math.max(0, Number(query?.offset) || 0);
-    const owners = this.ownerIds(user);
-    if (!owners.length) return { items: [], total: 0 };
     const where: any = {
       tenantId: user.tenantId,
-      createdBy: owners.length === 1 ? owners[0] : In(owners),
     };
-    if (query?.type) where.type = query.type;
+    // 业主/员工：任务中心与素材页对齐，同租户 user-facing 任务全可见（含同事创建的失败视频）
+    if (!(user.role === 'owner' || user.role === 'staff')) {
+      return { items: [], total: 0 };
+    }
+    // 业主列表默认只返回 user-facing 类型；未知/系统 job 默认隐藏
+    const rawType = String(query?.type || '').trim();
+    if (rawType) {
+      if (!isUserVisibleJobType(rawType)) {
+        return { items: [], total: 0 };
+      }
+      where.type = rawType;
+    } else {
+      where.type = In([...USER_VISIBLE_JOB_TYPES]);
+    }
     if (query?.status) where.status = query.status;
-    // 按商品筛时多取一些再内存过滤（payload JSON），保证详情页能列全
+    // 多取一些再去重/合并孤儿失败组，避免失败视频被近期成功挤出窗口
     const productId = String(query?.productId || '').trim();
-    const fetchTake = productId ? Math.min(200, Math.max(take * 4, 80)) : take;
+    const fetchTake = Math.min(200, Math.max(take * 4, productId ? 80 : take * 3));
     const [rows] = await this.jobs().findAndCount({
       where,
       order: { createdAt: 'DESC' },
@@ -275,11 +419,134 @@ export class JobsService {
     let items = rows.map((r) => this.toDto(r));
     if (productId) {
       items = items.filter((it) => String(it.productId || '').trim() === productId);
-      items = items.slice(skip, skip + take);
     }
     items = dedupePromoJobs(items);
+    items = await this.appendOrphanFailedPromoSets(user, items);
+    items = dedupePromoJobs(items);
+    if (productId) {
+      items = items.filter((it) => String(it.productId || '').trim() === productId);
+    }
+    if (query?.status) {
+      items = items.filter((it) => String(it.status || '') === String(query.status));
+    }
+    // 截断时优先保留排队/在做/失败，再补完成态
+    const rankKeep = (st: string) => {
+      if (st === 'running' || st === 'queued') return 0;
+      if (st === 'failed') return 1;
+      if (st === 'cancelled') return 2;
+      return 3;
+    };
+    items = items
+      .slice()
+      .sort((a, b) => {
+        const ra = rankKeep(String(a.status || ''));
+        const rb = rankKeep(String(b.status || ''));
+        if (ra !== rb) return ra - rb;
+        return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+      })
+      .slice(skip, skip + take);
     await this.enrichProductMeta(user.tenantId, items);
     return { items, total: items.length };
+  }
+
+  /**
+   * 素材页能看到、但 job_id 为空/任务中心漏掉的失败组：补进列表，避免死胡同。
+   * 无真实 job 时 id 用 set 关联；前端「查看」进素材组，「重新生成」走素材 regenerate。
+   */
+  private async appendOrphanFailedPromoSets(user: AuthContext, items: any[]): Promise<any[]> {
+    if (!this.dataSource || process.env.DB_ENABLED !== 'true') return items;
+    try {
+      const sets = this.dataSource.getRepository(PromoSetEntity);
+      const rows = await sets.find({
+        where: { tenantId: user.tenantId, status: 'failed' as any },
+        order: { updatedAt: 'DESC' },
+        take: 40,
+      });
+      const seenSet = new Set(
+        items
+          .map((it) => String(it?.payload?.setId || it?.setId || '').trim())
+          .filter(Boolean),
+      );
+      const seenJob = new Set(items.map((it) => String(it?.id || '').trim()).filter(Boolean));
+      const out = items.slice();
+      for (const row of rows) {
+        if (!row?.id || seenSet.has(row.id)) continue;
+        const jobId = String(row.jobId || '').trim();
+        if (jobId && seenJob.has(jobId)) {
+          seenSet.add(row.id);
+          continue;
+        }
+        // 若仍有真实 job 但不在本页结果里，尽量挂上真实 job 行
+        if (jobId) {
+          try {
+            const jobRow = await this.jobs().findOne({
+              where: { id: jobId, tenantId: user.tenantId },
+            });
+            if (jobRow && this.canAccessJob(jobRow, user)) {
+              const dto = this.toDto(jobRow);
+              out.push(dto);
+              seenSet.add(row.id);
+              seenJob.add(jobRow.id);
+              continue;
+            }
+          } catch {
+            /* fall through synthetic */
+          }
+        }
+        const params = (row.params || {}) as any;
+        const kind = String(params.kind || params.mediaKind || '');
+        const isVideo = kind === 'video' || kind === 'promo_video';
+        const err =
+          (Array.isArray(row.images) &&
+            row.images.map((i: any) => i?.error).find((e: any) => e)) ||
+          '生成失败';
+        const type = isVideo ? 'promo_video' : 'promo_image';
+        const productId = String(row.productId || '').trim();
+        const displayTitle = buildJobDisplayTitle(type, {
+          ...params,
+          templateId: row.templateId,
+          styleNo: params.styleNo,
+        });
+        const failImgs = Array.isArray(row.images) ? row.images : [];
+        const failDone = failImgs.filter((i: any) => i && i.status === 'done').length;
+        const failTotal = Math.max(failImgs.length, Number(params.count) || 0, failDone);
+        out.push({
+          // 真实 job 不可用时一律用 orphan_ 前缀，避免详情/重试打到已删 jobId
+          id: `orphan_${row.id}`,
+          type,
+          status: 'failed',
+          progress: {
+            percent: 0,
+            step: 'failed',
+            message: String(err).slice(0, 120),
+            done: failDone,
+            total: failTotal || undefined,
+          },
+          payload: {
+            ...params,
+            productId,
+            setId: row.id,
+            templateId: row.templateId,
+            displayTitle,
+          },
+          result: { setId: row.id, productId },
+          error: String(err).slice(0, 500),
+          attempts: 0,
+          maxAttempts: 0,
+          createdAt: row.createdAt?.getTime?.() ?? row.createdAt,
+          updatedAt: row.updatedAt?.getTime?.() ?? row.updatedAt,
+          productId,
+          setId: row.id,
+          title: displayTitle,
+          orphanPromoSet: true,
+        });
+        seenSet.add(row.id);
+      }
+      return out;
+    } catch (e) {
+      this.logger.warn(`appendOrphanFailedPromoSets: ${(e as Error).message}`);
+      return items;
+    }
   }
 
   async listEvents(user: AuthContext, jobId: string, limit = 50) {
@@ -302,6 +569,10 @@ export class JobsService {
   }
 
   async retry(user: AuthContext, jobId: string) {
+    const orphanSetId = this.parseOrphanPromoSetId(jobId);
+    if (orphanSetId) {
+      return this.retryOrphanPromoSet(user, orphanSetId);
+    }
     const repo = this.jobs();
     const row = this.assertOwned(
       await repo.findOne({ where: { id: jobId, tenantId: user.tenantId } }),
@@ -326,6 +597,115 @@ export class JobsService {
     await this.appendEvent(row, 'retry', '用户触发重试（已重置次数）');
     await this.revivePromoSetForRequeuedJob(row);
     return this.toDto(row);
+  }
+
+  /**
+   * 无 job 行的失败素材组：按 set.params 复用/创建真实 job 并重新排队。
+   * 任务中心「重新生成」与素材页 regenerate 同源效果，不再 toast 死胡同。
+   */
+  private async retryOrphanPromoSet(user: AuthContext, setId: string) {
+    if (!this.dataSource || process.env.DB_ENABLED !== 'true') {
+      throw new BadRequestException('任务服务未启用');
+    }
+    if (!(user.role === 'owner' || user.role === 'staff')) {
+      throw new NotFoundException('任务不存在');
+    }
+    const sets = this.dataSource.getRepository(PromoSetEntity);
+    const setRow = await sets.findOne({ where: { id: setId, tenantId: user.tenantId } });
+    if (!setRow) throw new NotFoundException('任务不存在');
+
+    const linkedJobId = String(setRow.jobId || '').trim();
+    if (linkedJobId) {
+      try {
+        const existing = await this.jobs().findOne({
+          where: { id: linkedJobId, tenantId: user.tenantId },
+        });
+        if (existing && this.canAccessJob(existing, user)) {
+          if (existing.status === 'running' || existing.status === 'queued') {
+            throw new BadRequestException('任务仍在排队或执行中');
+          }
+          if (existing.status !== 'succeeded') {
+            // 直接重排队（勿回调 this.retry，避免与 orphan 路径循环引用）
+            existing.status = 'queued';
+            existing.error = null;
+            existing.finishedAt = null;
+            existing.lockedBy = null;
+            existing.nextRunAt = null;
+            existing.startedAt = null;
+            existing.attempts = 0;
+            existing.progress = { percent: 0, step: 'queued', message: '重新排队' };
+            await this.jobs().save(existing);
+            await this.appendEvent(existing, 'retry', '用户触发重试（孤儿组已挂回 job）');
+            await this.revivePromoSetForRequeuedJob(existing);
+            return this.toDto(existing);
+          }
+        }
+      } catch (e) {
+        if (e instanceof BadRequestException) throw e;
+        /* fall through create */
+      }
+    }
+
+    const params = (setRow.params || {}) as Record<string, unknown>;
+    const kind = String((params as any).kind || (params as any).mediaKind || '');
+    const isVideo = kind === 'video' || kind === 'promo_video';
+    const type: JobType = isVideo ? 'promo_video' : 'promo_image';
+    const productId = String(setRow.productId || '').trim();
+    const templateId = String(setRow.templateId || (params as any).templateId || '').trim();
+    const refIds = ((params as any).referenceAssetIds || []).filter(Boolean);
+    if (!productId || !templateId || !refIds.length) {
+      throw new BadRequestException('该组缺少生成参数，无法重新生成');
+    }
+
+    const displayTitle = buildJobDisplayTitle(type, {
+      ...params,
+      templateId,
+      productId,
+      setId: setRow.id,
+      styleNo: (params as any).styleNo,
+    });
+    const jobPayload: Record<string, unknown> = {
+      ...params,
+      productId,
+      setId: setRow.id,
+      templateId,
+      kind: isVideo ? 'video' : (params as any).kind || 'image',
+      mediaKind: isVideo ? 'video' : (params as any).mediaKind || 'image',
+      displayTitle,
+    };
+
+    // 槽位立刻可见「重新生成中」
+    setRow.status = 'generating' as any;
+    if (isVideo) {
+      setRow.images = [{ index: 0, status: 'pending' }] as any;
+    } else if (Array.isArray(setRow.images) && setRow.images.length) {
+      setRow.images = setRow.images.map((im: any, idx: number) => {
+        if (!im) return { index: idx, status: 'pending' };
+        return {
+          ...im,
+          status: 'pending',
+          error: undefined,
+          url: undefined,
+          objectKey: undefined,
+        };
+      }) as any;
+    } else {
+      const count = Math.max(1, Number((params as any).count) || 1);
+      setRow.images = Array.from({ length: count }, (_, i) => ({
+        index: i,
+        status: 'pending',
+      })) as any;
+    }
+
+    const job = await this.reuseOrCreate(user, type, jobPayload, {
+      existingJobId: linkedJobId || null,
+    });
+    setRow.jobId = job.id;
+    await sets.save(setRow);
+    this.logger.log(
+      `retryOrphanPromoSet setId=${setRow.id} → jobId=${job.id} type=${type}`,
+    );
+    return job;
   }
 
   async cancel(user: AuthContext, jobId: string) {
@@ -445,7 +825,7 @@ export class JobsService {
     }
   }
 
-  /** promo_image 重排队：若 set 误为 failed，改回 generating（generating 保持不动） */
+  /** promo 重排队：失败组拉回 generating，视频/失败槽复位 pending，并挂上本 job */
   private async revivePromoSetForRequeuedJob(job: JobEntity) {
     if ((job.type !== 'promo_image' && job.type !== 'promo_video') || !this.dataSource) return;
     const setId = String((job.payload as any)?.setId || '').trim();
@@ -461,6 +841,28 @@ export class JobsService {
         const prev = row.status;
         row.status = 'generating';
         row.jobId = job.id;
+        const kind = String(
+          (row.params as any)?.kind || (row.params as any)?.mediaKind || '',
+        );
+        const isVideo =
+          job.type === 'promo_video' || kind === 'video' || kind === 'promo_video';
+        if (isVideo) {
+          row.images = [{ index: 0, status: 'pending' }] as any;
+        } else if (Array.isArray(row.images) && row.images.length) {
+          row.images = row.images.map((im: any, idx: number) => {
+            if (!im) return { index: idx, status: 'pending' };
+            if (im.status === 'failed' || im.error || !im.url) {
+              return {
+                ...im,
+                status: 'pending',
+                error: undefined,
+                url: undefined,
+                objectKey: undefined,
+              };
+            }
+            return im;
+          }) as any;
+        }
         await sets.save(row);
         if (prev !== 'generating') {
           this.logger.log(
@@ -498,6 +900,7 @@ export class JobsService {
         return null;
       }
       const id = rows[0].id;
+      // 保留已有 done/total（局部重生排队时已写入），只改运行态字段
       const upd = await qr.manager.query(
         `UPDATE jobs
          SET status = 'running',
@@ -505,12 +908,16 @@ export class JobsService {
              attempts = attempts + 1,
              started_at = NOW(3),
              error = NULL,
-             progress = CAST(? AS JSON),
+             progress = JSON_SET(
+               COALESCE(progress, JSON_OBJECT()),
+               '$.percent', 1,
+               '$.step', 'running',
+               '$.message', '执行中'
+             ),
              updated_at = NOW(3)
          WHERE id = ? AND status = 'queued'`,
         [
           this.workerId,
-          JSON.stringify({ percent: 1, step: 'running', message: '执行中' }),
           id,
         ],
       );
@@ -540,8 +947,27 @@ export class JobsService {
     job.error = null;
     job.finishedAt = new Date();
     job.lockedBy = null;
-    job.progress = { percent: 100, step: 'done', message: '完成', ...(job.progress || {}) };
-    (job.progress as any).percent = 100;
+    const prev = (job.progress || {}) as Record<string, unknown>;
+    const done =
+      typeof (result as any)?.done === 'number'
+        ? (result as any).done
+        : typeof prev.done === 'number'
+          ? prev.done
+          : undefined;
+    const total =
+      typeof (result as any)?.total === 'number'
+        ? (result as any).total
+        : typeof prev.total === 'number'
+          ? prev.total
+          : undefined;
+    job.progress = {
+      ...prev,
+      percent: 100,
+      step: 'done',
+      message: done != null && total != null ? `完成 ${done}/${total}` : '完成',
+      ...(done != null ? { done } : {}),
+      ...(total != null ? { total } : {}),
+    };
     await this.jobs().save(job);
     await this.appendEvent(job, 'succeeded', '任务成功', { keys: Object.keys(result || {}) });
   }
@@ -665,6 +1091,11 @@ export class JobsService {
         String((payload as any).productId || '').trim() ||
         String((rec.result as any)?.productId || (rec.result as any)?.product?.id || '').trim() ||
         '',
+      // 业主「查看」直达素材组详情；与 payload.setId 对齐
+      setId:
+        String((payload as any).setId || '').trim() ||
+        String((rec.result as any)?.setId || '').trim() ||
+        '',
     };
   }
 
@@ -737,8 +1168,10 @@ export class JobsService {
 }
 
 /**
- * promo_image：同一 setId 只留最新一条（含已完成历史），避免重生堆积多条任务。
- * 无 setId 的进行中任务：同商品+模板只留最新。
+ * promo 任务去重（列表展示用，不删库）：
+ * 1) 同一 setId 只留最新一条（重生不应堆多行）
+ * 2) 同一商品+模板：失败/取消仅当已被「更新的」成功或进行中取代时隐藏
+ *    （旧成功不得盖住新失败；失败必须仍出现在任务中心）
  */
 function dedupePromoJobs<T extends {
   id: string;
@@ -748,30 +1181,45 @@ function dedupePromoJobs<T extends {
   payload?: any;
   createdAt?: number;
 }>(items: T[]): T[] {
-  const active = new Set(['queued', 'running']);
+  const okStatus = new Set(['queued', 'running', 'succeeded', 'partial']);
+  // 先按 setId 去重（列表已按 createdAt DESC）
   const seenSet = new Set<string>();
-  const seenTpl = new Set<string>();
-  const out: T[] = [];
+  const bySet: T[] = [];
   for (const it of items) {
+    if (it.type !== 'promo_image' && it.type !== 'promo_video') {
+      bySet.push(it);
+      continue;
+    }
+    const setId = String(it.payload?.setId || '').trim();
+    if (setId) {
+      if (seenSet.has(setId)) continue;
+      seenSet.add(setId);
+    }
+    bySet.push(it);
+  }
+  // 按时间新→旧：先遇到的成功/进行中盖住更旧的失败/取消；新失败不被旧成功盖住
+  const coveredByNewerOk = new Set<string>();
+  const out: T[] = [];
+  for (const it of bySet) {
     if (it.type !== 'promo_image' && it.type !== 'promo_video') {
       out.push(it);
       continue;
     }
-    const setId = String(it.payload?.setId || '').trim();
     const productId = String(it.productId || it.payload?.productId || '').trim();
     const templateId = String(it.payload?.templateId || '').trim();
-    if (setId) {
-      if (seenSet.has(setId)) continue;
-      seenSet.add(setId);
+    const st = String(it.status || '');
+    if (!productId || !templateId) {
       out.push(it);
       continue;
     }
-    // 无 setId：仅折叠进行中的同模板重复
-    if (active.has(String(it.status || '')) && productId && templateId) {
-      const key = `${productId}::${templateId}`;
-      if (seenTpl.has(key)) continue;
-      seenTpl.add(key);
+    const key = `${productId}::${templateId}::${it.type}`;
+    if (okStatus.has(st)) {
+      coveredByNewerOk.add(key);
+      out.push(it);
+      continue;
     }
+    // failed / cancelled
+    if (coveredByNewerOk.has(key)) continue;
     out.push(it);
   }
   return out;

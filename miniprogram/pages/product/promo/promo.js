@@ -12,8 +12,9 @@ const STYLE_STRENGTH_OPTS = [
 ];
 
 const STEP_NAMES = {
-  reference: '选参考图', colors: '选颜色', feature: '商品特征', model: '选模特',
-  pose: '动作 / 呈现', scene: '场景 / 背景', pose_scene: '姿势与场景', count: '张数与尺寸',
+  reference: '选参考图', colors: '选颜色', feature: '商品特征', script: '分镜脚本', model: '选模特', bgm: '配乐',
+  pose: '动作 / 呈现', scene: '场景 / 背景', pose_scene: '姿势与场景',
+  style_keywords: '风格关键词', count: '张数与尺寸',
 };
 
 function matchPreset(options, text) {
@@ -31,6 +32,12 @@ Page({
     templates: [], models: [], tpl: null,
     steps: [], stepIdx: -1, stepKey: '', stepNames: STEP_NAMES,
     assets: [], colors: [], feature: '', featureDirty: false,
+    sellingPoint: '',
+    script: '', scriptSeconds: 10, scriptVia: '', scriptLoading: false, scriptDirty: false,
+    scriptBeats: [],
+    scriptPromptEn: '',
+    videoBgmPresets: [],
+    bgmId: 'none',
     sel: { refs: [], colors: [], modelId: '', poses: [], scenes: [], poseText: '', sceneText: '', count: 1, sizeId: '' },
     // 风格样例（可选，不进商品图库）：{ objectKey, url, uploading? }
     styleRefs: [],
@@ -38,7 +45,12 @@ Page({
     styleStrengthOpts: STYLE_STRENGTH_OPTS,
     styleRefMax: STYLE_REF_MAX,
     styleUploading: false,
-    job: null, submitting: false, saving: false, singlePoseScene: false,
+    styleKeywords: { scene: '', hasPerson: null, personVibe: '', shotType: '', mood: '', background: '', keywords: [], promptZh: '', suggestedModelId: null },
+    styleKeywordsText: '',
+    styleAnalyzing: false,
+    styleKeywordChips: [],
+    job: null, submitting: false, saving: false, singlePoseScene: false, footerPrimaryLabel: '下一步', hideFooterNext: false,
+    quickMode: false, fullSteps: [],
     voiceTarget: '', voiceListening: false, voiceHint: '按住说话',
     savingAlbum: false, albumSelectedCount: 0, albumAllSelected: false, albumSaveLabel: '保存到相册',
   },
@@ -59,7 +71,7 @@ Page({
       const uniq = [];
       templates.forEach((t) => { if (t && t.id && !seen[t.id]) { seen[t.id] = 1; uniq.push(t); } });
       this.setData({
-        templates: uniq, models: p.models,
+        templates: uniq, models: p.models, videoBgmPresets: p.videoBgmPresets || [],
         assets: s.assets.map((a) => Object.assign(a, { checked: false })),
         colors: s.colors.map((c) => ({ name: c, checked: false })),
         feature: s.feature, product: s.product, loading: false,
@@ -76,6 +88,19 @@ Page({
       } else if (!s.configured) {
         wx.showToast({ title: '服务端未配置生图密钥', icon: 'none' });
       }
+      // 生图默认进入「模特上身·场景图」完整向导（可换模板）；不再走短路径
+      if (mediaKind !== 'video') {
+        const prefer = uniq.find((t) => t.id === 'model_scene')
+          || uniq.find((t) => t.id === 'flatlay')
+          || uniq.find((t) => t.id === 'detail_closeup')
+          || uniq[0];
+        if (prefer) {
+          this.pickTemplate({
+            currentTarget: { dataset: { id: prefer.id } },
+            _assets: this.data.assets,
+          });
+        }
+      }
     } catch (e) {
       this.setData({ loading: false });
       wx.showToast({ title: e.message || '加载失败', icon: 'none' });
@@ -87,34 +112,87 @@ Page({
   },
 
   // ---- 模板 ----
+  /** 已禁用短路径：一律走模板完整 steps（含 feature / count 等） */
+  _supportsQuick(_tpl) {
+    return false;
+  },
+  _quickSteps(_tpl, fullSteps) {
+    return fullSteps;
+  },
+  /** 自动勾选商品图作为参考：静物/挂拍/模特上身尽量勾满至 max；其余模板勾选至 min */
+  _autoPickRefs(tpl, assets) {
+    const list = (assets || []).filter((a) => a && a.id && !a.isPromo);
+    if (!list.length) return { refs: [], assets: assets || [] };
+    const preferCover = list.filter((a) => a.isCover);
+    const pool = (preferCover.length ? preferCover : list).concat(
+      list.filter((a) => preferCover.indexOf(a) < 0),
+    );
+    const seen = {};
+    const ordered = [];
+    pool.forEach((a) => { if (!seen[a.id]) { seen[a.id] = 1; ordered.push(a); } });
+    const max = Math.min(tpl.reference.max || 1, ordered.length);
+    const min = Math.min(tpl.reference.min || 1, max);
+    // 平铺/挂拍静物、细节特写：尽量勾满；模特上身场景图强制 1 张 SKU
+    const generousIds = { flatlay: 1, detail_closeup: 1 };
+    const n = tpl.id === 'model_scene' ? 1 : (generousIds[tpl.id] ? max : Math.max(min, Math.min(max, min)));
+    const refs = ordered.slice(0, n).map((a) => a.id);
+    const assetsOut = (assets || []).map((a) => Object.assign({}, a, {
+      checked: refs.indexOf(a.id) >= 0,
+      order: refs.indexOf(a.id) + 1,
+    }));
+    return { refs, assets: assetsOut };
+  },
   pickTemplate(e) {
     const tpl = this.data.templates.find((t) => t.id === e.currentTarget.dataset.id);
-    const steps = tpl.steps.filter((s) => !(s === 'model' && tpl.model === 'none'));
+    if (!tpl) return;
+    const fullSteps = tpl.steps.filter((s) => !(s === 'model' && tpl.model === 'none'));
+    const quickMode = false; // 不再跳过 feature/count 等步骤
+    const steps = fullSteps;
     const singlePoseScene = tpl.id === 'multi_color';
+    const assetSrc = (e && e._assets) || this.data.assets;
+    const picked = this._autoPickRefs(tpl, assetSrc);
     this.setData({
-      tpl, steps, stepIdx: 0, stepKey: steps[0], job: null,
+      tpl, steps, fullSteps, quickMode, stepIdx: 0, stepKey: steps[0], job: null, script: '', scriptBeats: [], scriptPromptEn: '', scriptSeconds: 10, scriptVia: '', scriptDirty: false, bgmId: this.data.mediaKind === 'video' ? 'soft_ambient' : 'none',
       singlePoseScene,
       sel: {
-        refs: [], colors: [], modelId: tpl.model === 'required' ? (this.data.models[0] || {}).id : '',
-        poses: tpl.poses.length ? [tpl.poses[0].id] : [], scenes: tpl.scenes.length ? [tpl.scenes[0].id] : [],
+        refs: picked.refs,
+        colors: [],
+        modelId: tpl.model === 'required' ? (this.data.models[0] || {}).id : '',
+        poses: tpl.poses.length ? [tpl.poses[0].id] : [],
+        scenes: tpl.scenes.length ? [tpl.scenes[0].id] : [],
         poseText: '', sceneText: '',
         count: tpl.count.default, sizeId: tpl.defaultSize,
       },
       styleRefs: [],
       styleStrength: 'medium',
       styleUploading: false,
-      assets: this.data.assets.map((a) => Object.assign(a, { checked: false })),
+      styleKeywords: { scene: '', hasPerson: null, personVibe: '', shotType: '', mood: '', background: '', keywords: [], promptZh: '', suggestedModelId: null },
+      styleKeywordsText: '',
+      styleAnalyzing: false,
+      styleKeywordChips: [],
+      assets: picked.assets,
       colors: this.data.colors.map((c) => Object.assign(c, { checked: false })),
     });
     this.refreshOptionFlags();
+    this.syncFooterLabel();
   },
-  backToTemplates() { this.setData({ tpl: null, stepIdx: -1, stepKey: '', job: null }); },
+  /** 兼容旧入口：已默认完整向导，无需再展开 */
+  showMoreOptions() {
+    const full = this.data.fullSteps || this.data.steps || [];
+    if (!full.length) return;
+    const cur = this.data.stepKey;
+    let idx = full.indexOf(cur);
+    if (idx < 0) idx = 0;
+    this.setData({ quickMode: false, steps: full, stepIdx: idx, stepKey: full[idx] });
+  },
+  backToTemplates() { this.setData({ tpl: null, stepIdx: -1, stepKey: '', job: null, quickMode: false, fullSteps: [] }); },
 
   // ---- 步骤 ----
   prev() {
     if (this.data.stepIdx <= 0) return this.backToTemplates();
     const i = this.data.stepIdx - 1;
     this.setData({ stepIdx: i, stepKey: this.data.steps[i] });
+    this.syncFooterLabel();
   },
   async next() {
     const err = this.validate(this.data.stepKey);
@@ -125,17 +203,43 @@ Page({
         this.setData({ featureDirty: false });
       } catch (e) { wx.showToast({ title: '特征保存失败', icon: 'none' }); }
     }
+    const leavingRef = this.data.stepKey === 'reference';
+    const leavingFeature = this.data.stepKey === 'feature';
+    const tpl = this.data.tpl || {};
+    const needAnalyze = leavingRef && (tpl.id === 'style_ref' || (tpl.styleRef && tpl.styleRef.min > 0));
     if (this.data.stepIdx >= this.data.steps.length - 1) return this.submit();
     const i = this.data.stepIdx + 1;
-    this.setData({ stepIdx: i, stepKey: this.data.steps[i] });
+    const nextKey = this.data.steps[i];
+    this.setData({ stepIdx: i, stepKey: nextKey });
+    this.syncFooterLabel();
+    if (nextKey === 'count' && (this.data.tpl || {}).id === 'model_scene') {
+      this._syncCountFromGrid();
+    }
+    if (needAnalyze && nextKey === 'style_keywords') {
+      this.analyzeStyleRefs();
+    }
+    const leavingModel = this.data.stepKey === 'model';
+    if (this.data.mediaKind === 'video' && nextKey === 'script' && (leavingFeature || leavingRef || leavingModel) && !this.data.scriptDirty) {
+      this.draftVideoScript();
+    }
   },
   validate(k) {
     const { tpl, sel } = this.data;
     if (k === 'reference' && (sel.refs.length < tpl.reference.min || sel.refs.length > tpl.reference.max)) {
       return `请选择 ${tpl.reference.min}-${tpl.reference.max} 张参考图`;
     }
+    if (k === 'reference') {
+      const styleMin = (tpl.styleRef && tpl.styleRef.min) || 0;
+      const styleReady = (this.data.styleRefs || []).filter((x) => x && x.objectKey && !x.uploading);
+      if (styleMin > 0 && styleReady.length < styleMin) {
+        return `请至少上传 ${styleMin} 张风格样例`;
+      }
+      if (this.data.styleUploading || (this.data.styleRefs || []).some((x) => x.uploading)) {
+        return '风格样例上传中…';
+      }
+    }
     if (k === 'colors') {
-      if (tpl.id === 'multi_color') {
+      if (tpl.id === 'multi_color' || tpl.id === 'multi_color_outfit_video') {
         if (sel.colors.length < 2) return '多色展示至少选 2 个颜色';
         if (sel.colors.length !== sel.refs.length) {
           return `已选 ${sel.refs.length} 张图，请选同样数量的颜色（按顺序对应）`;
@@ -143,6 +247,13 @@ Page({
       } else if (sel.colors.length && sel.colors.length !== sel.refs.length) {
         return `已选 ${sel.refs.length} 张图，请选同样数量的颜色（按顺序对应）`;
       }
+    }
+    if (k === 'script' && (!(this.data.scriptBeats || []).length) && !(this.data.script || '').trim()) {
+      /* fallthrough to existing script check */
+    }
+    if (k === 'script') {
+      if (this.data.scriptLoading) return '脚本生成中…';
+      if (!(this.data.script || '').trim()) return '请先生成或填写分镜脚本';
     }
     if (k === 'model' && tpl.model === 'required' && !sel.modelId) return '请选择模特';
     if (k === 'pose' && tpl.poses.length && !sel.poses.length && !sel.poseText) return '请选择动作或填写描述';
@@ -177,11 +288,12 @@ Page({
   /** 风格样例：选图并上传（不进 coverMediaIds / 商品轮播） */
   addStyleRef() {
     if (this.data.styleUploading) return;
+    const max = ((this.data.tpl && this.data.tpl.styleRef && this.data.tpl.styleRef.max) || STYLE_REF_MAX);
     const have = (this.data.styleRefs || []).length;
-    if (have >= STYLE_REF_MAX) {
-      return wx.showToast({ title: `最多 ${STYLE_REF_MAX} 张`, icon: 'none' });
+    if (have >= max) {
+      return wx.showToast({ title: `最多 ${max} 张`, icon: 'none' });
     }
-    const remain = STYLE_REF_MAX - have;
+    const remain = max - have;
     wx.chooseMedia({
       count: remain,
       mediaType: ['image'],
@@ -204,10 +316,10 @@ Page({
           accepted.push(f);
         }
         if (!accepted.length) return;
-        const room = STYLE_REF_MAX - (this.data.styleRefs || []).length;
+        const room = max - (this.data.styleRefs || []).length;
         const batch = accepted.slice(0, room);
         if (accepted.length > room) {
-          wx.showToast({ title: `最多 ${STYLE_REF_MAX} 张`, icon: 'none' });
+          wx.showToast({ title: `最多 ${max} 张`, icon: 'none' });
         }
         this.setData({ styleUploading: true });
         try {
@@ -273,9 +385,191 @@ Page({
     this.setData({ 'sel.colors': cs, colors: this.data.colors.map((c) => Object.assign(c, { checked: cs.indexOf(c.name) >= 0 })) });
   },
   onFeature(e) { this.setData({ feature: e.detail.value, featureDirty: true }); },
+  onSellingPoint(e) { this.setData({ sellingPoint: e.detail.value }); },
+  onScript(e) { this.setData({ script: e.detail.value, scriptDirty: true }); },
+  normalizeBeats(raw, totalSeconds) {
+    const total = Number(totalSeconds) || 10;
+    const list = Array.isArray(raw) ? raw : [];
+    const out = [];
+    list.forEach((b, i) => {
+      if (b == null) return;
+      if (typeof b === 'string') {
+        const text = String(b).trim();
+        if (!text) return;
+        out.push({ id: `b${i}_${Date.now()}`, text, seconds: 0 });
+        return;
+      }
+      const text = String(b.text || b.script || '').trim();
+      if (!text) return;
+      out.push({
+        id: String(b.id || `b${i}_${Date.now()}`),
+        text: text.slice(0, 200),
+        seconds: Math.max(0, Math.round(Number(b.seconds) || 0)),
+      });
+    });
+    if (!out.length) return [];
+    if (out.every((x) => !x.seconds)) {
+      const each = Math.max(1, Math.floor(total / out.length));
+      let left = total;
+      out.forEach((x, i) => {
+        x.seconds = i === out.length - 1 ? Math.max(1, left) : each;
+        left -= x.seconds;
+      });
+    } else {
+      out.forEach((x) => { if (!x.seconds) x.seconds = 1; });
+    }
+    return out;
+  },
+  syncScriptFromBeats() {
+    const beats = this.data.scriptBeats || [];
+    let t0 = 0;
+    const lines = beats.map((b) => {
+      const start = t0;
+      t0 += Number(b.seconds) || 1;
+      return `${start}–${t0}s：${b.text || ''}`;
+    });
+    const seconds = Math.max(4, Math.min(15, t0 || this.data.scriptSeconds || 10));
+    const sell = (this.data.sellingPoint || '').trim();
+    const withPerson = this.data.tpl && this.data.tpl.model !== 'none';
+    const script = [
+      `【${seconds}秒·竖屏${withPerson ? '穿搭' : '商品展示'}】`,
+      ...lines,
+      sell ? `卖点：${sell}。` : '',
+    ].filter(Boolean).join('\n');
+    const promptEn = [
+      `Vertical 9:16 ${seconds}s knitwear video.`,
+      ...beats.map((b) => `(${b.seconds}s) ${b.text}`),
+      'Keep garment faithful to reference. No on-screen text.',
+    ].join(' ');
+    this.setData({
+      script,
+      scriptPromptEn: promptEn,
+      scriptSeconds: seconds,
+      scriptDirty: true,
+    });
+  },
+  onBeatText(e) {
+    const idx = Number(e.currentTarget.dataset.index);
+    const beats = (this.data.scriptBeats || []).slice();
+    if (!beats[idx]) return;
+    beats[idx] = Object.assign({}, beats[idx], { text: e.detail.value });
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  onBeatSeconds(e) {
+    const idx = Number(e.currentTarget.dataset.index);
+    const beats = (this.data.scriptBeats || []).slice();
+    if (!beats[idx]) return;
+    let sec = Math.round(Number(e.detail.value) || 0);
+    if (sec < 1) sec = 1;
+    if (sec > 12) sec = 12;
+    beats[idx] = Object.assign({}, beats[idx], { seconds: sec });
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  addBeat() {
+    const beats = (this.data.scriptBeats || []).slice();
+    if (beats.length >= 6) return wx.showToast({ title: '最多 6 段', icon: 'none' });
+    beats.push({ id: `b${Date.now()}`, text: '新镜头：请描述画面与动作', seconds: 2 });
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  removeBeat(e) {
+    const idx = Number(e.currentTarget.dataset.index);
+    const beats = (this.data.scriptBeats || []).slice();
+    if (beats.length <= 1) return wx.showToast({ title: '至少保留 1 段', icon: 'none' });
+    beats.splice(idx, 1);
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  moveBeat(e) {
+    const idx = Number(e.currentTarget.dataset.index);
+    const dir = e.currentTarget.dataset.dir === 'up' ? -1 : 1;
+    const beats = (this.data.scriptBeats || []).slice();
+    const j = idx + dir;
+    if (idx < 0 || j < 0 || j >= beats.length) return;
+    const tmp = beats[idx];
+    beats[idx] = beats[j];
+    beats[j] = tmp;
+    this.setData({ scriptBeats: beats });
+    this.syncScriptFromBeats();
+  },
+  pickBgm(e) {
+    const id = e.currentTarget.dataset.id;
+    if (!id) return;
+    this.setData({ bgmId: id });
+  },
+  /** mode: heuristic（默认即时）| polish（可选润色，慢） */
+  async draftVideoScript(opts) {
+    if (this.data.scriptLoading) return;
+    const mode = (opts && opts.mode === 'polish') ? 'polish' : 'heuristic';
+    this.setData({ scriptLoading: true });
+    try {
+      const r = await request({
+        url: `/api/products/${this.data.id}/promo/video-script`,
+        method: 'POST',
+        data: {
+          feature: this.data.feature,
+          sellingPoint: this.data.sellingPoint || undefined,
+          referenceAssetIds: (this.data.sel && this.data.sel.refs) || [],
+          seconds: this.data.scriptSeconds || 10,
+          mode,
+          templateId: (this.data.tpl && this.data.tpl.id) || undefined,
+          modelId: (this.data.sel && this.data.sel.modelId) || undefined,
+        },
+      });
+      const beats = this.normalizeBeats(r.beats, r.seconds || 10);
+      this.setData({
+        script: r.script || '',
+        scriptBeats: beats,
+        scriptPromptEn: r.promptEn || '',
+        scriptSeconds: r.seconds || 10,
+        scriptVia: r.via || '',
+        scriptDirty: false,
+        scriptLoading: false,
+      });
+    } catch (e) {
+      this.setData({ scriptLoading: false });
+      wx.showToast({ title: (e && e.message) || '脚本生成失败', icon: 'none' });
+    }
+  },
+  /** 规则草稿：进入脚本步默认调用，即时 */
+  refreshScript() { this.setData({ scriptDirty: false }); this.draftVideoScript({ mode: 'heuristic' }); },
+  /** 可选润色：调 VISION LLM */
+  polishScript() { this.setData({ scriptDirty: false }); this.draftVideoScript({ mode: 'polish' }); },
   pickModel(e) {
     const id = e.currentTarget.dataset.id;
     this.setData({ 'sel.modelId': this.data.sel.modelId === id && this.data.tpl.model !== 'required' ? '' : id });
+  },
+  /** 模特图：动作×场景网格大小（夹在 count.min/max） */
+  _poseSceneGridSize(sel, tpl) {
+    const s = sel || this.data.sel || {};
+    const t = tpl || this.data.tpl || {};
+    const pc = Math.max(1, (s.poses || []).length || 1);
+    const sc = Math.max(1, (s.scenes || []).length || 1);
+    const min = (t.count && t.count.min) || 1;
+    const max = (t.count && t.count.max) || 6;
+    return Math.min(max, Math.max(min, pc * sc));
+  },
+  /** 模特上身：张数默认跟动作×场景走（用户仍可在 count 步改） */
+  _syncCountFromGrid(extraPatch) {
+    const tpl = this.data.tpl;
+    if (!tpl || tpl.id !== 'model_scene' || this.data.mediaKind === 'video') {
+      if (extraPatch) this.setData(extraPatch);
+      return;
+    }
+    const sel = Object.assign({}, this.data.sel, extraPatch && extraPatch.sel ? extraPatch.sel : {});
+    // merge shallow sel.* keys from patch
+    const patch = Object.assign({}, extraPatch || {});
+    Object.keys(patch).forEach((k) => {
+      if (k.indexOf('sel.') === 0) {
+        const sk = k.slice(4);
+        sel[sk] = patch[k];
+      }
+    });
+    const n = this._poseSceneGridSize(sel, tpl);
+    patch['sel.count'] = n;
+    this.setData(patch);
   },
   toggleMulti(e) {
     const { kind, id } = e.currentTarget.dataset; // kind = poses | scenes
@@ -288,17 +582,13 @@ Page({
       if (kind === 'poses') return { 'sel.poseText': opt.name };
       return { 'sel.sceneText': opt.name };
     };
-    // multi_color 或单选合并步：姿态/场景单选（整组共用）
-    if (this.data.singlePoseScene || (tpl && tpl.id === 'multi_color') || this.data.stepKey === 'pose_scene') {
-      // pose_scene 下姿势仍可多选（非 multi_color）；multi_color 强制单选
-      const forceSingle = this.data.singlePoseScene || (tpl && tpl.id === 'multi_color');
-      if (forceSingle || this.data.stepKey === 'pose_scene') {
-        if (forceSingle) {
-          this.setData(Object.assign({ [`sel.${kind}`]: [id] }, fillText()));
-          this.refreshOptionFlags();
-          return;
-        }
-      }
+    // multi_color：姿态/场景强制单选（整组共用）；其它模板 pose_scene 可多选
+    const forceSingle = this.data.singlePoseScene || (tpl && tpl.id === 'multi_color');
+    if (forceSingle) {
+      const patch = Object.assign({ [`sel.${kind}`]: [id] }, fillText());
+      this._syncCountFromGrid(patch);
+      this.refreshOptionFlags();
+      return;
     }
     let arr = this.data.sel[kind].slice();
     const i = arr.indexOf(id);
@@ -306,7 +596,7 @@ Page({
     const patch = { [`sel.${kind}`]: arr };
     // 点选预设时把名称填进文本框作起点（用户可继续改成完整描述）
     if (opt && i < 0) Object.assign(patch, fillText());
-    this.setData(patch);
+    this._syncCountFromGrid(patch);
     this.refreshOptionFlags();
   },
   refreshOptionFlags() {
@@ -353,14 +643,23 @@ Page({
     if (target === 'pose') {
       const hit = matchPreset(tpl.poses || [], result);
       const patch = { 'sel.poseText': result };
-      if (hit) patch['sel.poses'] = [hit.id];
-      this.setData(patch);
+      // 多色单选：可覆盖为命中芯片；模特图等多选：只写文本，不塌缩已选动作
+      if (hit && (this.data.singlePoseScene || (tpl && tpl.id === 'multi_color') || !(this.data.sel.poses || []).length)) {
+        patch['sel.poses'] = [hit.id];
+      } else if (hit && (this.data.sel.poses || []).indexOf(hit.id) < 0) {
+        patch['sel.poses'] = (this.data.sel.poses || []).concat([hit.id]);
+      }
+      this._syncCountFromGrid(patch);
       this.refreshOptionFlags();
     } else {
       const hit = matchPreset(tpl.scenes || [], result);
       const patch = { 'sel.sceneText': result };
-      if (hit) patch['sel.scenes'] = [hit.id];
-      this.setData(patch);
+      if (hit && (this.data.singlePoseScene || (tpl && tpl.id === 'multi_color') || !(this.data.sel.scenes || []).length)) {
+        patch['sel.scenes'] = [hit.id];
+      } else if (hit && (this.data.sel.scenes || []).indexOf(hit.id) < 0) {
+        patch['sel.scenes'] = (this.data.sel.scenes || []).concat([hit.id]);
+      }
+      this._syncCountFromGrid(patch);
       this.refreshOptionFlags();
     }
     wx.showToast({ title: '已填入：' + String(result).slice(0, 12), icon: 'none' });
@@ -388,6 +687,76 @@ Page({
   countMinus() { if (this.data.sel.count > this.data.tpl.count.min) this.setData({ 'sel.count': this.data.sel.count - 1 }); },
   countPlus() { if (this.data.sel.count < this.data.tpl.count.max) this.setData({ 'sel.count': this.data.sel.count + 1 }); },
   pickSize(e) { this.setData({ 'sel.sizeId': e.currentTarget.dataset.id }); },
+
+  async analyzeStyleRefs() {
+    const keys = (this.data.styleRefs || []).map((x) => x && x.objectKey).filter(Boolean);
+    if (!keys.length) {
+      this.setData({
+        styleKeywordsText: '',
+        styleKeywordChips: [],
+        styleAnalyzing: false,
+      });
+      return;
+    }
+    this.setData({ styleAnalyzing: true });
+    try {
+      const r = await request({
+        url: `/api/products/${this.data.id}/promo/analyze-style-refs`,
+        method: 'POST',
+        data: { styleRefObjectKeys: keys },
+      });
+      const chips = [];
+      if (r.scene) chips.push(r.scene);
+      if (r.hasPerson === true) chips.push('有模特');
+      if (r.hasPerson === false) chips.push('无人');
+      if (r.personVibe) chips.push(r.personVibe);
+      if (r.shotType) chips.push(r.shotType);
+      if (r.mood) chips.push(r.mood);
+      if (r.background) chips.push(r.background);
+      (r.keywords || []).forEach((k) => { if (k && chips.indexOf(k) < 0) chips.push(k); });
+      const patch = {
+        styleKeywords: {
+          scene: r.scene || '',
+          hasPerson: r.hasPerson == null ? null : !!r.hasPerson,
+          personVibe: r.personVibe || '',
+          shotType: r.shotType || '',
+          mood: r.mood || '',
+          background: r.background || '',
+          keywords: r.keywords || [],
+          promptZh: r.promptZh || '',
+          suggestedModelId: r.suggestedModelId || null,
+        },
+        styleKeywordsText: r.promptZh || chips.join('；'),
+        styleKeywordChips: chips,
+        styleAnalyzing: false,
+      };
+      // 若分析认为有人且未选手模，预填建议模特（可改）
+      if (r.suggestedModelId && !(this.data.sel && this.data.sel.modelId)) {
+        patch['sel.modelId'] = r.suggestedModelId;
+      }
+      this.setData(patch);
+      if (!(r.analyzed || r.via === 'llm')) {
+        wx.showToast({ title: '未识别出关键词，可手填或直接生成', icon: 'none' });
+      }
+    } catch (e) {
+      this.setData({ styleAnalyzing: false });
+      wx.showToast({ title: (e && e.message) || '分析失败，可手填关键词', icon: 'none' });
+    }
+  },
+  onStyleKeywordsText(e) {
+    this.setData({ styleKeywordsText: e.detail.value });
+  },
+  toggleStyleChip(e) {
+    const name = e.currentTarget.dataset.name;
+    if (!name) return;
+    let text = String(this.data.styleKeywordsText || '');
+    const parts = text.split(/[；;、,，]/).map((s) => s.trim()).filter(Boolean);
+    const i = parts.indexOf(name);
+    if (i >= 0) parts.splice(i, 1);
+    else parts.push(name);
+    this.setData({ styleKeywordsText: parts.join('；') });
+  },
+  reAnalyzeStyle() { this.analyzeStyleRefs(); },
 
   // ---- 提交与进度 ----
   /** 合并轮询结果时保留相册勾选状态 */
@@ -423,6 +792,46 @@ Page({
     this.syncAlbumSel(merged.items);
   },
 
+  /** 分镜页一键提交：校验 script 后直接 generate（跳过可选配乐步） */
+
+  syncFooterLabel() {
+    const { stepIdx, steps, mediaKind, submitting, styleUploading, stepKey } = this.data;
+    const last = stepIdx >= (steps || []).length - 1;
+    // 视频分镜步已有卡片内「确认生成视频」：隐藏底栏「下一步」，只留一个明确 CTA
+    const hideFooterNext = mediaKind === 'video' && stepKey === 'script';
+    let footerPrimaryLabel = '下一步';
+    if (last) {
+      if (submitting) footerPrimaryLabel = '提交中…';
+      else if (styleUploading) footerPrimaryLabel = '上传中…';
+      else if (mediaKind === 'video') footerPrimaryLabel = '确认生成视频';
+      else footerPrimaryLabel = '开始生成';
+    }
+    const patch = {};
+    if (this.data.footerPrimaryLabel !== footerPrimaryLabel) patch.footerPrimaryLabel = footerPrimaryLabel;
+    if (this.data.hideFooterNext !== hideFooterNext) patch.hideFooterNext = hideFooterNext;
+    if (Object.keys(patch).length) this.setData(patch);
+  },
+
+  async submitFromScript() {
+    if (this.data.mediaKind !== 'video') return this.next();
+    if (this.data.submitting) return;
+    const err = this.validate('script');
+    if (err) return wx.showToast({ title: err, icon: 'none' });
+    return this.submit();
+  },
+
+  /** 分镜页次要入口：进可选配乐步（不占主 CTA） */
+  goOptionalBgm() {
+    if (this.data.mediaKind !== 'video' || this.data.stepKey !== 'script') return;
+    const err = this.validate('script');
+    if (err) return wx.showToast({ title: err, icon: 'none' });
+    const steps = this.data.steps || [];
+    const bgmIdx = steps.indexOf('bgm');
+    if (bgmIdx < 0) return wx.showToast({ title: '当前模板无配乐步', icon: 'none' });
+    this.setData({ stepIdx: bgmIdx, stepKey: 'bgm' });
+    this.syncFooterLabel();
+  },
+
   async submit() {
     try { await requestJobSubscribe(); } catch (e) { /* ignore */ }
     const { tpl, sel, feature, id } = this.data;
@@ -431,37 +840,71 @@ Page({
     }
     this.setData({ submitting: true });
     try {
-      const isMulti = tpl.id === 'multi_color';
+      const isMultiImage = tpl.id === 'multi_color';
+      const isMultiVideo = tpl.id === 'multi_color_outfit_video';
+      const isMulti = isMultiImage || isMultiVideo;
       if (isMulti) {
         if (sel.colors.length < 2) {
+          this.setData({ submitting: false });
           wx.showToast({ title: '多色展示至少选 2 个颜色', icon: 'none' });
           return;
         }
         if (sel.colors.length !== sel.refs.length) {
+          this.setData({ submitting: false });
           wx.showToast({ title: '颜色数量需与参考图一致', icon: 'none' });
           return;
         }
-        if (!sel.modelId) {
+        if (isMultiImage && !sel.modelId) {
+          this.setData({ submitting: false });
           wx.showToast({ title: '请选择模特', icon: 'none' });
           return;
         }
       }
-      const count = isMulti ? sel.colors.length : sel.count;
-      let poses = isMulti ? (sel.poses || []).slice(0, 1) : (sel.poses || []).slice();
-      let scenes = isMulti ? (sel.scenes || []).slice(0, 1) : (sel.scenes || []).slice();
-      const poseText = String(sel.poseText || '').trim();
-      const sceneText = String(sel.sceneText || '').trim();
-      if (poseText) {
-        const hit = matchPreset(tpl.poses || [], poseText);
-        if (hit) poses = [hit.id];
+      if (tpl.id === 'model_scene') {
+        if ((sel.refs || []).length !== 1) {
+          this.setData({ submitting: false });
+          wx.showToast({ title: '模特图请只选 1 张商品图', icon: 'none' });
+          return;
+        }
+        if (!sel.modelId) {
+          this.setData({ submitting: false });
+          wx.showToast({ title: '请选择 1 个模特', icon: 'none' });
+          return;
+        }
       }
-      if (sceneText) {
-        const hit = matchPreset(tpl.scenes || [], sceneText);
-        if (hit) scenes = [hit.id];
-      }
+      const count = isMultiImage ? sel.colors.length : (this.data.mediaKind === 'video' ? 1 : sel.count);
+      let poses = isMultiImage ? (sel.poses || []).slice(0, 1) : (sel.poses || []).slice();
+      let scenes = isMultiImage ? (sel.scenes || []).slice(0, 1) : (sel.scenes || []).slice();
+      let poseText = String(sel.poseText || '').trim();
+      let sceneText = String(sel.sceneText || '').trim();
+      // 多色：文本命中芯片可塌缩为单选；模特图等：保留多选数组，芯片名回填不覆盖
       if (isMulti) {
+        if (poseText) {
+          const hit = matchPreset(tpl.poses || [], poseText);
+          if (hit) poses = [hit.id];
+        }
+        if (sceneText) {
+          const hit = matchPreset(tpl.scenes || [], sceneText);
+          if (hit) scenes = [hit.id];
+        }
         poses = poses.slice(0, 1);
         scenes = scenes.slice(0, 1);
+      } else {
+        // 芯片名回填：多选时不把 freeText 当唯一姿势（避免后端/提示词覆盖错开）
+        if (poses.length > 1) {
+          const names = (tpl.poses || []).filter((o) => poses.indexOf(o.id) >= 0).map((o) => o.name);
+          if (names.indexOf(poseText) >= 0) poseText = '';
+        } else if (poseText && !poses.length) {
+          const hit = matchPreset(tpl.poses || [], poseText);
+          if (hit) poses = [hit.id];
+        }
+        if (scenes.length > 1) {
+          const names = (tpl.scenes || []).filter((o) => scenes.indexOf(o.id) >= 0).map((o) => o.name);
+          if (names.indexOf(sceneText) >= 0) sceneText = '';
+        } else if (sceneText && !scenes.length) {
+          const hit = matchPreset(tpl.scenes || [], sceneText);
+          if (hit) scenes = [hit.id];
+        }
       }
       const styleRefObjectKeys = (this.data.styleRefs || [])
         .map((x) => x && x.objectKey)
@@ -470,20 +913,55 @@ Page({
       const payload = {
         templateId: tpl.id,
         mediaKind: this.data.mediaKind === 'video' ? 'video' : 'image',
-        feature, referenceAssetIds: sel.refs,
+        feature, sellingPoint: this.data.sellingPoint || undefined, script: this.data.script || undefined, seconds: this.data.scriptSeconds || undefined, referenceAssetIds: sel.refs,
         modelId: sel.modelId || null, poses, scenes,
+        beats: this.data.mediaKind === 'video' ? (this.data.scriptBeats || []).map((b) => ({ text: b.text, seconds: b.seconds })) : undefined,
+        bgmId: this.data.mediaKind === 'video' ? (this.data.bgmId || 'soft_ambient') : undefined,
+        generateAudio: this.data.mediaKind === 'video'
+          ? ((this.data.bgmId || 'soft_ambient') !== 'none')
+          : undefined,
         poseText: poseText || undefined,
         sceneText: sceneText || undefined,
-        colors: sel.colors, count, sizeId: sel.sizeId,
+        colors: sel.colors || [], count, sizeId: sel.sizeId,
       };
-      if (this.data.mediaKind !== 'video' && styleRefObjectKeys.length) {
+      const styleAllowed = !!(tpl.styleRef && tpl.styleRef.max > 0);
+      if (styleAllowed && this.data.mediaKind !== 'video' && styleRefObjectKeys.length) {
         payload.styleRefObjectKeys = styleRefObjectKeys;
-        payload.styleStrength = this.data.styleStrength || 'medium';
+        payload.styleStrength = this.data.styleStrength || (tpl.id === 'style_ref' ? 'strong' : 'medium');
+      }
+      if (styleAllowed) {
+        if (!styleRefObjectKeys.length) {
+          wx.showToast({ title: '请上传风格样例', icon: 'none' });
+          return;
+        }
+        const sk = this.data.styleKeywords || {};
+        payload.styleKeywords = {
+          scene: sk.scene || '',
+          hasPerson: sk.hasPerson,
+          personVibe: sk.personVibe || '',
+          shotType: sk.shotType || '',
+          mood: sk.mood || '',
+          background: sk.background || '',
+          keywords: sk.keywords || [],
+          promptZh: this.data.styleKeywordsText || sk.promptZh || '',
+          suggestedModelId: sk.suggestedModelId || null,
+        };
+        payload.styleKeywordsText = this.data.styleKeywordsText || '';
       }
       const job = await request({
         url: `/api/products/${id}/promo/generate`, method: 'POST',
         data: payload,
       });
+      // 视频：建单即回素材列表/进度，不等 LKB；图仍可在向导结果页看槽位
+      if (this.data.mediaKind === 'video') {
+        const setId = (job && (job.setId || (job.payload && job.payload.setId))) || '';
+        const q = setId
+          ? `/pages/product/promo-gallery/promo-gallery?id=${id}&setId=${setId}`
+          : `/pages/product/promo-gallery/promo-gallery?id=${id}`;
+        wx.showToast({ title: '已提交，后台生成中', icon: 'none' });
+        wx.redirectTo({ url: q });
+        return;
+      }
       this.setData({
         job: Object.assign({}, job, {
           items: (job.items || []).map((it) => Object.assign({}, it, { albumSelected: false })),

@@ -64,10 +64,8 @@ export class MediaController {
     });
   }
 
-  /** 服务端中转上传（联系二维码等小文件 / 本地 mock） */
+  /** 服务端中转上传（头像/联系二维码等小文件 / 本地 mock）。头像允许客户上传。 */
   @Post('upload')
-  @UseGuards(RolesGuard)
-  @Roles('owner', 'staff')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -80,7 +78,13 @@ export class MediaController {
     @Body() body: { purpose?: string; productId?: string },
   ) {
     if (!file?.buffer?.length) throw new BadRequestException('缺少文件');
-    return this.mediaService.uploadBuffer(user, file, body?.purpose || 'misc', {
+    const purpose = String(body?.purpose || 'misc');
+    const isAvatar = purpose === 'avatar';
+    const staffOk = user.role === 'owner' || user.role === 'staff';
+    if (!isAvatar && !staffOk) {
+      throw new BadRequestException('无权上传');
+    }
+    return this.mediaService.uploadBuffer(user, file, purpose, {
       productId: body?.productId,
     });
   }

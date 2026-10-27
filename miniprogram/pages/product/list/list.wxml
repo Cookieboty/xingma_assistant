@@ -12,7 +12,7 @@
   </view>
 
   <view class="card search-bar">
-    <input class="input" placeholder="搜索款号 / 名称" value="{{q}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="onSearch" />
+    <input class="input" placeholder="搜索款号" value="{{q}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="onSearch" />
     <view class="search-btn" bindtap="onSearch">搜索</view>
   </view>
 
@@ -30,10 +30,8 @@
   </scroll-view>
 
   <view class="filters">
-    <text class="chip {{status===''?'active':''}}" data-status="" bindtap="onStatusFilter">全部</text>
     <text class="chip {{status==='on_sale'?'active':''}}" data-status="on_sale" bindtap="onStatusFilter">在售</text>
     <text class="chip {{status==='off_sale'?'active':''}}" data-status="off_sale" bindtap="onStatusFilter">下架</text>
-    <text class="chip {{status==='draft'?'active':''}}" data-status="draft" bindtap="onStatusFilter">草稿</text>
   </view>
 
   <view class="product-card card" wx:for="{{list}}" wx:key="id">
@@ -60,15 +58,15 @@
     <view class="pc-actions">
       <view class="pc-act" catchtap="goEdit" data-id="{{item.id}}">编辑</view>
       <view class="pc-act-div"></view>
-      <view class="pc-act" catchtap="goDetail" data-id="{{item.id}}">分享</view>
+      <view class="pc-act" catchtap="openShareSheet" data-id="{{item.id}}" data-name="{{item.name}}" data-style="{{item.styleNo}}" data-cover="{{item.coverUrl}}">转发</view>
       <view class="pc-act-div"></view>
-      <view class="pc-act" catchtap="toggleSale" data-id="{{item.id}}" data-status="{{item.status}}">
-        {{item.status==='on_sale'?'下架':'上架'}}
-      </view>
+      <view class="pc-act" catchtap="goMaterials" data-id="{{item.id}}">素材</view>
     </view>
   </view>
 
-  <view class="muted empty" wx:if="{{!list.length && !loading}}">暂无商品，点上方「选图发品」开始</view>
+  <view class="card muted empty" wx:if="{{!list.length && !loading}}">
+    <view>暂无商品</view>
+  </view>
   <view class="muted footer-tip" wx:if="{{loading}}">加载中…</view>
   <view class="muted footer-tip" wx:elif="{{loadingMore}}">加载更多…</view>
   <view class="muted footer-tip" wx:elif="{{list.length && !hasMore}}">没有更多了</view>
@@ -97,6 +95,27 @@
         </view>
         <view class="muted empty" wx:if="{{!groups.length}}" style="padding:40rpx;">暂无分组</view>
       </scroll-view>
+    </view>
+  </view>
+
+  <!-- 列表转发：公开 / 限量，不进商品详情 -->
+  <view class="share-mask" wx:if="{{shareSheetVisible}}" catchtouchmove="noop" catchtap="closeShareSheet">
+    <view class="share-sheet card" catchtap="noop">
+      <view class="share-sheet-title">转发给微信好友</view>
+      <view class="muted small" wx:if="{{shareSheetProduct.name}}">{{shareSheetProduct.name}} · {{shareSheetProduct.styleNo}}</view>
+      <button
+        class="btn-primary share-sheet-btn"
+        open-type="share"
+        data-policy="open"
+        catchtap="onShareSheetTap"
+      >公开转发</button>
+      <button
+        class="btn-primary share-sheet-btn"
+        open-type="share"
+        data-policy="limited"
+        catchtap="onShareSheetTap"
+      >限量转发</button>
+      <view class="share-sheet-cancel" bindtap="closeShareSheet">取消</view>
     </view>
   </view>
 

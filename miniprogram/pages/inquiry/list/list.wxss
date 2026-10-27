@@ -1,0 +1,13 @@
+
+.chips-row { white-space: nowrap; margin: 0 0 16rpx; }
+.chip {
+  display: inline-block;
+  padding: 10rpx 24rpx;
+  margin-right: 12rpx;
+  border-radius: 999rpx;
+  background: #f0ebe6;
+  color: #666;
+  font-size: 24rpx;
+}
+.chip.active { background: #c45c26; color: #fff; }
+.empty { text-align: center; padding: 40rpx; }

@@ -4,7 +4,7 @@
  */
 
 export type Platform = 'moments' | 'xiaohongshu';
-export type PromoStep = 'reference' | 'feature' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count';
+export type PromoStep = 'reference' | 'feature' | 'script' | 'model' | 'pose' | 'scene' | 'pose_scene' | 'colors' | 'count' | 'style_keywords' | 'bgm';
 
 export interface Option {
   id: string;
@@ -32,11 +32,18 @@ export interface ReferenceRule {
 
 export interface PromoModel {
   id: string;
+  /** 短标签，展示用，如「25岁中国女」 */
   name: string;
+  /** 短描述，展示用；不展示英文 prompt */
   desc: string;
+  /** 生成注入用英文人设（不下发前端） */
   prompt: string;
-  /** 小程序本地头像路径（包内 /images/models/…） */
+  /** 小程序头像：优先公网人脸图 */
   avatar: string;
+  /** 公网人脸参考图 URL（external modelImageUrl / 前端展示） */
+  faceUrl: string;
+  /** OSS objectKey（无 OSS_PREFIX）：presets/models/{id}.jpg */
+  faceObjectKey: string;
 }
 
 export interface PromptContext {
@@ -48,6 +55,8 @@ export interface PromptContext {
   poseText?: string;
   /** 用户自由描述的场景/背景（优先于 scene.prompt） */
   sceneText?: string;
+  /** 风格参考模板：用户编辑后的中文软关键词（不画进图） */
+  styleKeywordsText?: string;
   colors?: string[];
   index: number;
   total: number;
@@ -71,6 +80,12 @@ export interface PromoTemplate {
   buildPrompt: (c: PromptContext) => string;
   /** image（默认）| video：前端与 generate 分流 */
   mediaKind?: 'image' | 'video';
+  /**
+   * 风格样例规则。仅 style_ref 等需要样例的模板声明；缺省 = 不支持风格样例。
+   */
+  styleRef?: { min: number; max: number; hint: string };
+  /** style_ref 模板：风格图为硬参考（构图光影），仍低于服装 KEEP */
+  styleRefPrimary?: boolean;
 }
 
 export const SIZES: Record<string, SizeOption> = {
@@ -80,12 +95,66 @@ export const SIZES: Record<string, SizeOption> = {
   vertical_video: { id: 'vertical_video', name: '竖短视频 720×1280 (9:16)', upstream: '720x1280', target: '720x1280' },
 };
 
+/** 预置模特人脸：OSS xingma-stall/presets/models/；提示词仅服务端注入 */
+const PRESET_FACE_BASE =
+  process.env.PRESET_MODEL_FACE_BASE ||
+  'https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall';
+
+function presetFace(id: string): Pick<PromoModel, 'avatar' | 'faceUrl' | 'faceObjectKey'> {
+  const faceObjectKey = `presets/models/${id}.jpg`;
+  const faceUrl = `${PRESET_FACE_BASE.replace(/\/$/, '')}/${faceObjectKey}`;
+  return { faceObjectKey, faceUrl, avatar: faceUrl };
+}
+
 export const MODELS: PromoModel[] = [
-  { id: 'f_young', name: '亚洲女 · 22-28 岁', desc: '清爽自然、黑长直', prompt: 'a natural-looking East Asian woman in her mid twenties, long straight black hair, light natural makeup, slim build', avatar: '/images/models/f_young.png' },
-  { id: 'f_mature', name: '亚洲女 · 30-40 岁', desc: '知性温柔、齐肩发', prompt: 'an elegant East Asian woman in her thirties, shoulder-length hair, gentle confident expression', avatar: '/images/models/f_mature.png' },
-  { id: 'f_mom', name: '亚洲女 · 45-55 岁', desc: '端庄大方、妈妈款', prompt: 'a graceful East Asian woman in her fifties, short neat hair, warm smile, healthy figure', avatar: '/images/models/f_mom.png' },
-  { id: 'm_young', name: '亚洲男 · 25-35 岁', desc: '干净利落、短发', prompt: 'a clean-cut East Asian man in his late twenties, short black hair, relaxed posture', avatar: '/images/models/m_young.png' },
-  { id: 'm_mature', name: '亚洲男 · 40-55 岁', desc: '稳重儒雅', prompt: 'a refined East Asian man in his late forties, neat short hair, calm and steady look', avatar: '/images/models/m_mature.png' },
+  {
+    id: 'f_young',
+    name: '25岁中国女',
+    desc: '黑长直 · 清爽自然',
+    prompt:
+      'a natural-looking Chinese woman about 25 years old, long straight black hair, light natural makeup, slim build, East Asian facial features matching the provided face reference',
+    ...presetFace('f_young'),
+  },
+  {
+    id: 'f_fresh',
+    name: '22岁中国女',
+    desc: '微卷 · 清新甜美',
+    prompt:
+      'a fresh-faced Chinese woman about 22 years old, soft wavy black hair past the shoulders, light freckles optional, gentle closed-lip smile, youthful slim build, East Asian facial features matching the provided face reference',
+    ...presetFace('f_fresh'),
+  },
+  {
+    id: 'f_mature',
+    name: '35岁中国女',
+    desc: '齐肩发 · 知性温柔',
+    prompt:
+      'an elegant Chinese woman about 35 years old, shoulder-length dark hair, gentle confident expression, light natural makeup, East Asian facial features matching the provided face reference',
+    ...presetFace('f_mature'),
+  },
+  {
+    id: 'f_mom',
+    name: '50岁中国女',
+    desc: '短发 · 端庄妈妈款',
+    prompt:
+      'a graceful Chinese woman about 50 years old, short neat hair with soft gray strands, warm kind smile, healthy mature figure, East Asian facial features matching the provided face reference',
+    ...presetFace('f_mom'),
+  },
+  {
+    id: 'm_young',
+    name: '28岁中国男',
+    desc: '短发 · 干净利落',
+    prompt:
+      'a clean-cut Chinese man about 28 years old, short black hair, relaxed posture, natural expression, East Asian facial features matching the provided face reference',
+    ...presetFace('m_young'),
+  },
+  {
+    id: 'm_mature',
+    name: '45岁中国男',
+    desc: '短发 · 稳重儒雅',
+    prompt:
+      'a refined Chinese man about 45 years old, neat short hair with slight gray at the temples, calm and steady look, East Asian facial features matching the provided face reference',
+    ...presetFace('m_mature'),
+  },
 ];
 
 /** 所有模板通用的约束：服装不变、不画字（颜色与参考图一致） */
@@ -117,25 +186,36 @@ export function buildStyleRefPrompt(opts: {
   garmentRefCount: number;
   styleRefCount: number;
   strength?: StyleStrength | string | null;
+  /** 风格参考专用模板：样例为构图/光影硬参考，但仍低于 KEEP */
+  primary?: boolean;
 }): string {
   const n = Math.max(0, Number(opts.styleRefCount) || 0);
   if (!n) return '';
   const g = Math.max(1, Number(opts.garmentRefCount) || 1);
-  const raw = String(opts.strength || 'medium');
+  const raw = String(opts.strength || (opts.primary ? 'strong' : 'medium'));
   const strength: StyleStrength =
     raw === 'weak' || raw === 'strong' ? raw : 'medium';
-  return [
+  const primary = !!opts.primary;
+  const lines = [
     `Additional style reference image(s) are provided AFTER the first ${g} garment reference image(s) (${n} style-only image(s)).`,
-    'Use style references ONLY for lighting, color grading, camera angle, framing, depth of field and lifestyle mood.',
-    'Do NOT copy clothing, garment cut, knit patterns, faces or person identity, brand logos, trademarks, watermarks or text from the style references.',
+    primary
+      ? 'These style images are the PRIMARY hard references for composition, camera framing, lighting, color grading, depth of field and lifestyle mood — match them closely.'
+      : 'Use style references ONLY for lighting, color grading, camera angle, framing, depth of field and lifestyle mood.',
+    'Do NOT copy clothing, garment cut, knit patterns, yarn color, faces or person identity, brand logos, trademarks, watermarks or text from the style references.',
     'If a preset model was selected, keep that model identity; never clone faces from style samples.',
-    'Priority when conflicting: garment KEEP > template / pose / scene text > style samples.',
+    primary
+      ? 'Priority when conflicting: garment KEEP (product refs) > soft keyword text > style sample composition/lighting. Never let style samples override garment identity.'
+      : 'Priority when conflicting: garment KEEP > template / pose / scene text > style samples.',
     STYLE_STRENGTH_LINE[strength],
     'The knit garment must still match the garment reference exactly (KEEP).',
-  ].join(' ');
+  ];
+  return lines.join(' ');
 }
 
-/** 下发给前端的风格样例规则（所有模板共用；非独立步骤） */
+/**
+ * 风格样例上限（仅 style_ref 等显式声明 styleRef 的模板使用）。
+ * 其它模板不再下发可选风格样例。
+ */
 export const STYLE_REF_RULE = {
   min: 0,
   max: 4,
@@ -177,7 +257,7 @@ export const TEMPLATES: PromoTemplate[] = [
       { id: 'dark', name: '深色质感', prompt: 'on a dark charcoal felt surface with moody directional light' },
     ],
     reference: { prefer: ['detail', 'main'], min: 1, max: 2, hint: '选 1-2 张细节图或主图（织纹清晰的优先）' },
-    count: { min: 1, max: 4, default: 2 },
+    count: { min: 1, max: 4, default: 1 },
     steps: ['reference', 'feature', 'pose_scene', 'count'],
     buildPrompt: (c) =>
       [
@@ -208,8 +288,8 @@ export const TEMPLATES: PromoTemplate[] = [
       { id: 'autumn', name: '秋冬氛围', prompt: 'with autumn leaves, pine cones and a warm scarf as props' },
       { id: 'wood', name: '原木地板', prompt: 'on light wooden floorboards with soft daylight' },
     ],
-    reference: { prefer: ['main'], min: 1, max: 1, hint: '选 1 张能看到整件衣服的主图' },
-    count: { min: 1, max: 4, default: 2 },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张挂拍/平铺/静物主图与细节' },
+    count: { min: 1, max: 4, default: 1 },
     steps: ['reference', 'feature', 'pose_scene', 'count'],
     buildPrompt: (c) =>
       [
@@ -226,7 +306,7 @@ export const TEMPLATES: PromoTemplate[] = [
   {
     id: 'model_scene',
     name: '模特上身 · 场景图',
-    desc: '选模特、动作、场景；衣服颜色款式保持不变',
+    desc: '1 张商品图 + 1 个模特；可多选动作与场景，按动作×场景错开出图',
     platforms: ['moments', 'xiaohongshu'],
     defaultSize: 'portrait',
     sizes: ['portrait', 'square'],
@@ -234,17 +314,24 @@ export const TEMPLATES: PromoTemplate[] = [
     poses: MODEL_POSES,
     sceneLabel: '场景',
     scenes: MODEL_SCENES,
-    reference: { prefer: ['main'], min: 1, max: 2, hint: '选 1-2 张清晰主图（正面整件）' },
-    count: { min: 1, max: 6, default: 2 },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 1, hint: '只选 1 张清晰商品主图（正面整件优先）' },
+    count: { min: 1, max: 6, default: 1 },
     steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
     buildPrompt: (c) =>
       [
         `Fashion lifestyle photograph: ${c.model?.prompt || 'an East Asian model'} wearing the exact knit garment from the reference image.`,
-        (c.poseText || c.pose?.prompt) ? `Pose: ${effectivePrompt(c.pose, c.poseText)}.` : '',
-        (c.sceneText || c.scene?.prompt) ? `Scene: ${effectivePrompt(c.scene, c.sceneText)}.` : '',
+        // 多动作×场景：槽位用芯片 pose/scene；自由文案仅作补充，不覆盖错开配对
+        c.pose?.prompt ? `Pose: ${c.pose.prompt}.` : '',
+        c.poseText && !(c.pose?.name && c.poseText.trim() === c.pose.name)
+          ? `Pose note from merchant: ${c.poseText}.`
+          : '',
+        c.scene?.prompt ? `Scene: ${c.scene.prompt}.` : '',
+        c.sceneText && !(c.scene?.name && c.sceneText.trim() === c.scene.name)
+          ? `Scene note from merchant: ${c.sceneText}.`
+          : '',
         'Pair with simple neutral bottoms that do not distract. Realistic skin, natural proportions, professional e-commerce fashion photography.',
         c.total > 1
-          ? `Shot ${c.index + 1} of ${c.total}: if pose and scene are the same as other shots, add natural micro-variation (expression, weight shift, hand position) so images are not clones; do not change garment or framing style.`
+          ? `Shot ${c.index + 1} of ${c.total}: this slot's pose×scene pair must read differently from sibling slots; if the pair repeats, vary camera height/crop/gaze/hands; never clone the same frame; do not change garment.`
           : '',
         FEATURE(c.feature), KEEP, PHOTOREAL, NO_TEXT,
       ].filter(Boolean).join(' '),
@@ -308,7 +395,7 @@ export const TEMPLATES: PromoTemplate[] = [
       { id: 'winter', name: '冬日暖光', prompt: 'a winter evening with fairy lights and warm bokeh' },
     ],
     reference: { prefer: ['main'], min: 1, max: 2, hint: '选 1-2 张主图' },
-    count: { min: 1, max: 4, default: 2 },
+    count: { min: 1, max: 4, default: 1 },
     steps: ['reference', 'feature', 'model', 'pose_scene', 'count'],
     buildPrompt: (c) => {
       const poseId = c.pose?.id || '';
@@ -345,9 +432,49 @@ export const TEMPLATES: PromoTemplate[] = [
   },
 
   {
+    id: 'style_ref',
+    name: '风格参考',
+    desc: '照着你找的样例出图：风格样例必传；衣服仍以商品图为准；可改自动提取的关键词',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'portrait',
+    sizes: ['portrait', 'square'],
+    model: 'optional',
+    poses: [],
+    scenes: [],
+    sceneLabel: '氛围',
+    reference: { prefer: ['main', 'detail'], min: 1, max: 2, hint: '选 1-2 张商品主图/细节图（衣服保真）' },
+    count: { min: 1, max: 4, default: 2 },
+    steps: ['reference', 'style_keywords', 'model', 'count'],
+    styleRef: {
+      min: 1,
+      max: 4,
+      hint: '必传：上传你要照着出的成片样例（1-4 张）；衣服仍以商品图为准，不抄样例人脸/品牌',
+    },
+    styleRefPrimary: true,
+    buildPrompt: (c) => {
+      const hasModel = !!c.model;
+      const kw = String(c.styleKeywordsText || '').trim();
+      return [
+        'Fashion e-commerce photograph matching the style reference image(s) for composition, lighting, color grading, framing and mood.',
+        hasModel
+          ? `${c.model!.prompt} wears the exact knit garment from the garment reference image(s).`
+          : 'Feature the exact knit garment from the garment reference image(s); include a person only if the style samples clearly show one and soft keywords require it.',
+        kw
+          ? `Soft merchant style keywords (Chinese, follow intent for scene/mood/shot, do not render as text): ${kw}.`
+          : 'Infer scene, shot type and mood primarily from the style reference image(s).',
+        'Pair with simple neutral bottoms that do not distract when a model is present.',
+        c.total > 1
+          ? `Variation ${c.index + 1} of ${c.total}: keep the same style language; add natural micro-variation so shots are not clones.`
+          : '',
+        FEATURE(c.feature), KEEP, PHOTOREAL, NO_TEXT,
+      ].filter(Boolean).join(' ');
+    },
+  },
+
+  {
     id: 'product_showcase_video',
-    name: '商品竖版短视频',
-    desc: '约 15 秒竖屏短视频：商品参考图驱动镜头运动与展示（一期纯跑通，暂不上模特出镜）',
+    name: '商品挂拍短视频',
+    desc: '约 8～12 秒竖屏：静物/挂拍展示，不出真人；可多选商品图作参考',
     platforms: ['moments', 'xiaohongshu'],
     defaultSize: 'vertical_video',
     sizes: ['vertical_video'],
@@ -355,21 +482,152 @@ export const TEMPLATES: PromoTemplate[] = [
     poses: [],
     scenes: [],
     sceneLabel: '场景',
-    reference: { prefer: ['main', 'detail'], min: 1, max: 4, hint: '选 1-4 张商品主图/细节图作为视频参考' },
+    reference: { prefer: ['main', 'detail'], min: 1, max: 9, hint: '选 1-9 张商品主图/细节图作为视频参考（越多细节越稳）' },
     count: { min: 1, max: 1, default: 1 },
-    steps: ['reference', 'feature'],
+    steps: ['reference', 'feature', 'script', 'bgm'],
     mediaKind: 'video',
     buildPrompt: (c) =>
       [
         'Vertical 9:16 short product showcase video of a knitwear garment for social commerce.',
         'Smooth cinematic camera: slow push-in, gentle orbit or tilt, soft natural light, premium e-commerce look.',
         'Keep the garment appearance faithful to the reference image(s): same color, knit texture, neckline, sleeves and cut. Do not redesign.',
-        'No on-screen text, logos, watermarks or captions. No people / models on camera in this phase.',
+        'No on-screen text, logos, watermarks or captions. No people / models on camera.',
         'Photoreal fabric motion and subtle depth of field; clean background suitable for Moments / Xiaohongshu.',
         FEATURE(c.feature),
       ].filter(Boolean).join(' '),
   },
+
+  {
+    id: 'street_walk_video',
+    name: '街头漫步穿搭',
+    desc: '真人模特穿着成衣在街上自然走动；可选模特与配乐',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'optional',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['main', 'detail'], min: 1, max: 9, hint: '选 1-9 张商品图（正面/侧面/细节均可）' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'feature', 'model', 'script', 'bgm'],
+    mediaKind: 'video',
+    buildPrompt: (c) =>
+      [
+        'Vertical 9:16 lifestyle fashion video: a person walking casually on a city street wearing the exact knit garment from the reference.',
+        c.model?.prompt
+          ? `Talent: ${c.model.prompt}.`
+          : 'Talent: a natural-looking East Asian young adult, realistic proportions, not a celebrity.',
+        'Camera follows at mid-shot / three-quarter, gentle handheld feel, soft daylight, shallow depth of field.',
+        'Keep garment faithful to reference: same color, knit texture, neckline, sleeves and cut; do not redesign.',
+        'Natural walking gait, subtle fabric motion, clean urban backdrop; no on-screen text, logos or watermarks.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' '),
+  },
+
+  {
+    id: 'multi_color_outfit_video',
+    name: '多色换装短视频',
+    desc: '同一镜头氛围下切换成衣颜色；请按顺序选多色参考图',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'optional',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['main', 'detail'], min: 2, max: 9, hint: '按颜色顺序选 2-9 张成衣图（一张一色）' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'colors', 'feature', 'model', 'script', 'bgm'],
+    mediaKind: 'video',
+    buildPrompt: (c) => {
+      const colorHint = (c.colors || []).filter(Boolean).join(', ');
+      return [
+        'Vertical 9:16 knitwear color-change promo video for social commerce.',
+        c.model?.prompt
+          ? `Talent: ${c.model.prompt} wears successive color variants of the same knit garment.`
+          : 'Show the same knit garment design in successive color variants (hanging or on a model if implied).',
+        colorHint ? `Color sequence from merchant refs: ${colorHint}.` : 'Cycle through the color variants implied by the reference images in order.',
+        'Smooth transitions between colors; keep cut, knit texture and styling consistent; only color changes.',
+        'Keep each variant faithful to its matching reference. Soft light, clean set. No on-screen text, logos or watermarks.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' ');
+    },
+  },
+
+  {
+    id: 'cafe_lifestyle_video',
+    name: '咖啡馆生活感',
+    desc: '窗边/咖啡馆氛围，模特轻坐或转身展示成衣',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'optional',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['main', 'detail'], min: 1, max: 9, hint: '选 1-9 张商品主图/细节图' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'feature', 'model', 'script', 'bgm'],
+    mediaKind: 'video',
+    buildPrompt: (c) =>
+      [
+        'Vertical 9:16 cozy lifestyle fashion video in a cafe / by a warm window.',
+        c.model?.prompt
+          ? `Talent: ${c.model.prompt} wearing the exact knit garment from the reference.`
+          : 'An East Asian model wearing the exact knit garment from the reference.',
+        'Soft warm indoor light, gentle camera push-in and slight orbit; calm premium mood for Xiaohongshu / Moments.',
+        'Keep garment faithful to reference. No on-screen text, logos or watermarks.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' '),
+  },
+
+  {
+    id: 'detail_macro_video',
+    name: '织纹细节特写',
+    desc: '静物细节推进：领口/袖口/织纹微距，不出真人',
+    platforms: ['moments', 'xiaohongshu'],
+    defaultSize: 'vertical_video',
+    sizes: ['vertical_video'],
+    model: 'none',
+    poses: [],
+    scenes: [],
+    sceneLabel: '场景',
+    reference: { prefer: ['detail', 'main'], min: 1, max: 9, hint: '优先选细节图，可叠加主图共 1-9 张' },
+    count: { min: 1, max: 1, default: 1 },
+    steps: ['reference', 'feature', 'script', 'bgm'],
+    mediaKind: 'video',
+    buildPrompt: (c) =>
+      [
+        'Vertical 9:16 macro detail video of a knitwear garment: neckline, cuff, knit texture close-ups.',
+        'Slow cinematic push-in and gentle glide across fabric; soft natural light; premium e-commerce look.',
+        'Keep color and texture faithful to references. No people, no on-screen text, logos or watermarks.',
+        FEATURE(c.feature),
+      ].filter(Boolean).join(' '),
+  },
 ];
+
+/** 视频配乐预设（一期：UI + 入参透传；LKB 仅 generateAudio 布尔，具体曲目待上游支持） */
+export interface VideoBgmPreset {
+  id: string;
+  name: string;
+  desc: string;
+  /** 传给 LKB videoGeneration.generateAudio */
+  generateAudio: boolean;
+}
+
+export const VIDEO_BGM_PRESETS: VideoBgmPreset[] = [
+  { id: 'none', name: '无配乐', desc: '静音成片 / 后期自配', generateAudio: false },
+  { id: 'soft_ambient', name: '轻柔氛围', desc: '低干扰铺底（若上游支持）', generateAudio: true },
+  { id: 'upbeat_light', name: '轻快流行', desc: '节奏略明快（若上游支持）', generateAudio: true },
+  { id: 'warm_acoustic', name: '温暖原声', desc: '吉他/原声气质（若上游支持）', generateAudio: true },
+];
+
+export function findVideoBgm(id?: string | null) {
+  const hit = VIDEO_BGM_PRESETS.find((b) => b.id === id);
+  return hit || VIDEO_BGM_PRESETS[0];
+}
+
 
 
 /** 将自由文本匹配到最近预设；匹配不上则返回自定义 Option */
@@ -425,10 +683,16 @@ export function listTemplatesByKind(kind: 'image' | 'video' | 'all' = 'image') {
 /** 给前端的纯数据（去掉函数） */
 export function templateDto(t: PromoTemplate) {
   const { buildPrompt, ...rest } = t;
+  // 仅显式声明且 max>0 的模板（当前：style_ref）下发风格样例；其它模板省略 / max=0
+  const styleRef =
+    t.styleRef && Number(t.styleRef.max) > 0
+      ? { min: t.styleRef.min, max: t.styleRef.max, hint: t.styleRef.hint }
+      : { min: 0, max: 0, hint: '' };
   return {
     ...rest,
     mediaKind: t.mediaKind || (isVideoTemplate(t) ? 'video' : 'image'),
     sizeOptions: t.sizes.map((s) => SIZES[s]).filter(Boolean),
-    styleRef: STYLE_REF_RULE,
+    styleRef,
+    styleRefPrimary: !!t.styleRefPrimary,
   };
 }

@@ -1,6 +1,27 @@
 const { request } = require('./request');
 
 const CONTACT_PROMPTED_KEY = 'contact_prompted_v1';
+const PROFILE_PROMPTED_KEY = 'profile_complete_prompted_v1';
+
+/** 剥掉 OSS 签名 query，避免公网读切换后头像/二维码 403 空白 */
+function stableMediaUrl(url) {
+  if (url == null) return '';
+  const raw = String(url).trim();
+  if (!raw) return '';
+  if (
+    /^wxfile:/i.test(raw) ||
+    /^file:/i.test(raw) ||
+    /^http:\/\/(tmp|usr)\//i.test(raw) ||
+    /^\/(tmp|usr)\//i.test(raw)
+  ) {
+    return '';
+  }
+  if (/[?&](OSSAccessKeyId|Signature|Expires|security-token|x-oss-signature)=/i.test(raw)) {
+    const q = raw.indexOf('?');
+    return q >= 0 ? raw.slice(0, q) : raw;
+  }
+  return raw;
+}
 
 function currentRoute() {
   try {
@@ -18,6 +39,41 @@ function hasContactInfo(me) {
   const phone = String(me.phone || '').trim();
   const name = String(me.nickname || '').trim();
   return !!(phone || name);
+}
+
+
+
+/** 返回仍缺的资料字段：avatar / nickname / phone（已有则不返回，避免反复打扰） */
+function missingProfileFields(me) {
+  const miss = [];
+  if (!me) return ['avatar', 'nickname', 'phone'];
+  if (!String(me.avatarUrl || '').trim()) miss.push('avatar');
+  if (!String(me.nickname || '').trim()) miss.push('nickname');
+  if (!String(me.phone || '').trim()) miss.push('phone');
+  return miss;
+}
+
+/** 头像+昵称+手机是否都齐（完善资料软提示用） */
+function isProfileComplete(me) {
+  if (!me) return false;
+  const phone = String(me.phone || '').trim();
+  const name = String(me.nickname || '').trim();
+  const avatar = String(me.avatarUrl || '').trim();
+  return !!(phone && name && avatar);
+}
+
+function isProfilePrompted() {
+  try {
+    return !!wx.getStorageSync(PROFILE_PROMPTED_KEY);
+  } catch (e) {
+    return false;
+  }
+}
+
+function markProfilePrompted() {
+  try {
+    wx.setStorageSync(PROFILE_PROMPTED_KEY, '1');
+  } catch (e) { /* ignore */ }
 }
 
 function isContactPrompted() {
@@ -64,7 +120,8 @@ function uploadAvatar(filePath) {
         try {
           const data = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
           if (r.statusCode >= 200 && r.statusCode < 300) {
-            const url = (data && (data.url || data.publicUrl || data.avatarUrl)) || '';
+            const url = stableMediaUrl((data && (data.url || data.publicUrl || data.avatarUrl)) || '')
+              || ((data && (data.url || data.publicUrl || data.avatarUrl)) || '');
             if (!url) reject(new Error('上传未返回地址'));
             else resolve(url);
           } else {
@@ -87,6 +144,8 @@ function maybeCollectProfile(opts) {
   const app = getApp();
   const role = app.globalData.role || '';
   if (role !== 'customer' && role !== 'owner' && role !== 'staff') return Promise.resolve();
+  // 客户主路径由 view 页按「缺啥补啥」处理；此处不重复打扰
+  if (role === 'customer') return Promise.resolve();
   if (wx.getStorageSync('profile_prompted_v1')) return Promise.resolve();
   const route = currentRoute();
   const onCustomerShareUi =
@@ -95,28 +154,35 @@ function maybeCollectProfile(opts) {
   if (onCustomerShareUi) return Promise.resolve();
   return request({ url: '/api/auth/me' })
     .then((me) => {
-      if (me && (hasContactInfo(me) || (me.nickname && (role !== 'customer' || me.avatarUrl)))) {
+      const miss = missingProfileFields(me);
+      // 头像昵称已有则不再催；仅缺手机时去设置补手机
+      if (!miss.length) {
         wx.setStorageSync('profile_prompted_v1', '1');
         return;
       }
-      // 员工自愿完善；客户主路径已在 view 弹联系方式，此处不再强推
-      if (role === 'customer') {
+      const onlyPhone = miss.length === 1 && miss[0] === 'phone';
+      const needAvatarOrNick = miss.indexOf('avatar') >= 0 || miss.indexOf('nickname') >= 0;
+      if (!needAvatarOrNick && !onlyPhone) {
         wx.setStorageSync('profile_prompted_v1', '1');
         return;
       }
+      const content = onlyPhone
+        ? '还差手机号，方便同事认出你（可微信一键授权）'
+        : '请完善头像和昵称，方便同事认出你';
       return new Promise((resolve) => {
         wx.showModal({
-          title: '完善资料',
-          content: '可自愿完善昵称（方便档口认出你），可跳过',
+          title: onlyPhone ? '补一下手机号' : '完善资料',
+          content,
           confirmText: '去设置',
-          cancelText: '跳过',
+          cancelText: '稍后',
+          showCancel: onlyPhone, // 头像昵称缺失时不可跳过打扰一次
           success: (r) => {
             wx.setStorageSync('profile_prompted_v1', '1');
-            if (!r.confirm) {
+            if (onlyPhone && !r.confirm) {
               resolve();
               return;
             }
-            wx.navigateTo({
+            wx.switchTab({
               url: '/pages/settings/index/index?profile=1',
               complete: () => resolve(),
               fail: () => resolve(),
@@ -137,23 +203,40 @@ function saveProfile({ nickname, avatarUrl, phone }) {
   return request({ url: '/api/auth/me', method: 'PATCH', data });
 }
 
-function saveProfileWithAvatarUpload({ nickname, avatarUrl, phone }) {
+/**
+ * 头像若为本地临时路径则先上传再 PATCH。
+ * 只改昵称/手机时不要传入临时头像路径，否则上传失败会拖垮整次保存。
+ * 稳定 https 头像可一并回写；非 https 临时路径在未显式要求上传时忽略。
+ */
+function saveProfileWithAvatarUpload({ nickname, avatarUrl, phone, uploadAvatarIfTemp }) {
   const nick = nickname != null ? String(nickname).trim() : undefined;
   const ph = phone != null ? String(phone).trim() : undefined;
+  const wantUpload = uploadAvatarIfTemp !== false;
   let avatar = avatarUrl;
-  const chain = isTempAvatarPath(avatar)
+  const shouldUpload = wantUpload && isTempAvatarPath(avatar);
+  const chain = shouldUpload
     ? uploadAvatar(avatar).then((url) => {
         avatar = url;
         return url;
       })
     : Promise.resolve(avatar);
-  return chain.then(() =>
-    saveProfile({
+  return chain.then(() => {
+    // 未上传成功的临时路径绝不写入后端
+    let stableAvatar = avatar;
+    if (stableAvatar != null && isTempAvatarPath(stableAvatar)) {
+      stableAvatar = undefined;
+    }
+    return saveProfile({
       nickname: nick !== undefined ? nick : undefined,
-      avatarUrl: avatar != null ? avatar : undefined,
+      avatarUrl: stableAvatar != null ? stableAvatar : undefined,
       phone: ph !== undefined ? ph : undefined,
-    }).then((me) => ({ me, avatarUrl: avatar, nickname: nick, phone: ph })),
-  );
+    }).then((me) => ({
+      me,
+      avatarUrl: stableAvatar != null ? stableAvatar : (me && me.avatarUrl) || null,
+      nickname: nick !== undefined ? nick : (me && me.nickname) || null,
+      phone: ph !== undefined ? ph : (me && me.phone) || null,
+    }));
+  });
 }
 
 /** 任务完成订阅：模板 ID 由后端/小程序后台配置；未配置则静默跳过 */
@@ -183,9 +266,15 @@ module.exports = {
   saveProfileWithAvatarUpload,
   uploadAvatar,
   isTempAvatarPath,
+  stableMediaUrl,
   hasContactInfo,
   isContactPrompted,
   markContactPrompted,
   CONTACT_PROMPTED_KEY,
+  isProfileComplete,
+  isProfilePrompted,
+  markProfilePrompted,
+  PROFILE_PROMPTED_KEY,
+  missingProfileFields,
   requestJobSubscribe,
 };

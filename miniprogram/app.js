@@ -1,6 +1,7 @@
 /** 羊毛衫档口小程序入口 */
 const publishQueue = require('./utils/publish-upload-queue');
 const { refreshCustomerTabBadge } = require('./utils/customer-tab-badge');
+const inviteUtil = require('./utils/invite');
 
 App({
   globalData: {
@@ -14,18 +15,28 @@ App({
     tenantId: 'tenant_dev_001',
     userInfo: null,
     publishUpload: null,
+    pendingInviteCode: '',
   },
-  onLaunch() {
+  onLaunch(options) {
     const token = wx.getStorageSync('token');
     const role = wx.getStorageSync('role');
     if (token) {
       this.globalData.token = token;
       this.globalData.role = role || '';
     }
+    try {
+      const pending = inviteUtil.readPendingInviteCode();
+      if (pending) this.globalData.pendingInviteCode = pending;
+      inviteUtil.captureLaunchInvite(options || {});
+    } catch (e) { /* */ }
     publishQueue.hydrate();
     publishQueue.resumeAll();
   },
-  onShow() {
+  onShow(options) {
+    // 分享卡片点「房子」回首页时仍可能带着 query/scene，再抓一次邀请码
+    try {
+      inviteUtil.captureLaunchInvite(options || {});
+    } catch (e) { /* */ }
     // 锁屏/回前台：best-effort 续传 pending/failed
     try {
       publishQueue.resumeAll();

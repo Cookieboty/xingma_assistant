@@ -1,6 +1,7 @@
 const { request, ensureSilentSession } = require('../../../utils/request');
 const { saveUrlsToAlbum } = require('../../../utils/saveAlbum');
-const { maybeCollectProfile } = require('../../../utils/profile');
+const { maybeCollectProfile, stableMediaUrl } = require('../../../utils/profile');
+const { isUserVisibleJobType } = require('../../../utils/job-visibility');
 
 const STATUS_LABEL = {
   generating: '生成中',
@@ -34,7 +35,7 @@ function mapProductJob(j) {
   const title =
     j.title ||
     (j.payload && j.payload.displayTitle) ||
-    (j.type === 'promo_image' ? '宣传生图' : j.type === 'promo_video' ? '宣传视频' : j.type === 'publish_product' ? '选图发品' : '任务');
+    (j.type === 'promo_image' ? '宣传生图' : j.type === 'promo_video' ? '宣传视频' : '任务');
   let hint = '';
   if (j.status === 'failed') hint = String(j.error || progress.message || '').slice(0, 36);
   else if (j.status === 'queued' || j.status === 'running') {
@@ -90,7 +91,11 @@ function mapPromoSetCard(s) {
     statusLabel: STATUS_LABEL[s.status] || s.status || '',
     statusClass,
     metaText: isVideo
-      ? (total ? `${done}/${total}` : '')
+      ? (() => {
+          const sec = Math.round(Number(s.seconds || s.durationSec || (s.params && s.params.seconds) || 0) || 0);
+          const base = total ? `${done}/${total}` : '';
+          return sec > 0 ? (base ? `${base} · 约${sec}秒` : `约${sec}秒`) : base;
+        })()
       : (total ? `${done}/${total} 张` : ''),
   };
 }
@@ -139,9 +144,12 @@ Page({
   },
   onShow() {
     if (this.data.isStaff && this.data.id) {
-      this.loadPromoSets(this.data.id);
-      this.loadProductJobs(this.data.id);
+      this.refreshOwnerTasks(this.data.id);
     }
+  },
+  async refreshOwnerTasks(productId) {
+    await this.loadPromoSets(productId);
+    await this.loadProductJobs(productId);
   },
   async load(id, shareEventId, boundCustomerId) {
     try {
@@ -155,8 +163,9 @@ Page({
       const canDownload = isStaff || !!product.allowCustomerDownload;
       this.setData({ product, canDownload });
       if (isStaff) {
-        this.loadPromoSets(id);
-        this.loadProductJobs(id);
+        this.refreshOwnerTasks(id);
+        // 预创建 share，避免右上角/按钮同步 path 落到无 shareId 的 landing
+        this.prefetchShare();
       } else {
         this.loadMoreProducts(id, shareEventId, boundCustomerId);
         this.loadContactQr();
@@ -181,19 +190,60 @@ Page({
       /* 列表失败不挡详情 */
     }
   },
+  /**
+   * 业主「本商品任务」：仅 user-facing 生图/视频（进行中/失败的 promo_set）。
+   * 分析图、发品、封面等系统 job 不展示；成功素材在「素材」→ 宣传素材页。
+   */
   async loadProductJobs(productId) {
     if (!productId) return;
     this.setData({ productJobsLoading: true });
     try {
-      const res = await request({ url: `/api/jobs?productId=${productId}&limit=20` });
-      const items = ((res && res.items) || []).map(mapProductJob);
-      this.setData({ productJobs: items, productJobsLoading: false });
+      const tasks = [];
+      const sets = this.data.promoSets || [];
+      sets.forEach((s) => {
+        const busy = s.statusClass === 'run';
+        const failed = s.statusClass === 'err' || s.statusLabel === '失败';
+        if (!busy && !failed) return;
+        tasks.push({
+          id: s.id,
+          kind: 'set',
+          setId: s.id,
+          productId,
+          title: s.title || '宣传素材',
+          statusLabel: s.statusLabel || (busy ? '生成中' : '失败'),
+          tone: busy ? 'run' : 'err',
+          hint: s.metaText || '',
+        });
+      });
+      // 兜底：无 set 表达的 user-facing job（与任务中心同一白名单）
+      const res = await request({ url: `/api/jobs?productId=${productId}&limit=30` });
+      const seenSets = {};
+      tasks.forEach((t) => { if (t.setId) seenSets[t.setId] = true; });
+      ((res && res.items) || []).forEach((j) => {
+        if (!isUserVisibleJobType(j && j.type)) return;
+        const st = j.status;
+        if (st !== 'queued' && st !== 'running' && st !== 'failed') return;
+        const setId = (j.payload && j.payload.setId) || (j.result && j.result.setId) || '';
+        if (setId && seenSets[setId]) return;
+        tasks.push(Object.assign(mapProductJob(j), { kind: 'job', setId }));
+      });
+      this.setData({ productJobs: tasks, productJobsLoading: false });
     } catch (e) {
       this.setData({ productJobsLoading: false });
     }
   },
   goJobDetail(e) {
-    const id = e.currentTarget.dataset.id;
+    const ds = e.currentTarget.dataset || {};
+    const kind = ds.kind || '';
+    const setId = ds.setId || '';
+    const id = ds.id || '';
+    if (kind === 'set' || setId) {
+      const sid = setId || id;
+      wx.navigateTo({
+        url: `/pages/product/promo-gallery/promo-gallery?id=${this.data.id}&setId=${sid}`,
+      });
+      return;
+    }
     if (!id) return;
     wx.navigateTo({ url: `/pages/jobs/detail/detail?id=${id}` });
   },
@@ -251,29 +301,6 @@ Page({
       wx.showToast({ title: (e && e.message) || '保存失败', icon: 'none' });
     }
   },
-  /** 点某组 → 素材列表并展开该组详情 */
-  goPromoSet(e) {
-    const setId = e.currentTarget.dataset.id;
-    if (!setId) return;
-    wx.navigateTo({
-      url: `/pages/product/promo-gallery/promo-gallery?id=${this.data.id}&setId=${setId}`,
-    });
-  },
-  /** 新建素材：先选图片/视频，再直达对应新建页（绕过素材列表中间页） */
-  goPromoMaterials() {
-    const id = this.data.id;
-    if (!id) return;
-    wx.showActionSheet({
-      itemList: ['新建图片', '新建视频'],
-      success: (res) => {
-        if (res.tapIndex === 0) {
-          wx.navigateTo({ url: `/pages/product/promo/promo?id=${id}&type=image` });
-        } else if (res.tapIndex === 1) {
-          wx.navigateTo({ url: `/pages/product/promo/promo?id=${id}&type=video` });
-        }
-      },
-    });
-  },
   goEdit() {
     wx.navigateTo({ url: `/pages/product/edit/edit?id=${this.data.id}` });
   },
@@ -287,7 +314,13 @@ Page({
   },
   onShareModeTap(e) {
     const v = e.currentTarget.dataset.v;
-    if (v === 'open' || v === 'limited') this.setData({ shareMode: v });
+    if (v === 'open' || v === 'limited') {
+      this.setData({ shareMode: v });
+      this.prefetchShare();
+    }
+  },
+  prefetchShare() {
+    this.ensureShareForNative().catch(() => { /* 预热失败不挡详情 */ });
   },
   async ensureShareForNative() {
     const policy = this.data.shareMode === 'open' ? 'open' : 'designated_only';
@@ -321,13 +354,16 @@ Page({
     // 分享卡片目标：landing → 客户专用 view；绝不能落到员工 detail
     const policy = this.data.shareMode === 'open' ? 'open' : 'designated_only';
     const cached = this._shareCache && this._shareCache[policy];
+    const productId = this.data.id || (product && product.id) || '';
     const landingPath = (sid) => `/pages/share/landing/landing?shareId=${sid}`;
-    // 同步 path：有缓存 shareId 用 landing；否则占位 landing（promise 会覆盖为真实 shareId）
-    // 绝不能回退到 pages/product/detail（员工管理页）
+    // 无 shareId 时带 productId 降级，避免同步 path 落到裸 landing（微信可能先用 sync 再等 promise）
+    const fallbackPath = productId
+      ? `/pages/share/landing/landing?productId=${productId}`
+      : '/pages/share/landing/landing';
     const syncPath = (cached && cached.shareId)
       ? landingPath(cached.shareId)
-      : '/pages/share/landing/landing';
-    // 右上角菜单已 hide；若仍触发则尽量用已缓存 share
+      : fallbackPath;
+    // 右上角菜单已 hide；若仍触发则尽量用已缓存 share / productId 降级
     if (!res || res.from !== 'button') {
       return { title, path: syncPath, imageUrl: imageUrl || undefined };
     }
@@ -342,13 +378,13 @@ Page({
           // 必须与 app.json 注册页一致：pages/share/landing/landing
           const path = shareId
             ? landingPath(shareId)
-            : (shareRes.path || landingPath(''));
+            : (shareRes.path || fallbackPath);
           return { title, path, imageUrl: imageUrl || undefined };
         })
         .catch((err) => {
           wx.showToast({ title: (err && err.message) || '分享准备失败', icon: 'none' });
-          // 失败也不回员工 detail；无有效 shareId 时 landing 会提示缺参
-          return { title, path: landingPath(''), imageUrl: imageUrl || undefined };
+          // 失败也不回员工 detail；降级带 productId 直开客户详情
+          return { title, path: fallbackPath, imageUrl: imageUrl || undefined };
         }),
     };
   },
@@ -366,7 +402,7 @@ Page({
   async loadContactQr() {
     try {
       const tenant = await request({ url: '/api/tenants/current' });
-      this.setData({ contactQrUrl: (tenant && tenant.contactQrUrl) || '' });
+      this.setData({ contactQrUrl: (stableMediaUrl((tenant && tenant.contactQrUrl) || '') || '') });
     } catch (e) {
       /* ignore */
     }

@@ -1,71 +1,66 @@
 <view class="container">
-  <view class="card head" wx:if="{{product}}">
-    <view class="section-title">{{product.name || '宣传素材'}}</view>
-    <view class="muted">款号 {{product.styleNo}} · 图组与视频组同列表</view>
-  </view>
+  <!-- 详情入口但组已不存在：不回退到兄弟列表 -->
+  <block wx:if="{{viewMode === 'detail' && setMissing && !detailSet}}">
+    <view class="card muted empty">
+      <view>该任务对应的素材组不存在或已删除</view>
+      <view class="muted small" style="margin-top:8rpx;">不会展示同商品其他任务。请返回任务中心重试或重新生成。</view>
+    </view>
+  </block>
 
-  <view class="card muted" wx:if="{{loading && !sets.length}}">加载中…</view>
-  <view class="card muted empty" wx:elif="{{!sets.length}}">
-    <view>暂无宣传素材</view>
-    <view class="muted small" style="margin-top:8rpx;">可新建宣传图或竖版短视频</view>
-    <view class="btn-primary" style="margin-top:24rpx;" bindtap="goGenerate">新建素材</view>
-  </view>
-
-  <view class="card job" id="set-{{item.id}}" wx:for="{{sets}}" wx:key="id">
-    <view class="job-head">
-      <view class="job-head-main" data-id="{{item.id}}" bindtap="toggleExpand">
-        <view>
-          <text class="type-badge">{{item.typeLabel}}</text>
-          <text class="job-name">{{item.templateName}}</text>
-          <text class="st {{item.busy ? 'run' : (item.status==='failed' ? 'err' : 'ok')}}">{{item.statusLabel}}</text>
-        </view>
-        <view class="muted small">{{item.isVideo ? (item.done + '/' + item.total + ' 条') : (item.done + ' / ' + item.total + ' 张')}} · {{item.expanded ? '收起' : '展开查看'}}</view>
-        <view class="muted small" wx:if="{{item.progressText}}">{{item.progressText}}</view>
+  <!-- 详情：单组素材 -->
+  <block wx:elif="{{viewMode === 'detail' && detailSet}}">
+    <view class="card head">
+      <view class="section-title">
+        <text class="type-badge">{{detailSet.typeLabel}}</text>
+        {{detailSet.templateName}}
       </view>
-      <text
-        class="job-del"
-        wx:if="{{!item.busy}}"
-        data-id="{{item.id}}"
-        catchtap="deleteSet"
-      >{{actingId === item.id ? '…' : '删除'}}</text>
+      <view class="muted small">
+        <text class="st {{detailSet.busy ? 'run' : (detailSet.status==='failed' ? 'err' : 'ok')}}">{{detailSet.statusLabel}}</text>
+        · {{detailSet.isVideo ? (detailSet.done + '/' + detailSet.total + ' 条') : (detailSet.done + ' / ' + detailSet.total + ' 张')}}
+        <text wx:if="{{detailSet.durationLabel}}"> · {{detailSet.durationLabel}}</text>
+      </view>
+      <view class="muted small" wx:if="{{detailSet.progressText}}">{{detailSet.progressText}}</view>
+      <view class="err-hint" wx:if="{{detailSet.errorText}}" style="margin-top:8rpx;">{{detailSet.errorText}}</view>
     </view>
 
-    <view class="bar-wrap" wx:if="{{item.busy}}">
-      <view class="bar"><view class="bar-fill" style="width: {{item.percent}}%;"></view></view>
-    </view>
-
-    <block wx:if="{{item.expanded || item.busy || item.done || item.status==='partial'}}">
-      <view class="album-bar" wx:if="{{item.done || item.status==='partial'}}">
-        <text class="link" data-id="{{item.id}}" bindtap="toggleSelectAllAlbum">{{item.albumAllSelected ? '取消全选' : '全选'}}</text>
-        <text class="muted small">勾选图片后，用下方按钮下载或重新生成 · 点图可预览</text>
+    <view class="card job" id="set-{{detailSet.id}}">
+      <view class="bar-wrap" wx:if="{{detailSet.busy}}">
+        <view class="bar"><view class="bar-fill" style="width: {{detailSet.percent}}%;"></view></view>
       </view>
 
-      <view class="video-wrap" wx:if="{{item.isVideo && item.videoUrl}}">
+      <view class="album-bar" wx:if="{{detailSet.done || detailSet.status==='partial'}}">
+        <text class="link" data-id="{{detailSet.id}}" bindtap="toggleSelectAllAlbum">{{detailSet.albumAllSelected ? '取消全选' : '全选'}}</text>
+        <text class="muted small">勾选后下载或重新生成 · 点图可预览</text>
+      </view>
+
+      <view class="video-wrap" wx:if="{{detailSet.isVideo && detailSet.videoUrl}}">
         <video
           class="promo-video"
-          src="{{item.videoUrl}}"
+          src="{{detailSet.videoUrl}}"
           controls
           show-center-play-btn
           object-fit="contain"
           poster=""
+          duration="{{detailSet.durationSec || 0}}"
         ></video>
+        <view class="muted small" wx:if="{{detailSet.durationLabel}}" style="margin-top:8rpx;">时长 {{detailSet.durationLabel}}</view>
         <view class="album-bar" style="margin-top:12rpx;">
           <text
-            class="check {{item.items[0].albumSelected ? 'on' : ''}}"
-            data-setid="{{item.id}}"
+            class="check {{detailSet.items[0].albumSelected ? 'on' : ''}}"
+            data-setid="{{detailSet.id}}"
             data-index="0"
             catchtap="toggleAlbumItem"
-          >{{item.items[0].albumSelected ? '✓ 已选' : '勾选以下载'}}</text>
+          >{{detailSet.items[0].albumSelected ? '✓ 已选' : '勾选以下载'}}</text>
         </view>
       </view>
-      <view class="grid" wx:elif="{{item.items.length}}">
-        <view class="cell {{im.albumSelected ? 'checked' : ''}}" wx:for="{{item.items}}" wx:for-item="im" wx:for-index="idx" wx:key="index">
+      <view class="grid" wx:elif="{{detailSet.items.length}}">
+        <view class="cell {{im.albumSelected ? 'checked' : ''}}" wx:for="{{detailSet.items}}" wx:for-item="im" wx:for-index="idx" wx:key="index">
           <image
             wx:if="{{im.url}}"
             src="{{im.url}}"
             mode="aspectFill"
             lazy-load
-            data-setid="{{item.id}}"
+            data-setid="{{detailSet.id}}"
             data-index="{{idx}}"
             bindtap="preview"
           />
@@ -74,36 +69,99 @@
           <view
             class="check {{im.albumSelected ? 'on' : ''}}"
             wx:if="{{im.url}}"
-            data-setid="{{item.id}}"
+            data-setid="{{detailSet.id}}"
             data-index="{{idx}}"
             catchtap="toggleAlbumItem"
           >{{im.albumSelected ? '✓' : ''}}</view>
         </view>
       </view>
-      <view class="muted small" wx:elif="{{item.busy}}">排队或执行中，完成后自动刷新</view>
+      <view class="muted small" wx:elif="{{detailSet.busy}}">排队或执行中，完成后自动刷新</view>
+      <view class="muted small" wx:else>暂无成品</view>
 
-      <!-- 紧挨图片：下载 + 重新生成 -->
-      <view class="media-actions" wx:if="{{!item.busy && (item.done || item.status==='partial')}}">
+      <view class="media-actions" wx:if="{{!detailSet.busy && (detailSet.done || detailSet.status==='partial' || detailSet.status==='failed' || detailSet.errorText)}}">
         <view
           class="btn-primary media-btn"
-          data-id="{{item.id}}"
+          data-id="{{detailSet.id}}"
           bindtap="saveToAlbum"
-        >{{savingAlbumId === item.id ? '保存中…' : item.albumSaveLabel}}</view>
+          wx:if="{{detailSet.done || detailSet.status==='partial'}}"
+        >{{savingAlbumId === detailSet.id ? '保存中…' : detailSet.albumSaveLabel}}</view>
         <view
-          class="btn-ghost media-btn"
-          data-id="{{item.id}}"
+          class="btn-primary media-btn {{(actingId === detailSet.id) ? 'disabled' : ''}}"
+          data-id="{{detailSet.id}}"
           bindtap="regenSelected"
-        >{{actingId === item.id ? '提交中…' : item.regenLabel}}</view>
+          wx:if="{{detailSet.status==='failed' || detailSet.errorText}}"
+        >{{actingId === detailSet.id ? '提交中…' : '重新生成'}}</view>
+        <view
+          class="btn-ghost media-btn {{(!detailSet.canRegen || actingId === detailSet.id) ? 'disabled' : ''}}"
+          data-id="{{detailSet.id}}"
+          bindtap="regenSelected"
+          wx:elif="{{detailSet.canRegen}}"
+        >{{actingId === detailSet.id ? '提交中…' : detailSet.regenLabel}}</view>
       </view>
 
-      <view class="caption-box" wx:if="{{item.hasCaption && (item.done || item.status==='partial')}}">
+      <view class="caption-box" wx:if="{{detailSet.hasCaption && (detailSet.done || detailSet.status==='partial')}}">
         <view class="caption-head">
           <text class="caption-title">种草文案</text>
-          <text class="link" data-id="{{item.id}}" bindtap="copyCaption">一键复制</text>
+          <text class="link" data-id="{{detailSet.id}}" bindtap="copyCaption">一键复制</text>
         </view>
-        <text class="caption-body" user-select>{{item.caption}}</text>
+        <text class="caption-body" user-select>{{detailSet.caption}}</text>
       </view>
 
-    </block>
-  </view>
+      <view class="detail-foot" wx:if="{{!detailSet.busy}}">
+        <text
+          class="job-del"
+          data-id="{{detailSet.id}}"
+          bindtap="deleteSet"
+        >{{actingId === detailSet.id ? '…' : '删除这组素材'}}</text>
+      </view>
+    </view>
+  </block>
+
+  <!-- 列表：全部素材组 -->
+  <block wx:else>
+    <view class="card head" wx:if="{{product}}">
+      <view class="section-title">{{product.name || '宣传素材'}}</view>
+      <view class="muted">款号 {{product.styleNo}} · 点某一组进入详情</view>
+      <view class="btn-primary" style="margin-top:24rpx;" bindtap="goGenerate">新建素材</view>
+    </view>
+
+    <view class="card muted" wx:if="{{loading && !sets.length}}">加载中…</view>
+    <view class="card muted empty" wx:elif="{{!sets.length}}">
+      <view>还没有素材组</view>
+      <view class="muted small" style="margin-top:8rpx;">下一步：新建一组宣传图或竖版短视频，完成后可在这里下载</view>
+    </view>
+
+    <view class="card job set-row" id="set-{{item.id}}" wx:for="{{sets}}" wx:key="id" data-id="{{item.id}}" bindtap="openSetDetail">
+      <view class="job-head">
+        <view class="job-head-main">
+          <view>
+            <text class="type-badge">{{item.typeLabel}}</text>
+            <text class="job-name">{{item.templateName}}</text>
+            <text class="st {{item.busy ? 'run' : (item.status==='failed' ? 'err' : 'ok')}}">{{item.statusLabel}}</text>
+          </view>
+          <view class="muted small">{{item.isVideo ? (item.done + '/' + item.total + ' 条') : (item.done + ' / ' + item.total + ' 张')}} · 进入详情</view>
+          <view class="muted small" wx:if="{{item.progressText}}">{{item.progressText}}</view>
+          <view class="err-hint" wx:if="{{item.errorText}}">{{item.errorText}}</view>
+        </view>
+      </view>
+      <view class="bar-wrap" wx:if="{{item.busy}}">
+        <view class="bar"><view class="bar-fill" style="width: {{item.percent}}%;"></view></view>
+      </view>
+      <!-- 列表仅展示轻量缩略，不展开全部槽位/下载区 -->
+      <view class="list-thumbs" wx:if="{{item.isVideo && item.videoUrl}}">
+        <view class="thumb-video muted small">📹 视频已生成 · 点开详情播放/下载</view>
+      </view>
+      <view class="list-thumbs" wx:elif="{{item.thumbUrls && item.thumbUrls.length}}">
+        <image
+          class="thumb"
+          wx:for="{{item.thumbUrls}}"
+          wx:for-item="tu"
+          wx:key="*this"
+          src="{{tu}}"
+          mode="aspectFill"
+          lazy-load
+        />
+      </view>
+    </view>
+  </block>
 </view>

@@ -25,4 +25,7 @@ export class ProductLevel extends TenantScopedEntity {
 
   @Column({ type: 'int', nullable: true, name: 'min_customer_rank', comment: '客户最低等级要求（可选）' })
   minCustomerRank!: number | null;
+
+  @Column({ type: 'varchar', length: 16, default: 'active', comment: 'active|deleted' })
+  status!: string;
 }

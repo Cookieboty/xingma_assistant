@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { AuthService, LoginResult } from '../auth/auth.service';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
+import { AuditService } from '../common/audit.service';
 import { CustomersService } from '../customers/customers.service';
 import { TenantsService, TenantInfo, PROD_APP_ID } from '../tenants/tenants.service';
 import { WechatService } from '../wechat/wechat.service';
@@ -31,6 +32,7 @@ export class LoginService {
     private readonly customers: CustomersService,
     private readonly wechat: WechatService,
     private readonly invites: InvitesService,
+    private readonly audit: AuditService,
   ) {}
 
   async login(params: {
@@ -82,7 +84,15 @@ export class LoginService {
 
     let payload: AuthContext;
     if (member) {
-      payload = { tenantId: tenant.id, openid, role: member.role, memberId: member.id };
+      // 成员仍为 owner/staff；同时 ensureProfile 写入 customerId，避免自测询价等接口再踩坑
+      const base: AuthContext = {
+        tenantId: tenant.id,
+        openid,
+        role: member.role,
+        memberId: member.id,
+      };
+      const customer = await this.customers.ensureProfile(base);
+      payload = { ...base, customerId: customer.id };
     } else {
       const base: AuthContext = { tenantId: tenant.id, openid, role: 'customer' };
       const customer = await this.customers.ensureProfile(base);
@@ -95,13 +105,16 @@ export class LoginService {
   async getMe(user: AuthContext) {
     if (user.role === 'owner' || user.role === 'staff') {
       const nickname = await this.tenants.getMemberNickname(user.tenantId, user.openid);
+      const customer = await this.customers.ensureProfile(user);
       return {
         role: user.role,
         tenantId: user.tenantId,
         openid: user.openid,
         memberId: user.memberId,
-        nickname: nickname || null,
-        avatarUrl: null,
+        customerId: customer.id,
+        nickname: nickname || customer.nickname || null,
+        avatarUrl: customer.avatarUrl || null,
+        phone: customer.phone || null,
       };
     }
     const c = await this.customers.ensureProfile(user);
@@ -123,8 +136,18 @@ export class LoginService {
     body: { nickname?: string; avatarUrl?: string; phone?: string },
   ) {
     const nickname = body.nickname != null ? String(body.nickname).trim().slice(0, 64) : undefined;
-    const avatarUrl = body.avatarUrl != null ? String(body.avatarUrl).trim().slice(0, 512) : undefined;
+    let avatarUrl = body.avatarUrl != null ? String(body.avatarUrl).trim().slice(0, 512) : undefined;
     const phone = body.phone != null ? String(body.phone).trim().slice(0, 32) : undefined;
+    // 拒绝小程序本地临时路径写入 DB（须先走 /api/media/upload）
+    if (avatarUrl !== undefined && avatarUrl) {
+      const ok =
+        /^https:\/\//i.test(avatarUrl) ||
+        /^\/media\//i.test(avatarUrl) ||
+        /^https?:\/\/[^/]+\/media\//i.test(avatarUrl);
+      if (!ok) {
+        throw new BadRequestException('avatarUrl 须为已上传的 https 地址');
+      }
+    }
     if (nickname === undefined && avatarUrl === undefined && phone === undefined) {
       throw new BadRequestException('请提供 nickname、avatarUrl 或 phone');
     }
@@ -142,10 +165,52 @@ export class LoginService {
         { tenantId: user.tenantId, openid: user.openid, role: 'customer', customerId: user.customerId },
         patch,
       );
+      await this.audit.record({
+        tenantId: user.tenantId,
+        actor: user,
+        action: 'profile.update',
+        targetType: 'member',
+        targetId: user.memberId || user.openid,
+        detail: { fields: Object.keys(patch) },
+      });
       return this.getMe(user);
     }
     await this.customers.updateSelfProfile(user, patch);
+    await this.audit.record({
+      tenantId: user.tenantId,
+      actor: user,
+      action: 'profile.update',
+      targetType: 'customer',
+      targetId: user.customerId || user.openid,
+      detail: { fields: Object.keys(patch) },
+    });
     return this.getMe(user);
+  }
+
+  /**
+   * 消费 getPhoneNumber 的 code，写入 customer_profiles.phone（员工同步档案）。
+   * 个人主体/未认证/额度不足时微信侧会失败，前端应保留手填。
+   */
+  async bindPhoneFromWechat(user: AuthContext, phoneCode: string) {
+    const code = String(phoneCode || '').trim();
+    if (!code) throw new BadRequestException('缺少手机号 code');
+    const tenant = await this.tenants.getById(user.tenantId);
+    if (!tenant) throw new BadRequestException('租户不存在');
+    const secret = await this.tenants.getAppSecret(tenant);
+    if (!secret) {
+      throw new ServiceUnavailableException(
+        `小程序 ${tenant.wxAppId} 未配置 AppSecret，无法换取微信手机号；请手填或配置 WECHAT_APP_SECRET`,
+      );
+    }
+    const info = await this.wechat.getUserPhoneNumber({
+      appId: tenant.wxAppId,
+      secret,
+      code,
+      openid: user.openid,
+    });
+    const phone = String(info.purePhoneNumber || info.phoneNumber || '').trim().slice(0, 32);
+    if (!phone) throw new BadRequestException('未获取到手机号');
+    return this.updateProfile(user, { phone });
   }
 
   private async resolveTenant(appId: string | undefined, tenantId: string | undefined, devFake: boolean): Promise<TenantInfo> {

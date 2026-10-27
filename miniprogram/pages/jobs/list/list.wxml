@@ -2,7 +2,7 @@
 <view class="container">
   <view class="card head">
     <view class="section-title">任务中心</view>
-    <view class="muted">发品、宣传图等后台任务：看进度、失败可重试、生成中可停止。中断的任务会自动重新排队继续。</view>
+    <view class="muted">业主视角的任务：宣传生图 / 宣传视频。点开看进度与素材槽位；分析图、发品、封面等系统任务不展示。</view>
   </view>
 
   <scroll-view scroll-x class="chips-row" enable-flex>
@@ -25,7 +25,10 @@
   </scroll-view>
 
   <view class="card muted" wx:if="{{loading && !list.length}}">加载中…</view>
-  <view class="card muted empty" wx:elif="{{!list.length}}">暂无任务</view>
+  <view class="card muted empty" wx:elif="{{!list.length}}">
+    <view>还没有宣传任务</view>
+    <view class="muted small" style="margin-top:8rpx;">去商品列表点「素材」→「新建素材」开始生图或视频</view>
+  </view>
 
   <view class="card job" wx:for="{{list}}" wx:key="id">
     <view class="job-row">
@@ -41,7 +44,7 @@
       </view>
 
       <view class="job-main">
-        <view class="job-title-block" data-id="{{item.id}}" bindtap="openView">
+        <view class="job-title-block" data-id="{{item.id}}" data-product-id="{{item.productId}}" data-set-id="{{item.setId}}" data-is-gen="{{item.isGenType}}" bindtap="openView">
           <text class="job-title">{{item.title}}</text>
           <text class="muted small" wx:if="{{item.styleNo}}">款号 {{item.styleNo}}</text>
           <text class="muted small" wx:elif="{{item.createdText}}">{{item.createdText}}</text>
@@ -54,9 +57,9 @@
             <text class="err-hint" wx:elif="{{item.errHint}}">{{item.errHint}}</text>
           </view>
           <view class="foot-ops">
-            <text class="link" wx:if="{{item.canView}}" data-id="{{item.id}}" bindtap="openView">查看</text>
-            <text class="link" wx:if="{{item.canCancel}}" data-id="{{item.id}}" bindtap="cancel">{{item.cancelLabel}}</text>
-            <text class="link primary" wx:if="{{item.canRetry}}" data-id="{{item.id}}" bindtap="retry">{{item.retryLabel}}</text>
+            <text class="link" wx:if="{{item.canView}}" data-id="{{item.id}}" data-product-id="{{item.productId}}" data-set-id="{{item.setId}}" data-is-gen="{{item.isGenType}}" bindtap="openView">查看</text>
+            <text class="link" wx:if="{{item.canCancel}}" data-id="{{item.id}}" catchtap="cancel">{{item.cancelLabel}}</text>
+            <text class="link primary retry" wx:if="{{item.canRetry}}" data-id="{{item.id}}" catchtap="retry">{{item.retryLabel || '重试'}}</text>
           </view>
         </view>
       </view>

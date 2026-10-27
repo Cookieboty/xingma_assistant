@@ -103,3 +103,5 @@
 .foot-ops .link { color: var(--color-muted); font-size: 26rpx; }
 .foot-ops .link.primary { color: var(--color-primary); font-weight: 600; }
 .empty { text-align: center; padding: 48rpx; }
+
+.link.retry { color: #c45c26; font-weight: 600; }

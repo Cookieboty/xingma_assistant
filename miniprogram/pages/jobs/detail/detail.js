@@ -39,6 +39,7 @@ function enrichJob(j) {
     (j.result && (j.result.productId || (j.result.product && j.result.product.id))) ||
     '';
   const setId =
+    j.setId ||
     (j.payload && j.payload.setId) ||
     (j.result && j.result.setId) ||
     '';
@@ -47,7 +48,7 @@ function enrichJob(j) {
     (j.payload && (j.payload.styleNo || j.payload.draftStyleNo)) ||
     (j.result && (j.result.styleNo || (j.result.product && j.result.product.styleNo))) ||
     '';
-  const isGenType = j.type === 'promo_image' || j.type === 'promo_video' || j.type === 'cover_reselect';
+  const isGenType = j.type === 'promo_image' || j.type === 'promo_video';
   const isCreateType = j.type === 'publish_product';
   const busy = j.status === 'queued' || j.status === 'running';
   const doneTotal =
@@ -66,14 +67,32 @@ function enrichJob(j) {
     productId,
     setId,
     styleNo,
+    isGenType,
+    isCreateType,
     canRetry: j.status === 'failed' || j.status === 'cancelled',
     canCancel: busy,
     cancelLabel: j.status === 'running' ? '停止' : '取消',
-    retryLabel: j.status === 'cancelled' ? '重跑' : '重试',
+    retryLabel: j.status === 'cancelled'
+      ? '重跑'
+      : (j.type === 'promo_image' || j.type === 'promo_video' ? '重新生成' : '重试'),
+    isOrphan: !!(j.orphanPromoSet || String(j.id || '').indexOf('orphan_') === 0),
+    canOpenGallery: !!(isGenType && productId && setId),
     busy,
     doneTotal,
     percent: Number(progress.percent) || 0,
-    progressMessage: progress.message || '',
+    progressMessage: (() => {
+      const msg = String(progress.message || '').trim();
+      if (!msg) return '';
+      // 已有 done/total 时，隐藏「生图 1/2」这类会把 total 显示成重生张数的文案
+      if (doneTotal && /(\d+)\s*\/\s*(\d+)/.test(msg)) {
+        const m = msg.match(/(\d+)\s*\/\s*(\d+)/);
+        const shown = String(doneTotal);
+        if (m && shown && !shown.startsWith(m[1] + '/') && shown.split('/')[1] !== m[2]) {
+          return '';
+        }
+      }
+      return msg;
+    })(),
     progressStep: progress.step || '',
     error: j.error || (j.status === 'failed' ? progress.message : '') || '',
     createdText: fmtTime(j.createdAt),
@@ -111,6 +130,19 @@ Page({
     try {
       const jobRaw = await request({ url: `/api/jobs/${id}` });
       const job = enrichJob(jobRaw || {});
+      // orphan 重试后后端返回真实 jobId：同步到本页，避免继续打 orphan_
+      if (job.id && job.id !== id && String(id).indexOf('orphan_') === 0) {
+        this.setData({ id: job.id });
+      }
+      // 失败/取消：留在任务详情，展示「重新生成」
+      // 排队/在做/完成：仅当有 setId 时进「该组」素材详情；无 setId 留在本页（禁止跳商品全部素材列表）
+      const needOps = job.status === 'failed' || job.status === 'cancelled';
+      if (!needOps && job.isGenType && job.productId && job.setId) {
+        wx.redirectTo({
+          url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}&setId=${job.setId}`,
+        });
+        return;
+      }
       this.setData({ job, loading: false });
       if (job.busy) {
         this.timer = setTimeout(() => this.load(), 3000);
@@ -121,11 +153,28 @@ Page({
     }
   },
 
+  openGallery() {
+    const job = this.data.job || {};
+    // 必须带 setId，否则会进商品全部素材列表（兄弟任务）
+    if (!job.productId || !job.setId) {
+      wx.showToast({ title: '无法定位该组素材', icon: 'none' });
+      return;
+    }
+    wx.navigateTo({
+      url: `/pages/product/promo-gallery/promo-gallery?id=${job.productId}&setId=${job.setId}`,
+    });
+  },
+
   async retry() {
     const id = this.data.id;
+    const job = this.data.job || {};
     try {
-      await request({ url: `/api/jobs/${id}/retry`, method: 'POST', data: {} });
-      wx.showToast({ title: '已重新排队', icon: 'none' });
+      const res = await request({ url: `/api/jobs/${id}/retry`, method: 'POST', data: {} });
+      if (res && res.id && res.id !== id) {
+        this.setData({ id: res.id });
+      }
+      const label = job.retryLabel === '重新生成' || job.isGenType ? '已开始重新生成' : '已重新排队';
+      wx.showToast({ title: label, icon: 'none' });
       this.load();
     } catch (err) {
       wx.showToast({ title: err.message || '重试失败', icon: 'none' });

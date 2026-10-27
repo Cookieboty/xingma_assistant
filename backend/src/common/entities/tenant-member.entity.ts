@@ -20,4 +20,12 @@ export class TenantMember extends TenantScopedEntity {
   @Index()
   @Column({ type: 'varchar', length: 16, default: 'active', comment: '状态' })
   status!: string;
+
+  /** 加入时所用邀请 id（可空：首位业主/假登录等） */
+  @Column({ type: 'varchar', length: 36, name: 'invite_id', nullable: true })
+  inviteId!: string | null;
+
+  /** 加入时邀请码快照，便于成员列表展示 */
+  @Column({ type: 'varchar', length: 16, name: 'invite_code', nullable: true })
+  inviteCode!: string | null;
 }

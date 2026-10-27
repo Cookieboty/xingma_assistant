@@ -4,7 +4,7 @@
     <view class="section-title">联系方式</view>
     <view class="contact-name">{{contact.name}}</view>
     <view class="contact-phone">{{contact.phone}}</view>
-    <view class="muted tip" wx:if="{{!contact.hasContact}}">客户尚未留下姓名或手机；可看下方询价记录里的快照</view>
+    <view class="muted tip" wx:if="{{!contact.hasContact}}">客户尚未留下称呼或手机号</view>
     <view class="btn-primary copy-btn" bindtap="copyContact" wx:if="{{contact.hasContact}}">一键复制联系方式</view>
     <view class="btn-ghost copy-btn disabled" wx:else>暂无可复制联系方式</view>
   </view>
@@ -12,28 +12,32 @@
   <!-- 询价记录 -->
   <view class="card">
     <view class="section-title">询价记录</view>
-    <view class="section-hint">点「已处理」并填写处理方式；复制上方联系方式去微信沟通即可</view>
+    <view class="section-hint">待沟通点「我来沟通」；沟通完后填内容点「沟通完成」</view>
 
     <view class="inq" wx:for="{{inquiries}}" wx:key="id">
       <view class="inq-head">
         <text class="inq-product">{{item.productTitle}}</text>
-        <text class="inq-status {{item.isHandled ? 'done' : 'open'}}">{{item.statusLabel}}</text>
+        <text class="inq-status {{item.statusClass}}">{{item.statusLabel}}</text>
       </view>
       <view class="muted small">{{item.timeText}}</view>
-      <view class="inq-contact" wx:if="{{item.contactSnap}}">联系快照：{{item.contactSnap}}</view>
+      <view class="inq-handler">处理人：{{item.handlerText}}</view>
       <view class="inq-body" wx:if="{{item.remarkText}}">备注：{{item.remarkText}}</view>
       <view class="inq-body muted" wx:elif="{{item.contentText}}">{{item.contentText}}</view>
-      <view class="inq-handled" wx:if="{{item.isHandled && item.handledNote}}">处理说明：{{item.handledNote}}</view>
+      <view class="inq-handled" wx:if="{{item.isHandled && item.handledNote}}">沟通内容：{{item.handledNote}}</view>
 
-      <block wx:if="{{!item.isHandled}}">
+      <block wx:if="{{item.isOpen}}">
+        <view class="btn-primary mini" data-id="{{item.id}}" bindtap="claimInquiry">我来沟通</view>
+      </block>
+
+      <block wx:elif="{{item.isInProgress}}">
         <input
           class="input handle-input"
-          placeholder="处理方式（如：已微信报价 / 已电话沟通）"
+          placeholder="沟通内容（如：已微信报价 / 已电话沟通）"
           value="{{handleDrafts[item.id]}}"
           data-id="{{item.id}}"
           bindinput="onHandleNoteInput"
         />
-        <view class="btn-primary mini" data-id="{{item.id}}" bindtap="markHandled">标记已处理</view>
+        <view class="btn-primary mini" data-id="{{item.id}}" bindtap="markHandled">沟通完成</view>
       </block>
     </view>
     <view class="muted empty-tip" wx:if="{{!inquiries.length}}">暂无询价</view>

@@ -12,7 +12,7 @@ export class InvitesController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles('owner')
+  @Roles('owner', 'staff')
   create(
     @AuthUser() user: AuthContext,
     @Body() body: { role?: string; maxUses?: number; expiresInDays?: number },
@@ -22,7 +22,7 @@ export class InvitesController {
 
   @Get()
   @UseGuards(RolesGuard)
-  @Roles('owner')
+  @Roles('owner', 'staff')
   list(@AuthUser() user: AuthContext) {
     return this.invites.list(user);
   }
@@ -34,6 +34,14 @@ export class InvitesController {
     return this.invites.listMembers(user);
   }
 
+  /** 踢除员工（平权：owner/staff 均可；须写在 :id/revoke 之前，避免 members 被当成 id） */
+  @Post('members/:memberId/disable')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'staff')
+  disableMember(@AuthUser() user: AuthContext, @Param('memberId') memberId: string) {
+    return this.invites.disableMember(user, memberId);
+  }
+
   @Post('accept')
   accept(@AuthUser() user: AuthContext, @Body() body: { code?: string }) {
     return this.invites.accept(user, body || {});
@@ -41,7 +49,7 @@ export class InvitesController {
 
   @Post(':id/revoke')
   @UseGuards(RolesGuard)
-  @Roles('owner')
+  @Roles('owner', 'staff')
   revoke(@AuthUser() user: AuthContext, @Param('id') id: string) {
     return this.invites.revoke(user, id);
   }

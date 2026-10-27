@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T13:03:27.232Z",
+  "tenant": "tenant_dev_001",
+  "dry": false,
+  "oldToNew": {},
+  "updates": {
+    "product_view_events": 0,
+    "inquiries": 0,
+    "share_events": 0,
+    "customer_product_rules": 0,
+    "jobs": 0
+  }
+}

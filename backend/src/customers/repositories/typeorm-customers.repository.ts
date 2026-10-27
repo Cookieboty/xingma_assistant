@@ -1,5 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { CustomerProfile } from '../../common/entities/customer-profile.entity';
 import { CustomerLevel } from '../../common/entities/customer-level.entity';
 import { FollowUp } from '../../common/entities/follow-up.entity';
@@ -52,7 +52,32 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
     }
     qb.orderBy('c.created_at', 'DESC');
     const rows = await qb.getMany();
-    return Promise.all(rows.map((r) => this.toRec(r)));
+    if (!rows.length) return [];
+    // Batch levels once — avoid N+1 findOne per customer
+    const levelIds = [...new Set(rows.map((r) => r.levelId).filter(Boolean))];
+    const levels = levelIds.length
+      ? await this.levels.find({ where: { tenantId, id: In(levelIds) } })
+      : [];
+    const levelMap = new Map(levels.map((l) => [l.id, l]));
+    return rows.map((e) => {
+      const level = levelMap.get(e.levelId);
+      return {
+        id: e.id,
+        tenantId: e.tenantId,
+        openid: e.openid,
+        unionId: e.unionId,
+        nickname: e.nickname,
+        avatarUrl: e.avatarUrl,
+        levelId: e.levelId,
+        levelCode: level?.code || '',
+        rank: level?.rank ?? 0,
+        phone: e.phone,
+        remark: e.remark,
+        firstShareEventId: e.firstShareEventId,
+        createdAt: e.createdAt,
+        updatedAt: e.updatedAt,
+      };
+    });
   }
 
   async findById(tenantId: string, id: string) {
@@ -113,7 +138,7 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
 
   async listFollowUps(tenantId: string, customerId: string) {
     const rows = await this.followUps.find({
-      where: { tenantId, customerId },
+      where: { tenantId, customerId, status: 'active' as any },
       order: { createdAt: 'DESC' },
     });
     return rows.map(
@@ -165,8 +190,11 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
   }
 
   async removeFollowUp(tenantId: string, id: string) {
-    const result = await this.followUps.delete({ id, tenantId });
-    return (result.affected || 0) > 0;
+    const row = await this.followUps.findOne({ where: { id, tenantId } });
+    if (!row) return false;
+    (row as any).status = 'deleted';
+    await this.followUps.save(row);
+    return true;
   }
 
   async listRules(tenantId: string, customerId?: string, productId?: string) {
@@ -174,7 +202,7 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
     if (customerId) where.customerId = customerId;
     if (productId) where.productId = productId;
     const rows = await this.rules.find({ where });
-    return rows.map(
+    return rows.filter((r) => (r as any).status !== 'deleted').map(
       (r): CustomerProductRuleRec => ({
         id: r.id,
         tenantId: r.tenantId,
@@ -236,7 +264,10 @@ export class TypeOrmCustomersRepository implements ICustomersRepository {
   }
 
   async removeRule(tenantId: string, id: string) {
-    const result = await this.rules.delete({ id, tenantId });
-    return (result.affected || 0) > 0;
+    const row = await this.rules.findOne({ where: { id, tenantId } });
+    if (!row) return false;
+    (row as any).status = 'deleted';
+    await this.rules.save(row);
+    return true;
   }
 }

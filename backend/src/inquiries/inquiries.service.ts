@@ -10,6 +10,7 @@ import {
 import { DataSource } from 'typeorm';
 import { Inquiry } from '../common/entities/inquiry.entity';
 import { Product } from '../common/entities/product.entity';
+import { TenantMember } from '../common/entities/tenant-member.entity';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { CustomersService } from '../customers/customers.service';
 
@@ -23,6 +24,9 @@ export interface InquiryRec {
   contactName: string | null;
   remark: string | null;
   status: string;
+  assigneeMemberId: string | null;
+  assigneeOpenid: string | null;
+  assigneeName: string | null;
   staffReadAt: Date | null;
   handledNote: string | null;
   unread: boolean;
@@ -45,8 +49,11 @@ export type CreateInquiryBody = {
 export type CustomerInquiryStat = {
   customerId: string;
   inquiryCount: number;
+  /** open|pending|in_progress only — list badge must ignore handled */
+  pendingInquiryCount: number;
   unreadCount: number;
   hasUnreadInquiry: boolean;
+  hasPendingInquiry: boolean;
 };
 
 export type UnreadSummary = {
@@ -88,6 +95,9 @@ export class InquiriesService {
       contactName: e.contactName ?? null,
       remark: e.remark ?? null,
       status: e.status,
+      assigneeMemberId: e.assigneeMemberId ?? null,
+      assigneeOpenid: e.assigneeOpenid ?? null,
+      assigneeName: e.assigneeName ?? null,
       staffReadAt,
       handledNote: e.handledNote ?? null,
       unread: staffReadAt == null,
@@ -96,9 +106,42 @@ export class InquiriesService {
     };
   }
 
+  private async resolveHandler(user: AuthContext): Promise<{
+    memberId: string | null;
+    openid: string;
+    name: string;
+  }> {
+    const openid = user.openid;
+    let name = '';
+    if (this.db) {
+      const m = await this.db.getRepository(TenantMember).findOne({
+        where: { tenantId: user.tenantId, openid },
+      });
+      if (m?.nickname) name = String(m.nickname).trim();
+    }
+    if (!name) name = openid ? `员工${openid.slice(-4)}` : '员工';
+    return {
+      memberId: user.memberId || null,
+      openid,
+      name: name.slice(0, 64),
+    };
+  }
+
+  private applyHandler(
+    target: { assigneeMemberId: string | null; assigneeOpenid?: string | null; assigneeName?: string | null },
+    handler: { memberId: string | null; openid: string; name: string },
+  ) {
+    target.assigneeMemberId = handler.memberId;
+    target.assigneeOpenid = handler.openid;
+    target.assigneeName = handler.name;
+  }
+
   async create(user: AuthContext, body: CreateInquiryBody) {
     if (!body.productId) throw new BadRequestException('商品必填');
-    if (!user.customerId) throw new ForbiddenException('仅客户可发起询价');
+    // 员工/业主自测分享落地也会建 customer_profiles；JWT 可能仍无 customerId，
+    // 对任意已登录用户 ensureProfile 后以其客户档 id 写询价（owner/staff/customer 均可）。
+    const profile = await this.customers.ensureProfile(user);
+    const customerId = profile.id;
 
     const phone = body.phone != null ? String(body.phone).trim().slice(0, 32) : '';
     const contactName = String(body.name ?? body.nickname ?? '')
@@ -118,7 +161,7 @@ export class InquiriesService {
         .join('；') ||
       '客户询价';
 
-    // 回写客户档案（有填才写）
+    // 回写客户档案（有填才写）；ensureProfile 已保证档案存在，staff 亦可写 phone/nickname
     const profilePatch: { phone?: string | null; nickname?: string | null } = {};
     if (phone) profilePatch.phone = phone;
     if (contactName) profilePatch.nickname = contactName;
@@ -132,13 +175,15 @@ export class InquiriesService {
         repo.create({
           tenantId: user.tenantId,
           productId: body.productId,
-          customerId: user.customerId,
+          customerId,
           content,
           phone: phone || null,
           contactName: contactName || null,
           remark: remark || null,
           status: 'open',
           assigneeMemberId: null,
+          assigneeOpenid: null,
+          assigneeName: null,
           staffReadAt: null,
           handledNote: null,
         }),
@@ -149,12 +194,15 @@ export class InquiriesService {
       id: `inq_${String(this.seq++).padStart(6, '0')}`,
       tenantId: user.tenantId,
       productId: body.productId,
-      customerId: user.customerId,
+      customerId,
       content,
       phone: phone || null,
       contactName: contactName || null,
       remark: remark || null,
       status: 'open',
+      assigneeMemberId: null,
+      assigneeOpenid: null,
+      assigneeName: null,
       staffReadAt: null,
       handledNote: null,
       unread: true,
@@ -167,11 +215,12 @@ export class InquiriesService {
 
   async list(
     user: AuthContext,
-    opts?: { productId?: string; customerId?: string },
+    opts?: { productId?: string; customerId?: string; status?: string },
   ) {
     const onlyMine = user.role === 'customer';
     const productId = opts?.productId ? String(opts.productId) : '';
     let customerId = opts?.customerId ? String(opts.customerId) : '';
+    const status = String(opts?.status || '').trim();
     if (onlyMine) customerId = user.customerId || '-';
     if (user.role === 'customer' && opts?.customerId && opts.customerId !== user.customerId) {
       throw new ForbiddenException('无权查看他人询价');
@@ -185,6 +234,7 @@ export class InquiriesService {
         .orderBy('i.created_at', 'DESC');
       if (customerId) qb.andWhere('i.customer_id = :customerId', { customerId });
       if (productId) qb.andWhere('i.product_id = :productId', { productId });
+      if (status) qb.andWhere('i.status = :status', { status });
       const rows = await qb.getMany();
       const productIds = [...new Set(rows.map((r) => r.productId))];
       const nameMap = new Map<string, string>();
@@ -207,6 +257,7 @@ export class InquiriesService {
         if (i.tenantId !== user.tenantId) return false;
         if (customerId && i.customerId !== customerId) return false;
         if (productId && i.productId !== productId) return false;
+        if (status && i.status !== status) return false;
         return true;
       })
       .map((i) => ({ ...i, unread: i.staffReadAt == null }));
@@ -235,7 +286,7 @@ export class InquiriesService {
     return rec;
   }
 
-  /** 未读摘要：Tab 红点总计 + 按客户统计（列表行红点） */
+  /** 红点摘要：未处理(open/pending)或未读；已处理/关闭不计（列表行+Tab） */
   async unreadSummary(user: AuthContext): Promise<UnreadSummary> {
     this.assertStaff(user);
     if (this.db) {
@@ -244,18 +295,30 @@ export class InquiriesService {
         .createQueryBuilder('i')
         .select('i.customer_id', 'customerId')
         .addSelect('COUNT(*)', 'inquiryCount')
-        .addSelect('SUM(CASE WHEN i.staff_read_at IS NULL THEN 1 ELSE 0 END)', 'unreadCount')
+        .addSelect(
+          `SUM(CASE WHEN i.status IN ('open', 'pending', 'in_progress') THEN 1 ELSE 0 END)`,
+          'pendingInquiryCount',
+        )
+        .addSelect(
+          `SUM(CASE WHEN i.status NOT IN ('handled', 'closed', 'replied')
+            AND (i.staff_read_at IS NULL OR i.status IN ('open', 'pending', 'in_progress'))
+            THEN 1 ELSE 0 END)`,
+          'unreadCount',
+        )
         .where('i.tenant_id = :tenantId', { tenantId: user.tenantId })
         .groupBy('i.customer_id')
-        .getRawMany<{ customerId: string; inquiryCount: string; unreadCount: string }>();
+        .getRawMany<{ customerId: string; inquiryCount: string; pendingInquiryCount: string; unreadCount: string }>();
       const customers: CustomerInquiryStat[] = rows.map((r) => {
         const inquiryCount = Number(r.inquiryCount) || 0;
+        const pendingInquiryCount = Number(r.pendingInquiryCount) || 0;
         const unreadCount = Number(r.unreadCount) || 0;
         return {
           customerId: r.customerId,
           inquiryCount,
+          pendingInquiryCount,
           unreadCount,
           hasUnreadInquiry: unreadCount > 0,
+          hasPendingInquiry: pendingInquiryCount > 0,
         };
       });
       const unreadInquiryCount = customers.reduce((s, c) => s + c.unreadCount, 0);
@@ -267,12 +330,20 @@ export class InquiriesService {
       const cur = map.get(i.customerId) || {
         customerId: i.customerId,
         inquiryCount: 0,
+        pendingInquiryCount: 0,
         unreadCount: 0,
         hasUnreadInquiry: false,
+        hasPendingInquiry: false,
       };
       cur.inquiryCount += 1;
-      if (i.staffReadAt == null) cur.unreadCount += 1;
+      const st = String(i.status || 'open');
+      const isOpen = st === 'open' || st === 'pending' || st === 'in_progress';
+      const isDone = st === 'handled' || st === 'closed' || st === 'replied';
+      if (isOpen) cur.pendingInquiryCount += 1;
+      // 红点：待沟通/正在沟通 或 未读；已处理不再计入
+      if (!isDone && (i.staffReadAt == null || isOpen)) cur.unreadCount += 1;
       cur.hasUnreadInquiry = cur.unreadCount > 0;
+      cur.hasPendingInquiry = cur.pendingInquiryCount > 0;
       map.set(i.customerId, cur);
     }
     const customers = [...map.values()];
@@ -311,24 +382,28 @@ export class InquiriesService {
     return { ok: true, affected };
   }
 
-  /** 员工将单条询价标为已处理，可附处理说明 */
-  async markHandled(
+  /** 待沟通 → 我来沟通：记处理人，状态变为正在沟通 */
+  async claim(
     user: AuthContext,
     id: string,
-    body?: { handledNote?: string; handleResult?: string },
   ) {
     this.assertStaff(user);
-    const note = String(body?.handledNote ?? body?.handleResult ?? '')
-      .trim()
-      .slice(0, 512);
+    const handler = await this.resolveHandler(user);
     const now = new Date();
     if (this.db) {
       const repo = this.db.getRepository(Inquiry);
       const e = await repo.findOne({ where: { id, tenantId: user.tenantId } });
       if (!e) throw new NotFoundException('询价不存在');
-      e.status = 'handled';
-      e.handledNote = note || e.handledNote || null;
-      if (e.staffReadAt == null) e.staffReadAt = now;
+      if (e.status === 'handled' || e.status === 'closed' || e.status === 'replied') {
+        throw new BadRequestException('该询价已处理完成');
+      }
+      // 已在沟通中：保留原处理人，不抢单；本人可再次点确认
+      if (e.status === 'in_progress' && e.assigneeMemberId && e.assigneeMemberId !== handler.memberId) {
+        throw new BadRequestException(`已由 ${e.assigneeName || '同事'} 沟通中`);
+      }
+      e.status = 'in_progress';
+      this.applyHandler(e, handler);
+      if (!e.staffReadAt) e.staffReadAt = now;
       const saved = await repo.save(e);
       let productName: string | null = null;
       const p = await this.db.getRepository(Product).findOne({
@@ -340,12 +415,75 @@ export class InquiriesService {
     }
     const rec = this.listStore.find((i) => i.id === id && i.tenantId === user.tenantId);
     if (!rec) throw new NotFoundException('询价不存在');
-    rec.status = 'handled';
-    rec.handledNote = note || rec.handledNote || null;
-    if (rec.staffReadAt == null) {
-      rec.staffReadAt = now;
-      rec.unread = false;
+    if (rec.status === 'handled' || rec.status === 'closed' || rec.status === 'replied') {
+      throw new BadRequestException('该询价已处理完成');
     }
+    if (rec.status === 'in_progress' && rec.assigneeMemberId && rec.assigneeMemberId !== handler.memberId) {
+      throw new BadRequestException(`已由 ${rec.assigneeName || '同事'} 沟通中`);
+    }
+    rec.status = 'in_progress';
+    this.applyHandler(rec, handler);
+    if (!rec.staffReadAt) rec.staffReadAt = now;
+    rec.unread = false;
+    return { ...rec };
+  }
+
+  /** 正在沟通 → 沟通完成：填写沟通内容，保留处理人 */
+  async markHandled(
+    user: AuthContext,
+    id: string,
+    body?: { handledNote?: string; handleResult?: string },
+  ) {
+    this.assertStaff(user);
+    const note = String(body?.handledNote ?? body?.handleResult ?? '')
+      .trim()
+      .slice(0, 512);
+    if (!note) throw new BadRequestException('请填写沟通内容');
+    const handler = await this.resolveHandler(user);
+    const now = new Date();
+    if (this.db) {
+      const repo = this.db.getRepository(Inquiry);
+      const e = await repo.findOne({ where: { id, tenantId: user.tenantId } });
+      if (!e) throw new NotFoundException('询价不存在');
+      if (e.status === 'handled' || e.status === 'closed' || e.status === 'replied') {
+        throw new BadRequestException('该询价已处理完成');
+      }
+      // 尚未认领或姓名缺失时记/补处理人（旧数据可能只有 status=handled）
+      if (!e.assigneeMemberId && !e.assigneeOpenid) {
+        this.applyHandler(e, handler);
+      } else if (!(e.assigneeName || '').trim()) {
+        e.assigneeName = handler.name;
+        if (!e.assigneeOpenid) e.assigneeOpenid = handler.openid;
+        if (!e.assigneeMemberId) e.assigneeMemberId = handler.memberId;
+      }
+      e.status = 'handled';
+      e.handledNote = note;
+      e.staffReadAt = now;
+      const saved = await repo.save(e);
+      let productName: string | null = null;
+      const p = await this.db.getRepository(Product).findOne({
+        where: { id: saved.productId, tenantId: user.tenantId },
+        select: ['id', 'name'],
+      });
+      productName = p?.name ?? null;
+      return this.toRec(saved, productName);
+    }
+    const rec = this.listStore.find((i) => i.id === id && i.tenantId === user.tenantId);
+    if (!rec) throw new NotFoundException('询价不存在');
+    if (rec.status === 'handled' || rec.status === 'closed' || rec.status === 'replied') {
+      throw new BadRequestException('该询价已处理完成');
+    }
+    if (!rec.assigneeMemberId && !rec.assigneeOpenid) {
+      this.applyHandler(rec, handler);
+    } else if (!(rec.assigneeName || '').trim()) {
+      rec.assigneeName = handler.name;
+      if (!rec.assigneeOpenid) rec.assigneeOpenid = handler.openid;
+      if (!rec.assigneeMemberId) rec.assigneeMemberId = handler.memberId;
+    }
+    rec.status = 'handled';
+    rec.handledNote = note;
+    rec.staffReadAt = now;
+    rec.unread = false;
     return { ...rec };
   }
 }

@@ -1,0 +1,40 @@
+<view class="page">
+  <view class="head" wx:if="{{groupName}}">
+    <view class="head-title">{{groupName}}</view>
+    <view class="head-sub">可公开展示的款式</view>
+  </view>
+
+  <view class="grid" wx:if="{{list.length}}">
+    <view
+      class="cat-card"
+      wx:for="{{list}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="goProduct"
+    >
+      <view class="cover-wrap">
+        <image
+          wx:if="{{item.coverUrl}}"
+          class="cover"
+          src="{{item.coverUrl}}"
+          mode="aspectFill"
+          lazy-load
+        />
+        <view wx:else class="cover cover-ph">暂无图</view>
+      </view>
+      <view class="body">
+        <view class="style">{{item.styleNo ? '款号 ' + item.styleNo : '未填款号'}}</view>
+        <view class="price {{item.priceMuted ? 'muted' : ''}}">{{item.priceText || '询价'}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="empty" wx:if="{{!loading && !list.length}}">
+    <view class="empty-title">暂无商品</view>
+    <view class="empty-sub">该分组下还没有可公开展示的款式</view>
+  </view>
+  <view class="footer" wx:if="{{loading}}">加载中…</view>
+  <view class="footer" wx:elif="{{loadingMore}}">加载更多…</view>
+  <view class="footer" wx:elif="{{list.length && !hasMore}}">没有更多了</view>
+  <view class="footer" wx:elif="{{list.length && hasMore}}">上拉加载更多</view>
+</view>

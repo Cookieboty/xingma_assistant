@@ -1,5 +1,17 @@
 <!-- 客户专用商品页（分享落地）。无编辑/分享/宣传等管理控件。 -->
 <view class="page" wx:if="{{product}}">
+  <!-- t336: 左上角回目录（全部可公开展示款式），同「更多」上下文 -->
+  <view
+    class="home-fab"
+    wx:if="{{showCatalogCta}}"
+    style="top: {{homeFabTop}}px; height: {{homeFabSize}}px; width: {{homeFabSize}}px;"
+    bindtap="goCatalog"
+    aria-role="button"
+    aria-label="全部款式"
+  >
+    <image class="home-fab-icon" src="/images/home.png" mode="aspectFit" />
+  </view>
+
   <!-- 1. 标题 + 款号/面料等 -->
   <view class="hero">
     <view class="title">{{product.name}}</view>
@@ -65,7 +77,59 @@
   </view>
 
   <view class="bottom-bar">
+    <view class="catalog-btn" wx:if="{{showCatalogCta}}" bindtap="goCatalog">更多</view>
     <view class="inquire-btn" bindtap="openInquirySheet">询价</view>
+  </view>
+
+
+  <!-- 首次打开软提示完善资料（可跳过，不挡看货） -->
+  <view class="contact-mask" wx:if="{{showProfileSheet}}" catchtouchmove="noop">
+    <view class="contact-sheet profile-sheet" catchtap="noop">
+      <view class="contact-sheet-title">{{profileSheetTitle || '完善资料'}}</view>
+      <view class="contact-sheet-desc">{{profileSheetDesc || '只补还缺的项；可跳过'}}</view>
+      <view class="profile-sheet-row">
+        <button
+          wx:if="{{needProfileAvatar}}"
+          class="profile-avatar-btn"
+          open-type="chooseAvatar"
+          bind:chooseavatar="onProfileChooseAvatar"
+        >
+          <image wx:if="{{profileAvatarUrl}}" src="{{profileAvatarUrl}}" class="profile-avatar-img" mode="aspectFill" />
+          <view wx:else class="profile-avatar-placeholder">头像</view>
+        </button>
+        <view class="profile-sheet-fields">
+          <input
+            wx:if="{{needProfileNickname}}"
+            class="contact-input"
+            type="nickname"
+            maxlength="32"
+            placeholder="昵称 / 怎么称呼"
+            value="{{profileDraftNick}}"
+            bindblur="onProfileNick"
+            bindinput="onProfileNick"
+          />
+          <view class="profile-phone-row" wx:if="{{needProfilePhone}}">
+            <input
+              class="contact-input profile-phone-input"
+              type="number"
+              maxlength="20"
+              placeholder="手机号"
+              value="{{profileDraftPhone}}"
+              bindinput="onProfilePhone"
+            />
+            <button
+              class="profile-phone-wx"
+              open-type="getPhoneNumber"
+              bindgetphonenumber="onProfileGetPhone"
+            >微信获取</button>
+          </view>
+        </view>
+      </view>
+      <view class="contact-sheet-actions">
+        <view class="contact-btn ghost" bindtap="skipProfileSheet">跳过</view>
+        <view class="contact-btn primary" bindtap="saveProfileSheet">{{profileSaving ? '保存中…' : '保存'}}</view>
+      </view>
+    </view>
   </view>
 
   <!-- 询价弹层：预填已有联系方式；提交写询价记录 + 档案 -->

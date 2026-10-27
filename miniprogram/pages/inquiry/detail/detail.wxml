@@ -10,6 +10,7 @@
     <view>{{inquiry.content}}</view>
     <view class="muted" wx:if="{{inquiry.contactName || inquiry.phone}}">{{inquiry.contactName || ''}} {{inquiry.phone || ''}}</view>
     <view class="muted">状态：{{inquiry.statusLabel || inquiry.status}}</view>
-    <view wx:if="{{inquiry.handledNote}}">处理说明：{{inquiry.handledNote}}</view>
+    <view class="muted">处理人：{{inquiry.assigneeName || '未认领'}}</view>
+    <view wx:if="{{inquiry.handledNote}}">沟通内容：{{inquiry.handledNote}}</view>
   </view>
 </view>

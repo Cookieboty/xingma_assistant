@@ -11,3 +11,16 @@ miniprogram.bak*/
 .deploy-staging/
 backend/data/
 coverage/
+backend/.env
+backend/storage/
+
+# 本机 secrets（Token 勿入仓）
+backend/.secrets/
+*.secret
+
+backend/secrets/
+backend/.secrets/
+
+# local scratch / agent temp (do not commit)
+.tmp/
+.tmp-*/

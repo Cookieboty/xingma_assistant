@@ -2,23 +2,32 @@ import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleIni
 import { DataSource } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { MediaAsset } from '../common/entities/media-asset.entity';
-import { PromoSetEntity, PromoSetImage } from '../common/entities/promo-set.entity';
+import { PromoSetEntity, PromoSetImage, ImageGenCallRecord, OutfitCompareRecord } from '../common/entities/promo-set.entity';
 import { newId } from '../common/utils/id';
 import { ProductsService } from '../products/products.service';
 import { ImageGenClient } from './image-gen.client';
-import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind } from './promo.templates';
+import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind, VIDEO_BGM_PRESETS, findVideoBgm } from './promo.templates';
 import { enrichPoseSceneText } from './pose-scene-enrich';
+import { analyzeStyleRefs, styleKeywordsToPromptZh, StyleKeywordsZh } from './style-ref-analyze';
+import { prepareRefsForCategory, buildPromptZh } from './garment-ref-prepare';
+import type { ProductRefAnalysis, GarmentRefKind } from './garment-ref-prepare';
 import { VisionClient } from '../vision/vision.client';
 import { JobsService } from '../jobs/jobs.service';
 import { registerPromoImageHandler } from '../jobs/handlers/promo-image.handler';
 import { registerPromoVideoHandler } from '../jobs/handlers/promo-video.handler';
 import { JobProgress } from '../jobs/job.types';
 import { OssClient } from '../media/oss.client';
+import { MediaService } from '../media/media.service';
 import { buildPromoCaption } from './promo.captions';
 import { buildJobDisplayTitle } from '../jobs/job-display-title';
 import { VideoGenClient } from './video-gen.client';
+import { LkbVideoClient, clampDuration, LkbVideoAttachment } from './lkb-video.client';
+import { draftVideoBeatScript, resolveVideoPromptZh, syncScriptFromBeats, VideoBeat } from './video-script';
+import { ExternalOutfitClient } from './external-outfit.client';
 
 export interface GenerateInput {
   templateId: string;
@@ -40,6 +49,8 @@ export interface GenerateInput {
   setId?: string;
   /** 仅重生成这些下标；缺省则整组 */
   regenIndexes?: number[];
+  /** 每次重新生成随机令牌：写入 prompt/instruction/seed，避免同参同图 */
+  regenNonce?: string;
   /**
    * 风格样例 OSS objectKey（业务 key，无 OSS_PREFIX）。
    * 0～4；须 tenants/{tenantId}/promo_style_ref/ 前缀；不写 coverMediaIds。
@@ -47,14 +58,33 @@ export interface GenerateInput {
   styleRefObjectKeys?: string[];
   /** 风格强弱：weak / medium / strong；默认 medium；无风格图时忽略 */
   styleStrength?: StyleStrength;
-  /** 视频时长秒数（约 15）；仅 mediaKind=video */
+  /**
+   * 风格参考模板：用户编辑后的关键词（中文结构或扁平）。
+   * 留痕进 params；软提示进 promptZh / buildPrompt。
+   */
+  styleKeywords?: Partial<StyleKeywordsZh> | null;
+  /** 风格关键词自由文本（覆盖结构化字段拼句） */
+  styleKeywordsText?: string;
+  /** 视频时长秒数（约 8–12，钳制 4–15）；仅 mediaKind=video */
   seconds?: number;
+  /** 可选一句话卖点（视频）；可与 feature 并存 */
+  sellingPoint?: string;
+  /** 业主确认/编辑后的中文分镜脚本 */
+  script?: string;
+  /** 可编辑分镜 beats（可选；有则优先用于拼脚本） */
+  beats?: VideoBeat[];
+  /** 视频配乐预设 id（none / soft_ambient / …）；引擎未支持曲目时仍透传 params */
+  bgmId?: string | null;
+  /** 是否请上游生成/附带音频（LKB generateAudio） */
+  generateAudio?: boolean;
 }
 
 interface JobItem {
   index: number;
   status: 'pending' | 'running' | 'done' | 'failed';
   prompt: string;
+  /** 中文原话（用户输入 + 读衣中文），与 prompt 成对留痕 */
+  promptZh?: string;
   poseId?: string;
   sceneId?: string;
   objectKey?: string;
@@ -63,6 +93,14 @@ interface JobItem {
   error?: string;
   savedMediaId?: string;
   ms?: number;
+  /** 本次 IMAGE_GEN 调用记录（重生时与 prior.genCalls 合并） */
+  genCall?: ImageGenCallRecord;
+  /** 保留未重生槽位的历史 */
+  genCalls?: ImageGenCallRecord[];
+  model?: string;
+  size?: string;
+  /** 同图对比（self vs external） */
+  compare?: OutfitCompareRecord;
 }
 interface PromoJob {
   id: string;
@@ -85,13 +123,18 @@ export class PromoService implements OnModuleInit {
   private readonly logger = new Logger('Promo');
   private running = 0;
   private waiters: Array<() => void> = [];
+  /** productIds already scanned for pj_ legacy migrate this process */
+  private readonly legacyMigratedProducts = new Set<string>();
 
   constructor(
     private readonly products: ProductsService,
     private readonly gen: ImageGenClient,
     private readonly videoGen: VideoGenClient,
+    private readonly lkbVideo: LkbVideoClient,
     private readonly jobs: JobsService,
     private readonly oss: OssClient,
+    private readonly media: MediaService,
+    private readonly externalOutfit: ExternalOutfitClient,
     @Optional() private readonly vision?: VisionClient,
     @Optional() private readonly dataSource?: DataSource,
   ) {}
@@ -112,7 +155,35 @@ export class PromoService implements OnModuleInit {
     return d;
   }
   private publicUrl(objectKey: string) {
+    const k = String(objectKey || '').trim();
+    if (/^https?:\/\//i.test(k)) return k;
     return this.oss.publicUrl(objectKey);
+  }
+
+  /**
+   * 槽位播放 URL：外部直链优先，否则 OSS/本地 objectKey。
+   * 上游绝对 URL 原样返回（不转存自有 OSS、不改写为 external-play）。
+   * 微信 downloadFile 白名单已含 xy-tradex.oss-cn-shenzhen 等上游桶时可直链播放；
+   * /api/media/external-play 仍保留作应急中转，本路径默认不再调用。
+   */
+  private itemPlayUrl(
+    it: { objectKey?: string | null; externalUrl?: string | null; url?: string | null },
+  ): string | null {
+    const ext = String(it?.externalUrl || it?.url || '').trim();
+    if (/^https?:\/\//i.test(ext)) {
+      return ext;
+    }
+    const key = String(it?.objectKey || '').trim();
+    if (!key) return null;
+    return this.publicUrl(key);
+  }
+
+  /** 槽位是否已有可展示结果（本地/OSS objectKey 或外部 http(s) 直链） */
+  private itemHasResult(it: { status?: string; objectKey?: string | null; url?: string | null; externalUrl?: string | null }): boolean {
+    if (it?.status !== 'done') return false;
+    if (String(it?.objectKey || '').trim()) return true;
+    const u = String(it?.externalUrl || it?.url || '').trim();
+    return /^https?:\/\//i.test(u);
   }
 
   /** 校验并规范化风格样例 keys；空/缺省 → [] */
@@ -145,30 +216,84 @@ export class PromoService implements OnModuleInit {
   }
 
   /**
-   * 确保 objectKey 在本地 storage/ 可读；缺则从 OSS 拉取。
+   * 确保 objectKey 在本地 storage/ 可读。
+   * - 业务 key（tenants/...）：本地 miss 则从自有 OSS（xy-tradex）拉取
+   * - http(s) 直链（external outfit / LKB 结果入库时把 URL 写入 objectKey）：HTTP 下载到 _http_cache
+   * - 绝对本地路径：存在则直接用
    * 失败返回 null（调用方决定降级或报错）。
    */
   private async ensureLocal(objectKey: string): Promise<string | null> {
-    const abs = path.join(this.storageRoot(), objectKey);
+    const key = String(objectKey || '').trim();
+    if (!key) return null;
+
+    if (path.isAbsolute(key)) {
+      try {
+        if (fs.existsSync(key) && fs.statSync(key).size > 0) return key;
+      } catch {
+        /* fall through */
+      }
+    }
+
+    if (/^https?:\/\//i.test(key)) {
+      return this.ensureLocalFromHttp(key);
+    }
+
+    const abs = path.join(this.storageRoot(), key);
     try {
       if (fs.existsSync(abs) && fs.statSync(abs).size > 0) return abs;
     } catch {
       /* fall through to download */
     }
     try {
-      const buf = await this.oss.getObjectBuffer(objectKey);
+      const buf = await this.oss.getObjectBuffer(key);
       if (!buf?.length) return null;
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, buf);
       return abs;
     } catch (e: any) {
-      // 本地 mock / 无 OSS：若文件本就该在 storage，再探一次
       try {
         if (fs.existsSync(abs) && fs.statSync(abs).size > 0) return abs;
       } catch {
         /* ignore */
       }
-      this.logger.warn(`ensureLocal fail key=${objectKey}: ${e?.message || e}`);
+      this.logger.warn(`ensureLocal fail key=${key}: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  /** 外部 HTTPS 参考图缓存到 storage/_http_cache（生图 vision / 生视频附件共用） */
+  private async ensureLocalFromHttp(url: string): Promise<string | null> {
+    const hash = createHash('sha1').update(url).digest('hex');
+    let ext = '.jpg';
+    try {
+      const pathname = new URL(url).pathname;
+      const m = pathname.match(/\.(jpe?g|png|webp|gif)(?:$|\?)/i);
+      if (m) {
+        const raw = m[1].toLowerCase();
+        ext = raw === 'jpeg' ? '.jpg' : `.${raw}`;
+      }
+    } catch {
+      /* keep .jpg */
+    }
+    const abs = path.join(this.storageRoot(), '_http_cache', `${hash}${ext}`);
+    try {
+      if (fs.existsSync(abs) && fs.statSync(abs).size > 0) return abs;
+    } catch {
+      /* download */
+    }
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 90_000);
+      const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf?.length) return null;
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, buf);
+      return abs;
+    } catch (e: any) {
+      this.logger.warn(`ensureLocal http fail url=${url.slice(0, 160)}: ${e?.message || e}`);
       return null;
     }
   }
@@ -178,13 +303,24 @@ export class PromoService implements OnModuleInit {
     return listTemplatesByKind(kind).map(templateDto);
   }
   listModels() {
-    return MODELS.map(({ id, name, desc }) => ({ id, name, desc }));
+    // 不下发英文 prompt；前端只展示短标签 + 人脸图
+    return MODELS.map(({ id, name, desc, avatar, faceUrl }) => ({
+      id,
+      name,
+      desc,
+      avatar: faceUrl || avatar,
+      faceUrl: faceUrl || avatar || '',
+    }));
+  }
+  listVideoBgm() {
+    return VIDEO_BGM_PRESETS.map(({ id, name, desc, generateAudio }) => ({ id, name, desc, generateAudio }));
   }
   presets() {
     return {
       templates: this.listTemplates('image'),
       videoTemplates: this.listTemplates('video'),
       models: this.listModels(),
+      videoBgmPresets: this.listVideoBgm(),
       sizes: Object.values(SIZES),
     };
   }
@@ -192,7 +328,7 @@ export class PromoService implements OnModuleInit {
   // ---------- 素材 ----------
   private async productAssets(user: AuthContext, productId: string) {
     const product: any = await this.products.getDetail(user, productId);
-    let assets: Array<{ id: string; objectKey: string }> = [];
+    let assets: Array<{ id: string; objectKey: string; meta?: Record<string, unknown> | null }> = [];
     if (this.dataSource && process.env.DB_ENABLED === 'true') {
       const rows = await this.dataSource
         .getRepository(MediaAsset)
@@ -202,7 +338,7 @@ export class PromoService implements OnModuleInit {
         const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
         return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib) || a.objectKey.localeCompare(b.objectKey);
       });
-      assets = rows.map((r) => ({ id: r.id, objectKey: r.objectKey }));
+      assets = rows.map((r) => ({ id: r.id, objectKey: r.objectKey, meta: (r as any).meta || null }));
     }
     return { product, assets };
   }
@@ -238,7 +374,8 @@ export class PromoService implements OnModuleInit {
       featureSource: draft ? 'saved' : 'auto',
       template: tpl ? templateDto(tpl) : null,
       configured: this.gen.configured(),
-      videoConfigured: this.videoGen.configured(),
+      videoConfigured: this.videoEngineConfigured(),
+      videoEngine: this.resolveVideoEngine(),
     };
   }
 
@@ -285,6 +422,33 @@ export class PromoService implements OnModuleInit {
     });
   }
 
+  /**
+   * 风格样例识图 → 可编辑中文关键词。失败返回空结构（仍可生图）。
+   * body.styleRefObjectKeys 须已上传。
+   */
+  async analyzeStyleRefsApi(
+    user: AuthContext,
+    productId: string,
+    body: { styleRefObjectKeys?: string[] },
+  ) {
+    await this.products.getDetail(user, productId);
+    const keys = this.normalizeStyleRefs(user, body?.styleRefObjectKeys);
+    if (!keys.length) {
+      throw new BadRequestException('请先上传至少 1 张风格样例');
+    }
+    const locals: string[] = [];
+    for (const k of keys) {
+      const local = await this.ensureLocal(k);
+      if (local) locals.push(local);
+    }
+    const result = await analyzeStyleRefs(this.vision, locals);
+    return {
+      ...result,
+      styleRefObjectKeys: keys,
+      analyzed: result.via === 'llm',
+    };
+  }
+
   async generate(user: AuthContext, productId: string, input: GenerateInput) {
     const tpl = findTemplate(input?.templateId);
     if (!tpl) throw new BadRequestException('未知模板');
@@ -293,7 +457,14 @@ export class PromoService implements OnModuleInit {
     if (wantVideo) {
       return this.generateVideo(user, productId, { ...input, mediaKind: 'video', templateId: tpl.id });
     }
-    if (!this.gen.configured()) throw new BadRequestException('服务端未配置生图密钥');
+    // OUTFIT_ENGINE=external 时不调用自建 IMAGE_GEN，无需 IMAGE_GEN 密钥
+    const outfitEngineEarly = this.externalOutfit.engineMode();
+    if (outfitEngineEarly !== 'external' && !this.gen.configured()) {
+      throw new BadRequestException('服务端未配置生图密钥');
+    }
+    if (outfitEngineEarly !== 'self' && !this.externalOutfit.configured()) {
+      throw new BadRequestException('外部穿搭 Agent 未配置（OUTFIT_AGENT_ENABLED / API Key）');
+    }
     const product: any = await this.products.getDetail(user, productId);
     const colorsIn = Array.isArray(input.colors) ? input.colors.map((c) => String(c || '').trim()).filter(Boolean) : [];
     let count: number;
@@ -309,11 +480,35 @@ export class PromoService implements OnModuleInit {
         throw new BadRequestException('多色展示需要选择模特');
       }
       count = n;
+    } else if (tpl.id === 'model_scene') {
+      const refs = (input.referenceAssetIds || []).filter(Boolean);
+      if (refs.length !== 1) {
+        throw new BadRequestException(`模特上身场景图请只选 1 张商品参考图（已选 ${refs.length}）`);
+      }
+      if (!input.modelId) {
+        throw new BadRequestException('模特上身场景图需要选择 1 个模特');
+      }
+      // 动作/场景保持数组；张数按用户 count（前端默认 pose×scene）
+      count = Math.min(tpl.count.max, Math.max(tpl.count.min, Number(input.count) || tpl.count.default));
     } else {
       count = Math.min(tpl.count.max, Math.max(tpl.count.min, Number(input.count) || tpl.count.default));
     }
-    const styleRefObjectKeys = this.normalizeStyleRefs(user, input.styleRefObjectKeys);
-    const styleStrength = this.normalizeStyleStrength(input.styleStrength);
+    // 风格样例仅 style_ref（styleRef.max>0）；其它模板忽略入参，防误传
+    const styleAllowed = !!(tpl.styleRef && Number(tpl.styleRef.max) > 0);
+    const styleRefObjectKeys = styleAllowed
+      ? this.normalizeStyleRefs(user, input.styleRefObjectKeys)
+      : [];
+    const styleStrength = styleAllowed
+      ? this.normalizeStyleStrength(input.styleStrength)
+      : this.normalizeStyleStrength(undefined);
+    const styleRefMin = styleAllowed ? (tpl.styleRef?.min ?? 0) : 0;
+    if (styleRefMin > 0 && styleRefObjectKeys.length < styleRefMin) {
+      throw new BadRequestException(`「${tpl.name}」至少上传 ${styleRefMin} 张风格样例`);
+    }
+    const styleKeywordsText = styleKeywordsToPromptZh(
+      input.styleKeywords,
+      input.styleKeywordsText,
+    );
     const caption = this.captionFor(product, { ...input, colors: colorsIn.length ? colorsIn : input.colors, count }, tpl.id);
     const params = {
       templateId: tpl.id,
@@ -328,9 +523,12 @@ export class PromoService implements OnModuleInit {
       colors: tpl.id === 'multi_color' ? colorsIn : (input.colors || []),
       count,
       sizeId: input.sizeId || tpl.defaultSize,
-      // 风格样例整组共用（含 multi_color）；空数组不写也等价现网
+      // 风格样例仅 style_ref 模板写入；其它模板为空
       styleRefObjectKeys,
       styleStrength: styleRefObjectKeys.length ? styleStrength : undefined,
+      styleKeywords: input.styleKeywords || undefined,
+      styleKeywordsText: styleKeywordsText || undefined,
+      regenNonce: input.regenNonce ? String(input.regenNonce) : undefined,
     };
 
     const isPartialRegen = Array.isArray(input.regenIndexes) && input.regenIndexes.length > 0;
@@ -379,21 +577,36 @@ export class PromoService implements OnModuleInit {
       existingJobId = existing.jobId || null;
       await repo.save(existing);
     } else {
-      setId = newId('ps');
-      await repo.save(
-        repo.create({
-          id: setId,
-          tenantId: user.tenantId,
-          productId,
-          templateId: tpl.id,
-          params,
-          caption,
-          jobId: null,
-          legacyJobId: null,
-          status: 'generating',
-          images: Array.from({ length: count }, (_, i) => ({ index: i, status: 'pending' as const })),
-        }),
-      );
+      // 同模板失败空壳：复用该 set，避免「本商品任务」再堆一行
+      const reusable = await this.findReusableFailedSet(user, productId, tpl.id);
+      if (reusable) {
+        setId = reusable.id;
+        reusable.status = 'generating';
+        reusable.params = params;
+        reusable.caption = caption;
+        reusable.templateId = tpl.id;
+        reusable.images = Array.from({ length: count }, (_, i) => ({ index: i, status: 'pending' as const }));
+        existingJobId = reusable.jobId || null;
+        await repo.save(reusable);
+        await this.softDeleteFailedEmptySets(user, productId, tpl.id, setId);
+      } else {
+        setId = newId('ps');
+        await repo.save(
+          repo.create({
+            id: setId,
+            tenantId: user.tenantId,
+            productId,
+            templateId: tpl.id,
+            params,
+            caption,
+            jobId: null,
+            legacyJobId: null,
+            status: 'generating',
+            images: Array.from({ length: count }, (_, i) => ({ index: i, status: 'pending' as const })),
+          }),
+        );
+        await this.softDeleteFailedEmptySets(user, productId, tpl.id, setId);
+      }
     }
 
     const jobPayload = {
@@ -423,6 +636,34 @@ export class PromoService implements OnModuleInit {
     }
     await repo.update({ id: setId, tenantId: user.tenantId }, { jobId: job.id });
 
+    // 任务中心进度：局部重生时 total 仍为整组槽位数，done 为仍成功的旧槽
+    let progressDone = 0;
+    let progressTotal = count;
+    try {
+      const setRow = await repo.findOne({ where: { id: setId!, tenantId: user.tenantId, productId } });
+      const imgs = Array.isArray(setRow?.images) ? setRow!.images : [];
+      if (imgs.length) {
+        progressTotal = Math.max(count, imgs.length);
+        progressDone = imgs.filter((im) => im && im.status === 'done').length;
+      } else if (isPartialRegen) {
+        progressDone = Math.max(0, count - ((input.regenIndexes as number[]) || []).length);
+      }
+      const prog = {
+        ...(job.progress || {}),
+        percent: 0,
+        step: 'queued',
+        message: isPartialRegen
+          ? `重新生成 ${((input.regenIndexes as number[]) || []).length} 张（${progressDone}/${progressTotal}）`
+          : ((job.progress as any)?.message || '排队中'),
+        done: progressDone,
+        total: progressTotal,
+      };
+      await this.jobs.updateProgress(job.id, user.tenantId, prog);
+      (job as any).progress = prog;
+    } catch (e: any) {
+      this.logger.warn(`init promo progress: ${e?.message || e}`);
+    }
+
     return {
       id: job.id,
       jobId: job.id,
@@ -433,17 +674,86 @@ export class PromoService implements OnModuleInit {
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
       progress: job.progress,
-      done: 0,
-      total: count,
+      done: progressDone,
+      total: progressTotal,
       items: [],
       reused: false,
     };
   }
 
 
+
+  /** VIDEO_ENGINE=lkb|xytoken；未设时：LKB 已配置则 lkb，否则 xytoken */
+  resolveVideoEngine(): 'lkb' | 'xytoken' {
+    const m = String(process.env.VIDEO_ENGINE || '').trim().toLowerCase();
+    if (m === 'lkb' || m === 'xytoken') return m;
+    return this.lkbVideo.configured() ? 'lkb' : 'xytoken';
+  }
+
+  videoEngineConfigured(): boolean {
+    const e = this.resolveVideoEngine();
+    if (e === 'lkb') return this.lkbVideo.configured();
+    return this.videoGen.configured();
+  }
+
+  /**
+   * 视频分镜脚本草案：业主可编辑后再 POST generate（script 字段）。
+   * 不创建 job / promo_set。
+   */
+  async draftVideoScript(
+    user: AuthContext,
+    productId: string,
+    body: {
+      feature?: string;
+      sellingPoint?: string;
+      referenceAssetIds?: string[];
+      seconds?: number;
+      /** heuristic（默认）| polish（润色，调 LLM） */
+      mode?: 'heuristic' | 'polish';
+      polish?: boolean;
+      templateId?: string;
+      modelId?: string | null;
+      beats?: VideoBeat[];
+    },
+  ) {
+    const { product } = await this.productAssets(user, productId);
+    const feature =
+      String(body?.feature || '').trim() ||
+      this.readFeature(user.tenantId, productId)?.feature ||
+      this.defaultFeature(product);
+    const sellingPoint = String(body?.sellingPoint || '').trim().slice(0, 200);
+    const seconds = clampDuration(
+      Number(body?.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
+    );
+    const mode =
+      body?.mode === 'polish' || body?.polish === true ? 'polish' : 'heuristic';
+    const templateId = String(body?.templateId || '').trim() || undefined;
+    const modelId = body?.modelId ? String(body.modelId) : null;
+    // 若前端已改 beats 再请求同步，可回写 script（仍走 heuristic/polish 生成时忽略入参 beats）
+    const draft = await draftVideoBeatScript(this.vision, {
+      feature,
+      sellingPoint,
+      seconds,
+      mode,
+      templateId,
+      modelId,
+    });
+    return {
+      ...draft,
+      feature,
+      sellingPoint: sellingPoint || null,
+      templateId: templateId || null,
+      modelId,
+      engine: this.resolveVideoEngine(),
+      configured: this.videoEngineConfigured(),
+      productId,
+      styleNo: product.styleNo,
+    };
+  }
+
   /**
    * 宣传视频：创建 promo_sets(kind=video) + jobs(type=promo_video)。
-   * 一期固定 1 条竖屏约 15s；模板默认 product_showcase_video。
+   * 一期固定 1 条竖屏约 8–12s；模板默认 product_showcase_video。
    */
   async generateVideo(user: AuthContext, productId: string, input: GenerateInput) {
     let tpl = findTemplate(input?.templateId);
@@ -451,7 +761,7 @@ export class PromoService implements OnModuleInit {
       tpl = findTemplate('product_showcase_video') || undefined;
     }
     if (!tpl) throw new BadRequestException('未知视频模板');
-    if (!this.videoGen.configured()) throw new BadRequestException('服务端未配置视频生成密钥');
+    if (!this.videoEngineConfigured()) throw new BadRequestException('服务端未配置视频生成密钥');
     const product: any = await this.products.getDetail(user, productId);
     const refs = (input.referenceAssetIds || []).filter(Boolean);
     if (refs.length < tpl.reference.min || refs.length > tpl.reference.max) {
@@ -460,32 +770,75 @@ export class PromoService implements OnModuleInit {
     const count = 1;
     const sizeId = tpl.sizes.includes(String(input.sizeId || '')) ? String(input.sizeId) : tpl.defaultSize;
     const feature = String(input.feature || '').slice(0, 2000);
+    const sellingPoint = String(input.sellingPoint || '').slice(0, 200);
+    const script = String(input.script || '').trim().slice(0, 1200);
+    const seconds = clampDuration(
+      Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
+    );
+    const bgm = findVideoBgm(input.bgmId);
+    // 生视频一律请上游出音；UI「无配乐」仍记 bgmId=none，但不压制 generateAudio
+    const generateAudio = true;
+    const modelId =
+      tpl.model === 'none' ? null : input.modelId ? String(input.modelId) : null;
+    if (tpl.model === 'required' && !modelId) {
+      throw new BadRequestException('该视频模板需要选择模特');
+    }
+    if (tpl.id === 'multi_color_outfit_video') {
+      const colors = (input.colors || []).filter(Boolean);
+      if (colors.length < 2) throw new BadRequestException('多色换装至少选 2 个颜色');
+      if (colors.length !== refs.length) {
+        throw new BadRequestException('颜色数量需与参考图数量一致（按顺序对应）');
+      }
+    }
+    let beats = Array.isArray(input.beats) ? input.beats : undefined;
+    let scriptFinal = script;
+    if (!scriptFinal && beats && beats.length) {
+      scriptFinal = syncScriptFromBeats({
+        beats,
+        seconds,
+        sellingPoint,
+        feature,
+        withPerson: tpl.model !== 'none',
+        templateId: tpl.id,
+      }).script;
+    }
     const caption = this.captionFor(product, { ...input, feature, count, sizeId }, tpl.id);
     const params = {
       kind: 'video' as const,
       mediaKind: 'video' as const,
       templateId: tpl.id,
       feature,
+      sellingPoint: sellingPoint || undefined,
+      script: scriptFinal || undefined,
+      beats: beats || undefined,
       referenceAssetIds: refs,
-      modelId: null,
+      modelId,
       poses: [],
       scenes: [],
-      colors: [],
+      colors: (input.colors || []).filter(Boolean),
       count,
       sizeId,
-      seconds: parseInt(process.env.VIDEO_GEN_SECONDS || '15', 10) || 15,
+      seconds,
+      bgmId: bgm.id,
+      generateAudio: true,
+      videoEngine: this.resolveVideoEngine(),
     };
 
     const repo = this.setsRepo();
-    const reused = await this.findActivePromo(user, productId, tpl.id, input.setId, 'promo_video');
-    if (reused) {
-      this.logger.log(
-        `generateVideo reuse productId=${productId} templateId=${tpl.id} setId=${reused.setId} jobId=${reused.jobId}`,
-      );
-      return reused;
+    const isExplicitSetRegen = !!String(input.setId || '').trim();
+    // 重生指定 set 时不得吞成「进行中复用」；仅全新提交防双开
+    if (!isExplicitSetRegen) {
+      const reused = await this.findActivePromo(user, productId, tpl.id, input.setId, 'promo_video');
+      if (reused) {
+        this.logger.log(
+          `generateVideo reuse productId=${productId} templateId=${tpl.id} setId=${reused.setId} jobId=${reused.jobId}`,
+        );
+        return reused;
+      }
     }
 
     let setId = input.setId;
+    let existingJobId: string | null = null;
     if (setId) {
       const existing = await repo.findOne({ where: { id: setId, tenantId: user.tenantId, productId } });
       if (!existing) throw new NotFoundException('宣传素材组不存在');
@@ -493,6 +846,9 @@ export class PromoService implements OnModuleInit {
       existing.params = params;
       existing.caption = caption;
       existing.templateId = tpl.id;
+      // 失败/重生：槽位回到 pending，详情立刻可感知「重新生成中」
+      existing.images = [{ index: 0, status: 'pending' as const }];
+      existingJobId = existing.jobId || null;
       await repo.save(existing);
     } else {
       setId = newId('ps');
@@ -517,12 +873,25 @@ export class PromoService implements OnModuleInit {
       setId,
       ...params,
       styleNo: product.styleNo,
+      regenNonce: input.regenNonce ? String(input.regenNonce) : undefined,
     };
     const displayTitle = buildJobDisplayTitle('promo_video', { ...jobPayload, displayTitle: undefined });
-    const job = await this.jobs.create(user, 'promo_video', {
-      ...jobPayload,
-      displayTitle,
-    });
+    // 与生图一致：重生复用同组 job，任务中心不堆新行
+    const job = await this.jobs.reuseOrCreate(
+      user,
+      'promo_video',
+      { ...jobPayload, displayTitle },
+      { existingJobId },
+    );
+    try {
+      await this.jobs.cancelSiblingPromoJobs(user, {
+        setId,
+        exceptJobId: job.id,
+        types: ['promo_video'],
+      });
+    } catch (e: any) {
+      this.logger.warn(`cancelSiblingPromoJobs(video): ${e?.message || e}`);
+    }
     await repo.update({ id: setId, tenantId: user.tenantId }, { jobId: job.id });
 
     return {
@@ -556,7 +925,8 @@ export class PromoService implements OnModuleInit {
     let tpl = findTemplate(String(input?.templateId || ''));
     if (!tpl || !isVideoTemplate(tpl)) tpl = findTemplate('product_showcase_video') || undefined;
     if (!tpl) throw new Error('未知视频模板');
-    if (!this.videoGen.configured()) throw new Error('服务端未配置视频生成密钥');
+    if (!this.videoEngineConfigured()) throw new Error('服务端未配置视频生成密钥');
+    const engine = this.resolveVideoEngine();
 
     const { product, assets } = await this.productAssets(user, productId);
     const refIds = ((input.referenceAssetIds as string[]) || []).filter(Boolean);
@@ -570,26 +940,62 @@ export class PromoService implements OnModuleInit {
     const feature = String(
       input.feature ?? this.readFeature(user.tenantId, productId)?.feature ?? this.defaultFeature(product),
     ).slice(0, 2000);
+    const sellingPoint = String(input.sellingPoint || '').slice(0, 200);
+    const script = String(input.script || '').trim().slice(0, 1200);
     const sizeId = tpl.sizes.includes(String(input.sizeId || '')) ? String(input.sizeId) : tpl.defaultSize;
-    const upstreamSize = SIZES[sizeId]?.upstream || this.videoGen.defaultSize;
-    const seconds = Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? 15) || 15;
-    const prompt = tpl.buildPrompt({
+    const upstreamSize =
+      SIZES[sizeId]?.upstream || (engine === 'lkb' ? this.lkbVideo.defaultSize : this.videoGen.defaultSize);
+    let seconds = clampDuration(
+      Number(input.seconds ?? process.env.VIDEO_GEN_SECONDS ?? this.lkbVideo.defaultSeconds) || 10,
+    );
+    const model = tpl.model === 'none' ? null : MODELS.find((m) => m.id === input.modelId) || null;
+    const colors = ((input.colors as string[]) || []).filter(Boolean);
+    const beats = Array.isArray(input.beats) ? (input.beats as VideoBeat[]) : undefined;
+    const bgm = findVideoBgm(input.bgmId as string | undefined);
+    // 生视频一律请上游出音；UI「无配乐」仍记 bgmId=none，但不压制 generateAudio
+    const generateAudio = true;
+    let scriptResolved = script;
+    if (!scriptResolved && beats && beats.length) {
+      scriptResolved = syncScriptFromBeats({
+        beats,
+        seconds,
+        sellingPoint,
+        feature,
+        withPerson: tpl.model !== 'none',
+        templateId: tpl.id,
+      }).script;
+    }
+    const promptZh = resolveVideoPromptZh({
+      script: scriptResolved,
       feature,
-      model: null,
+      sellingPoint,
+      seconds,
+      templateId: tpl.id,
+      modelId: model?.id,
+      beats,
+    });
+    const promptEn = tpl.buildPrompt({
+      feature: [sellingPoint, feature].filter(Boolean).join('\n'),
+      model,
       pose: null,
       scene: null,
-      colors: [],
+      colors,
       index: 0,
       total: 1,
     });
+    // 上游：LKB 用中文分镜；xytoken 用英文模板 prompt
+    const prompt = engine === 'lkb' ? promptZh : promptEn;
 
     await opts?.onProgress?.({ percent: 10, step: 'refs', message: '准备参考图', done: 0, total: 1 });
 
     const refPaths: string[] = [];
+    const refUrls: string[] = [];
     for (const r of refs) {
       const local = await this.ensureLocal(r!.objectKey);
       if (!local) throw new Error(`参考图本地不可用：${r!.objectKey}`);
       refPaths.push(local);
+      const url = this.publicUrl(r!.objectKey);
+      if (/^https?:\/\//i.test(url)) refUrls.push(url);
     }
 
     const legacyId = newId('pj');
@@ -597,7 +1003,7 @@ export class PromoService implements OnModuleInit {
     fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
 
     const setId = String(input.setId || '');
-    const item: JobItem = { index: 0, status: 'running', prompt };
+    const item: JobItem = { index: 0, status: 'running', prompt, promptZh };
     const legacy: PromoJob = {
       id: legacyId,
       tenantId: user.tenantId,
@@ -608,8 +1014,11 @@ export class PromoService implements OnModuleInit {
         ...(input as GenerateInput),
         mediaKind: 'video',
         feature,
+        sellingPoint: sellingPoint || undefined,
+        script: scriptResolved || promptZh,
         count: 1,
         sizeId,
+        seconds,
         _frameworkJobId: String(input._frameworkJobId || ''),
       } as any,
       size: upstreamSize,
@@ -619,22 +1028,104 @@ export class PromoService implements OnModuleInit {
     };
     this.saveJob(legacy);
 
-    await opts?.onProgress?.({ percent: 20, step: 'generating', message: '视频生成中', done: 0, total: 1 });
+    await opts?.onProgress?.({
+      percent: 20,
+      step: 'generating',
+      message: engine === 'lkb' ? 'LKB 视频生成中' : '视频生成中',
+      done: 0,
+      total: 1,
+    });
     const t0 = Date.now();
     try {
-      const r = await this.videoGen.generate({
-        prompt,
-        size: upstreamSize,
-        seconds,
-        refs: refPaths,
-      });
-      const ext = r.mime.includes('webm') ? '.webm' : r.mime.includes('quicktime') ? '.mov' : '.mp4';
-      const objectKey = `${keyDir}/01${ext}`;
-      fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
-      await this.oss.putObjectSafe(r.buffer, objectKey, r.mime || 'video/mp4');
-      Object.assign(item, { status: 'done', objectKey, via: r.via, ms: Date.now() - t0 });
-      this.saveJob(legacy);
-      await opts?.onProgress?.({ percent: 85, step: 'upload', message: '上传完成', done: 1, total: 1 });
+      let r: { buffer?: Buffer; mime: string; via: string; videoId: string; videoUrl?: string; seconds?: number; size?: string };
+      if (engine === 'lkb') {
+        const attachments: LkbVideoAttachment[] = [];
+        if (refUrls.length) {
+          // 有商品/宣传图作首帧 → FIRST_LAST_FRAME；其余作 reference_image
+          attachments.push({
+            type: 'image',
+            uri: refUrls[0],
+            mediaType: 'image/jpeg',
+            name: 'first_frame',
+            metadata: { role: 'first_frame' },
+          });
+          for (let i = 1; i < Math.min(refUrls.length, 9); i++) {
+            attachments.push({
+              type: 'image',
+              uri: refUrls[i],
+              mediaType: 'image/jpeg',
+              name: `ref_${i}`,
+              metadata: { role: 'reference_image' },
+            });
+          }
+        }
+        const taskType = attachments.some((a) => a.metadata.role === 'first_frame')
+          ? 'FIRST_LAST_FRAME'
+          : 'FREE';
+        // FREE 时仍可带 reference_image
+        if (taskType === 'FREE' && refUrls.length && !attachments.length) {
+          for (let i = 0; i < Math.min(refUrls.length, 9); i++) {
+            attachments.push({
+              type: 'image',
+              uri: refUrls[i],
+              mediaType: 'image/jpeg',
+              name: `ref_${i}`,
+              metadata: { role: 'reference_image' },
+            });
+          }
+        }
+        r = await this.lkbVideo.generate({
+          prompt: promptZh,
+          duration: seconds,
+          taskType,
+          attachments,
+          generateAudio: true,
+          watermark: false,
+        });
+      } else {
+        r = await this.videoGen.generate({
+          prompt: promptEn,
+          size: upstreamSize,
+          seconds,
+          refs: refPaths,
+        });
+      }
+      if (typeof (r as any).seconds === 'number' && (r as any).seconds > 0) {
+        seconds = clampDuration((r as any).seconds);
+      }
+      const directUrl = String((r as any).videoUrl || '').trim();
+      if (engine === 'lkb' && /^https?:\/\//i.test(directUrl)) {
+        // LKB：直接持久化 SUCCEEDED 直链，不下载、不转存自有 OSS
+        Object.assign(item, {
+          status: 'done',
+          objectKey: undefined,
+          url: directUrl,
+          via: r.via,
+          ms: Date.now() - t0,
+        });
+        this.saveJob(legacy);
+        await opts?.onProgress?.({ percent: 90, step: 'link', message: '已拿到成片链接', done: 1, total: 1 });
+      } else {
+        if (!r.buffer?.length) throw new Error('视频引擎未返回文件内容');
+        const ext = r.mime.includes('webm') ? '.webm' : r.mime.includes('quicktime') ? '.mov' : '.mp4';
+        const objectKey = `${keyDir}/01${ext}`;
+        const absVideo = path.join(this.storageRoot(), objectKey);
+        fs.writeFileSync(absVideo, r.buffer);
+        let uploadBuf = r.buffer;
+        if (ext === '.mp4') {
+          const remuxed = await this.ensureMp4Faststart(absVideo);
+          if (remuxed?.length) uploadBuf = remuxed;
+        }
+        await this.oss.putObjectSafe(uploadBuf, objectKey, r.mime || 'video/mp4');
+        Object.assign(item, {
+          status: 'done',
+          objectKey,
+          via: r.via,
+          ms: Date.now() - t0,
+        });
+        this.saveJob(legacy);
+        await opts?.onProgress?.({ percent: 85, step: 'upload', message: '上传完成', done: 1, total: 1 });
+      }
     } catch (e: any) {
       item.status = 'failed';
       item.error = String(e.message || e).slice(0, 500);
@@ -690,10 +1181,11 @@ export class PromoService implements OnModuleInit {
         {
           index: 0,
           status: 'done',
-          url: item.objectKey ? this.publicUrl(item.objectKey) : null,
+          url: this.itemPlayUrl(item),
           mediaId: item.savedMediaId || null,
           mimeType: 'video/mp4',
           ms: item.ms,
+          seconds,
         },
       ],
     };
@@ -750,12 +1242,16 @@ export class PromoService implements OnModuleInit {
 
     const caption = this.captionFor(product, opts.input, opts.templateId);
     let mediaId: string | undefined;
-    if (opts.item.status === 'done' && opts.item.objectKey) {
-      const abs = path.join(this.storageRoot(), opts.item.objectKey);
-      const sizeBytes = fs.existsSync(abs) ? fs.statSync(abs).size : 0;
-      const mime = opts.item.objectKey.endsWith('.webm')
+    const externalUrl = String(opts.item.url || '').trim();
+    const hasExternal = /^https?:\/\//i.test(externalUrl);
+    if (opts.item.status === 'done' && (opts.item.objectKey || hasExternal)) {
+      const abs = opts.item.objectKey
+        ? path.join(this.storageRoot(), opts.item.objectKey)
+        : '';
+      const sizeBytes = abs && fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+      const mime = opts.item.objectKey?.endsWith('.webm')
         ? 'video/webm'
-        : opts.item.objectKey.endsWith('.mov')
+        : opts.item.objectKey?.endsWith('.mov')
           ? 'video/quicktime'
           : 'video/mp4';
       const saved = await mediaRepo.save(
@@ -764,8 +1260,9 @@ export class PromoService implements OnModuleInit {
           productId,
           promoSetId: setId,
           type: 'video',
-          provider: this.oss.mediaProvider(),
-          objectKey: opts.item.objectKey,
+          provider: hasExternal ? 'external' : this.oss.mediaProvider(),
+          // 直链存完整 URL；本地/OSS 仍存 objectKey
+          objectKey: hasExternal ? externalUrl : opts.item.objectKey!,
           mimeType: mime,
           sizeBytes: String(sizeBytes),
           status: 'active',
@@ -779,10 +1276,13 @@ export class PromoService implements OnModuleInit {
       {
         index: 0,
         status: opts.item.status === 'done' ? 'done' : 'failed',
-        objectKey: opts.item.objectKey,
+        objectKey: hasExternal ? undefined : opts.item.objectKey,
+        externalUrl: hasExternal ? externalUrl : undefined,
         mediaId,
         error: opts.item.error,
         ms: opts.item.ms,
+        prompt: opts.item.prompt || undefined,
+        size: opts.size,
       },
     ];
 
@@ -796,6 +1296,8 @@ export class PromoService implements OnModuleInit {
       count: 1,
       sizeId: opts.input.sizeId,
       seconds: opts.seconds,
+      durationSec: opts.seconds,
+      videoUrl: hasExternal ? externalUrl : undefined,
       size: opts.size,
       styleNo: product.styleNo,
     };
@@ -922,7 +1424,12 @@ export class PromoService implements OnModuleInit {
     if (!p.templateId || !(p.referenceAssetIds || []).length) {
       throw new BadRequestException('该组缺少生成参数，无法重生成');
     }
-    return this.generate(user, productId, { ...p, setId, regenIndexes: undefined });
+    return this.generate(user, productId, {
+      ...p,
+      setId,
+      regenIndexes: undefined,
+      regenNonce: newId('rg'),
+    });
   }
 
   /** 单张重生成（兼容旧路径） */
@@ -939,7 +1446,12 @@ export class PromoService implements OnModuleInit {
     }
     const idxs = [...new Set((indexes || []).map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0))];
     if (!idxs.length) throw new BadRequestException('请指定要重生成的图片下标');
-    return this.generate(user, productId, { ...p, setId, regenIndexes: idxs });
+    return this.generate(user, productId, {
+      ...p,
+      setId,
+      regenIndexes: idxs,
+      regenNonce: newId('rg'),
+    });
   }
 
   private async getSetEntity(user: AuthContext, productId: string, setId: string) {
@@ -956,15 +1468,39 @@ export class PromoService implements OnModuleInit {
     user: AuthContext,
     productId: string,
     input: GenerateInput & Record<string, unknown>,
-    opts?: { onProgress?: (p: Partial<JobProgress>) => Promise<void> },
+    opts?: {
+      onProgress?: (p: Partial<JobProgress>) => Promise<void>;
+      appendEvent?: (event: string, message?: string, data?: Record<string, unknown>) => Promise<void>;
+    },
   ) {
     const tpl = findTemplate(String(input?.templateId || ''));
     if (!tpl) throw new Error('未知模板');
-    if (!this.gen.configured()) throw new Error('服务端未配置生图密钥');
+    const outfitEngine = this.externalOutfit.engineMode();
+    if (outfitEngine !== 'external' && !this.gen.configured()) {
+      throw new Error('服务端未配置生图密钥');
+    }
+    if (outfitEngine !== 'self' && !this.externalOutfit.configured()) {
+      throw new Error('外部穿搭 Agent 未配置（OUTFIT_AGENT_ENABLED + API_KEY/.secrets），无法使用 external/both');
+    }
     const { product, assets } = await this.productAssets(user, productId);
     const refIds = ((input.referenceAssetIds as string[]) || []).filter(Boolean);
     if (refIds.length < tpl.reference.min || refIds.length > tpl.reference.max) {
       throw new Error(`该模板需选择 ${tpl.reference.min}-${tpl.reference.max} 张参考图`);
+    }
+    {
+      const styleAllowedEarly = !!(tpl.styleRef && Number(tpl.styleRef.max) > 0) || tpl.id === 'style_ref';
+      const styleMin = styleAllowedEarly ? (tpl.styleRef?.min ?? 0) : 0;
+      const styleKeysEarly = styleAllowedEarly
+        ? this.normalizeStyleRefs(user, input.styleRefObjectKeys)
+        : [];
+      if (styleMin > 0 && styleKeysEarly.length < styleMin) {
+        throw new Error(`「${tpl.name}」至少需要 ${styleMin} 张风格样例`);
+      }
+      if (!styleAllowedEarly) {
+        // 安全：其它模板执行期丢弃风格样例入参
+        (input as any).styleRefObjectKeys = [];
+        (input as any).styleStrength = undefined;
+      }
     }
     const byId = new Map(assets.map((a) => [a.id, a]));
     const refs = refIds.map((id) => byId.get(id));
@@ -1001,22 +1537,43 @@ export class PromoService implements OnModuleInit {
       poses = poses.length ? [poses[0]] : tpl.poses[0] ? [tpl.poses[0]] : [];
       scenes = scenes.length ? [scenes[0]] : tpl.scenes[0] ? [tpl.scenes[0]] : [];
     }
-    // 自由文本：匹配预设或生成 custom option（整组共用）
+    // 自由文本：仅在「单选语义」下覆盖为单个 option。
+    // model_scene 等多选动作/场景时，芯片数组必须保留；芯片名回填到文本框不得塌缩数组。
     const poseTextEarly = String(input.poseText || '').trim();
     const sceneTextEarly = String(input.sceneText || '').trim();
     if (poseTextEarly && tpl.poses.length) {
-      const resolved = resolveOption(tpl.poses, (input.poses as string[]) || [], poseTextEarly, 'pose');
-      if (resolved) poses = [resolved];
+      const allowCollapse = isMultiColor || poses.length <= 1;
+      if (allowCollapse) {
+        const resolved = resolveOption(tpl.poses, (input.poses as string[]) || [], poseTextEarly, 'pose');
+        if (resolved) poses = [resolved];
+      }
     }
     if (sceneTextEarly && tpl.scenes.length) {
-      const resolved = resolveOption(tpl.scenes, (input.scenes as string[]) || [], sceneTextEarly, 'scene');
-      if (resolved) scenes = [resolved];
+      const allowCollapse = isMultiColor || scenes.length <= 1;
+      if (allowCollapse) {
+        const resolved = resolveOption(tpl.scenes, (input.scenes as string[]) || [], sceneTextEarly, 'scene');
+        if (resolved) scenes = [resolved];
+      }
     }
+    // 芯片名回填：多选时去掉与芯片同名的 freeText，避免 effectivePrompt 覆盖错开配对
+    const stripChipEcho = (text: string, opts: { id: string; name: string }[]) => {
+      const t = String(text || '').trim();
+      if (!t || opts.length <= 1) return t;
+      if (opts.some((o) => o.name === t || o.id === t)) return '';
+      return t;
+    };
     const feature = String(
       input.feature ?? this.readFeature(user.tenantId, productId)?.feature ?? this.defaultFeature(product),
     ).slice(0, 2000);
-    let poseText = String(input.poseText || '').trim();
-    let sceneText = String(input.sceneText || '').trim();
+    // 中文原话（留痕用，不被英文 enrich 覆盖）
+    let poseTextZh = String(input.poseText || '').trim();
+    let sceneTextZh = String(input.sceneText || '').trim();
+    if (!isMultiColor) {
+      poseTextZh = stripChipEcho(poseTextZh, poses);
+      sceneTextZh = stripChipEcho(sceneTextZh, scenes);
+    }
+    let poseText = poseTextZh;
+    let sceneText = sceneTextZh;
     // 自由描述 → 关键词拆解 + 英文生图片段（LLM 优先，否则启发式）；自定义文案覆盖芯片 prompt
     if (poseText || sceneText) {
       try {
@@ -1045,34 +1602,65 @@ export class PromoService implements OnModuleInit {
       if (existing?.images?.length) priorImages = existing.images;
     }
 
+    // model_scene 等：先铺满 pose×scene 网格，再按序取；不足 N 时循环网格并由后续 nudge 保证提示词不同
+    const posePool = poses.length ? poses : (tpl.poses[0] ? [tpl.poses[0]] : []);
+    const scenePool = scenes.length ? scenes : (tpl.scenes[0] ? [tpl.scenes[0]] : []);
+    const poseSceneGrid: { pose: (typeof poses)[number] | null; scene: (typeof scenes)[number] | null }[] = [];
+    if (!isMultiColor) {
+      const pList = posePool.length ? posePool : [null];
+      const sList = scenePool.length ? scenePool : [null];
+      for (const sc of sList) {
+        for (const po of pList) {
+          poseSceneGrid.push({ pose: po, scene: sc });
+        }
+      }
+    }
+    const gridSize = Math.max(1, poseSceneGrid.length || 1);
+
     const items: JobItem[] = [];
     for (let i = 0; i < count; i++) {
-      const pose = isMultiColor
-        ? (poses[0] || tpl.poses[0] || null)
-        : poses.length
-          ? poses[i % poses.length]
-          : tpl.poses[0] || null;
-      const scene = isMultiColor
-        ? (scenes[0] || tpl.scenes[0] || null)
-        : scenes.length
-          ? scenes[Math.floor(i / Math.max(1, poses.length)) % scenes.length]
-          : tpl.scenes[0] || null;
+      let pose: (typeof poses)[number] | null;
+      let scene: (typeof scenes)[number] | null;
+      if (isMultiColor) {
+        pose = poses[0] || tpl.poses[0] || null;
+        scene = scenes[0] || tpl.scenes[0] || null;
+      } else if (poseSceneGrid.length) {
+        const pair = poseSceneGrid[i % poseSceneGrid.length];
+        pose = pair.pose;
+        scene = pair.scene;
+      } else {
+        pose = tpl.poses[0] || null;
+        scene = tpl.scenes[0] || null;
+      }
       const prior = priorImages.find((x) => x.index === i);
-      if (onlyRegen && !regenSet.has(i) && prior?.objectKey && prior.status === 'done') {
+      // 局部重生：保留未点选且已成功的槽（objectKey / externalUrl / https-in-objectKey）
+      if (onlyRegen && !regenSet.has(i) && prior?.status === 'done' && this.itemHasResult(prior)) {
+        const priorKey = String(prior.objectKey || '').trim();
+        const priorUrl = String((prior as any).externalUrl || (prior as any).url || '').trim();
+        const keyIsHttp = /^https?:\/\//i.test(priorKey);
         items.push({
           index: i,
           status: 'done',
           poseId: prior.poseId || pose?.id,
           sceneId: prior.sceneId || scene?.id,
-          objectKey: prior.objectKey,
+          objectKey: priorKey || undefined,
+          url: priorUrl || (keyIsHttp ? priorKey : undefined),
           savedMediaId: prior.mediaId,
-          prompt: '',
+          prompt: prior.prompt || '',
+          promptZh: prior.promptZh,
+          genCalls: Array.isArray(prior.genCalls) ? prior.genCalls : [],
+          model: prior.model,
+          size: prior.size,
         });
         continue;
       }
       const colorsForPrompt = isMultiColor
         ? [colorsAll[i]].filter(Boolean)
         : colorsAll;
+      const styleKwText = styleKeywordsToPromptZh(
+        (input as any).styleKeywords,
+        String((input as any).styleKeywordsText || '').trim() || undefined,
+      );
       items.push({
         index: i,
         status: 'pending',
@@ -1085,6 +1673,7 @@ export class PromoService implements OnModuleInit {
           scene,
           poseText: poseText || undefined,
           sceneText: sceneText || undefined,
+          styleKeywordsText: styleKwText || undefined,
           colors: colorsForPrompt,
           index: i,
           total: count,
@@ -1116,15 +1705,160 @@ export class PromoService implements OnModuleInit {
 
     // 商品参考图：ensureLocal（OSS→本地）；缺一不可
     const refPaths: string[] = [];
+    const refInputs: Array<{
+      localPath: string;
+      objectKey?: string;
+      assetId?: string;
+      filename?: string;
+      priorKind?: GarmentRefKind;
+      priorRoleZh?: string;
+      priorRoleEn?: string;
+    }> = [];
+    const cachedAnalysis = (product as any)?.refAnalysis as ProductRefAnalysis | null | undefined;
+    const cachedByAsset = new Map(
+      (cachedAnalysis?.assets || []).filter((a) => a?.assetId).map((a) => [a.assetId, a]),
+    );
     for (const r of refs) {
       const local = await this.ensureLocal(r!.objectKey);
       if (!local) throw new Error(`参考图本地不可用：${r!.objectKey}`);
       refPaths.push(local);
+      const prior = cachedByAsset.get(r!.id) || ((r as any).meta as any) || null;
+      const priorKind = prior?.kind as GarmentRefKind | undefined;
+      refInputs.push({
+        localPath: local,
+        objectKey: r!.objectKey,
+        assetId: r!.id,
+        filename: (r as any).filename || (r as any).originalName,
+        priorKind:
+          priorKind === 'hang' || priorKind === 'detail' || priorKind === 'unusable' ? priorKind : undefined,
+        priorRoleZh: prior?.roleZh ? String(prior.roleZh) : undefined,
+        priorRoleEn: prior?.roleEn ? String(prior.roleEn) : undefined,
+      });
+    }
+    const canReuseCached =
+      !!cachedAnalysis?.analyzedAt &&
+      refInputs.length > 0 &&
+      refInputs.every((i) => !!i.priorKind);
+
+    const keyDir = `tenants/${user.tenantId}/products/${product.styleNo}/promo/${legacy.id}`;
+    fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
+
+    // 羊毛衫专用标准流程：分类 → 宫格补细节 → 角色标注 → 硬约束；非羊毛衫/读不全拒生
+    const keptDone0 = items.filter((x) => x.status === 'done').length;
+    await opts?.onProgress?.({
+      percent: 8,
+      step: 'prepare_refs',
+      message: keptDone0
+        ? `准备参考图（已保留 ${keptDone0}/${items.length}）`
+        : '识别羊毛衫参考图…',
+      done: keptDone0,
+      total: items.length,
+    });
+    const garmentPrep = await prepareRefsForCategory('knitwear', this.vision, refInputs, {
+      workDir: path.join(this.storageRoot(), keyDir, '_knitwear_grid'),
+      reuseCached: canReuseCached,
+      cachedAnalysis: canReuseCached ? cachedAnalysis || null : null,
+    });
+    if (!garmentPrep.ok) {
+      throw new Error(garmentPrep.reasonZh || '羊毛衫参考图不可用，已拒绝生图');
+    }
+    this.logger.log(
+      `knitwear-prep via=${garmentPrep.via} detail=${garmentPrep.detailSufficiency} refs=${garmentPrep.refs.length} classified=${garmentPrep.classified.length}`,
+    );
+    await opts?.appendEvent?.('garment_prep', '羊毛衫参考图准备完成', {
+      via: garmentPrep.via,
+      detailSufficiency: garmentPrep.detailSufficiency,
+      garmentDescZh: garmentPrep.garmentDescZh,
+      refKinds: garmentPrep.refs.map((r) => r.kind),
+      classified: garmentPrep.classified.map((c) => ({ kind: c.kind, roleZh: c.roleZh, objectKey: c.objectKey })),
+    });
+
+    // 将硬约束 + 参考图角色写入每张待生图 prompt；中文原话成对留痕
+    const styleKwZhForTrace = styleKeywordsToPromptZh(
+      (input as any).styleKeywords,
+      String((input as any).styleKeywordsText || '').trim() || undefined,
+    );
+    const promptZhBase = [
+      buildPromptZh({
+        feature,
+        poseText: poseTextZh,
+        sceneText: sceneTextZh,
+        garmentDescZh: garmentPrep.garmentDescZh,
+        refRolesPromptZh: garmentPrep.refRolesPromptZh,
+      }),
+      styleKwZhForTrace ? `风格关键词：${styleKwZhForTrace}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const regenNonce = String((input as any).regenNonce || '').trim();
+    const regenNudgeEn = regenNonce
+      ? `Regeneration ${regenNonce}: intentionally change camera angle, crop, pose micro-gesture, expression or lighting so the result is visibly different from any prior output; keep the exact same garment identity, color and knit texture.`
+      : '';
+    const regenNudgeZh = regenNonce
+      ? `重新生成 ${regenNonce}：请在构图/机位/姿势微动作/表情/光影上做出可见差异，切勿与上一版几乎相同；衣服款式、颜色、织纹必须与参考成衣一致。`
+      : '';
+    for (const it of items) {
+      if (this.itemHasResult(it)) continue;
+      const wrapPass = !isMultiColor && count > gridSize ? Math.floor(it.index / gridSize) : 0;
+      const slotNudgeEn =
+        count > 1
+          ? `Independent variant ${it.index + 1}/${count} (slot-${it.index + 1}): change camera angle, crop, pose micro-gesture, expression or lighting vs sibling slots; never clone the same frame; keep garment identity/color/knit texture identical.`
+          : '';
+      const wrapNudgeEn =
+        wrapPass > 0
+          ? `Extra distinct pass ${wrapPass + 1} for a repeated pose×scene pair: alter camera height, crop tightness, gaze direction and hand placement vs earlier passes of the same pair; still identical garment.`
+          : '';
+      const slotNudgeZh =
+        count > 1
+          ? `独立变体 ${it.index + 1}/${count}（槽位${it.index + 1}）：须在机位/构图/姿势微动作/表情/光影上与同组其它张明显不同，禁止复刻同一构图；成衣款式颜色织纹不变。`
+          : '';
+      const wrapNudgeZh =
+        wrapPass > 0
+          ? `同动作×场景第 ${wrapPass + 1} 轮补充：相对前一轮改机位高度/裁切松紧/视线与手位，保证提示词与成片均不同；成衣不变。`
+          : '';
+      const enrichedPrompt = [
+        it.prompt,
+        garmentPrep.garmentConstraintEn,
+        garmentPrep.refRolesPromptEn,
+        slotNudgeEn,
+        wrapNudgeEn,
+        regenNudgeEn,
+      ]
+        .filter(Boolean)
+        .join(' ');
+      it.prompt = enrichedPrompt;
+      it.promptZh = [promptZhBase, slotNudgeZh, wrapNudgeZh, regenNudgeZh].filter(Boolean).join('\n');
     }
 
-    // 风格样例：整组共用；ensureLocal 失败则降级去掉该张并记 warn
-    const styleKeysRaw = this.normalizeStyleRefs(user, input.styleRefObjectKeys);
-    const styleStrength = this.normalizeStyleStrength(input.styleStrength);
+    // 风格样例：仅 style_ref；其它模板强制忽略（即便 params 残留）
+    const styleAllowedExec = !!(tpl.styleRef && Number(tpl.styleRef.max) > 0) || tpl.id === 'style_ref';
+    const styleKeysRaw = styleAllowedExec
+      ? this.normalizeStyleRefs(user, input.styleRefObjectKeys)
+      : [];
+    const styleStrength = this.normalizeStyleStrength(
+      styleAllowedExec ? input.styleStrength : undefined,
+    );
+    // 预置模特人脸：下载到本地供自建 IMAGE_GEN 作身份参考；公网 URL 给 external modelImageUrl
+    let modelFaceLocal: string | null = null;
+    let modelFaceUrl: string | null = null;
+    if (model) {
+      modelFaceUrl = String(model.faceUrl || '').trim() || null;
+      if (model.faceObjectKey) {
+        modelFaceLocal = await this.ensureLocal(model.faceObjectKey);
+        if (!modelFaceUrl) {
+          const u = this.oss.publicUrl(model.faceObjectKey);
+          if (/^https?:\/\//i.test(u)) modelFaceUrl = u;
+        }
+      }
+      if (!modelFaceLocal && modelFaceUrl) {
+        // faceObjectKey miss 时走 HTTPS 缓存（ensureLocal 已支持 http(s)）
+        modelFaceLocal = await this.ensureLocal(modelFaceUrl);
+      }
+      if (!modelFaceLocal && modelFaceUrl) {
+        this.logger.warn(`preset model face local miss id=${model.id} url=${modelFaceUrl}`);
+      }
+    }
+
     const stylePaths: string[] = [];
     const styleWarns: string[] = [];
     for (const k of styleKeysRaw) {
@@ -1139,19 +1873,22 @@ export class PromoService implements OnModuleInit {
       this.logger.warn(`style-ref degrade productId=${productId}: ${styleWarns.join('; ')}`);
     }
 
-    const keyDir = `tenants/${user.tenantId}/products/${product.styleNo}/promo/${legacy.id}`;
-    fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
-
     let done = 0;
+    // external 单引擎：跳过 IMAGE_GEN，后面统一拉外部结果
+    const skipSelfGen = outfitEngine === 'external';
     await Promise.all(
       items.map(async (it) => {
-        if (it.status === 'done' && it.objectKey) {
+        if (skipSelfGen) {
+          done += 1;
+          return;
+        }
+        if (this.itemHasResult(it)) {
           done += 1;
           const okKeep = items.filter((x) => x.status === 'done').length;
           await opts?.onProgress?.({
             percent: Math.min(95, Math.round((done / items.length) * 90) + 5),
             step: 'generating',
-            message: `生图 ${done}/${items.length}`,
+            message: `生图 ${okKeep}/${items.length}`,
             done: okKeep,
             total: items.length,
           });
@@ -1162,30 +1899,121 @@ export class PromoService implements OnModuleInit {
         try {
           it.status = 'running';
           this.saveJob(legacy);
-          // refs = 商品图(多色仅当前色) + 风格样例；空风格 = 现网路径
-          const garmentRefs =
-            isMultiColor && refPaths[it.index]
-              ? [refPaths[it.index]]
-              : refPaths;
-          const refsForShot = stylePaths.length
-            ? [...garmentRefs, ...stylePaths]
-            : garmentRefs;
+          // 羊毛衫：prepared 挂拍/细节/宫格；多色时只用「该色」参考 + 细节（禁止混入其它色挂拍）
+          const prepPaths = garmentPrep.refs.map((r) => r.localPath);
+          let garmentRefs = prepPaths;
+          if (isMultiColor && refPaths[it.index]) {
+            const colorPath = refPaths[it.index];
+            const detailOnly = garmentPrep.refs
+              .filter((r) => r.kind === 'detail' || r.kind === 'grid_cell')
+              .map((r) => r.localPath)
+              .filter((p) => p && p !== colorPath);
+            garmentRefs = [colorPath, ...detailOnly];
+          }
+          const faceRefs = modelFaceLocal ? [modelFaceLocal] : [];
+          const refsForShot = [...garmentRefs, ...faceRefs, ...stylePaths];
+          const faceBlock = faceRefs.length
+            ? ' A model face reference image is provided after the garment reference(s): match that face identity, age appearance and hairstyle exactly; do not copy clothing from the face reference.'
+            : '';
           const styleBlock = buildStyleRefPrompt({
             garmentRefCount: garmentRefs.length,
             styleRefCount: stylePaths.length,
             strength: styleStrength,
+            primary: !!tpl.styleRefPrimary || tpl.id === 'style_ref',
           });
-          const prompt = styleBlock ? `${it.prompt} ${styleBlock}` : it.prompt;
+          const prompt = `${it.prompt}${faceBlock}${styleBlock ? ` ${styleBlock}` : ''}`.trim();
           if (styleBlock) it.prompt = prompt;
-          const r = await this.gen.generate({ prompt, size: legacy.size, refs: refsForShot });
-          const ext = r.mime.includes('jpeg') ? '.jpg' : r.mime.includes('webp') ? '.webp' : '.png';
-          const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${ext}`;
-          fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
-          await this.oss.putObjectSafe(r.buffer, objectKey, r.mime);
-          Object.assign(it, { status: 'done', objectKey, via: r.via });
+          const promptZh = it.promptZh || promptZhBase;
+          const garmentKeys =
+            isMultiColor && refs[it.index]
+              ? [refs[it.index]!.objectKey]
+              : refs.map((r) => r!.objectKey);
+          const faceKeys = model?.faceObjectKey ? [model.faceObjectKey] : [];
+          const refObjectKeys = [...garmentKeys, ...faceKeys, ...styleKeysRaw];
+          const callBase: ImageGenCallRecord = {
+            at: new Date().toISOString(),
+            prompt,
+            promptEn: prompt,
+            promptZh,
+            model: this.gen.model,
+            size: legacy.size,
+            status: 'ok',
+            jobId: String(input._frameworkJobId || '') || undefined,
+            legacyJobId: legacy.id,
+            setId: String(input.setId || '') || undefined,
+            index: it.index,
+            refObjectKeys,
+            refCount: refsForShot.length,
+            garmentPrep: {
+              via: garmentPrep.via,
+              detailSufficiency: garmentPrep.detailSufficiency,
+              garmentDescZh: garmentPrep.garmentDescZh,
+              refKinds: garmentPrep.refs.map((r) => r.kind),
+            },
+          };
+          try {
+            // 每槽独立 seed：首生多张与重生成都要可见差异（仅 regenNonce 时旧逻辑会让同次多槽无 seed → 易撞图）
+            const seedKey = `${regenNonce || legacy.id}:${it.index}`;
+            const seed = Math.abs(
+              Array.from(seedKey).reduce((a, ch) => ((a * 33) + ch.charCodeAt(0)) | 0, it.index + 17),
+            );
+            const r = await this.gen.generate({
+              prompt,
+              size: legacy.size,
+              refs: refsForShot,
+              seed,
+            });
+            const ext = r.mime.includes('jpeg') ? '.jpg' : r.mime.includes('webp') ? '.webp' : '.png';
+            const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${ext}`;
+            fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
+            await this.oss.putObjectSafe(r.buffer, objectKey, r.mime);
+            const genCall: ImageGenCallRecord = {
+              ...callBase,
+              status: 'ok',
+              via: r.via,
+              ms: Date.now() - t0,
+            };
+            Object.assign(it, {
+              status: 'done',
+              objectKey,
+              via: r.via,
+              prompt,
+              promptZh,
+              model: this.gen.model,
+              size: legacy.size,
+              genCall,
+            });
+            await opts?.appendEvent?.(
+              'image_gen',
+              `生图 #${it.index + 1} 成功`,
+              genCall as unknown as Record<string, unknown>,
+            );
+          } catch (genErr: any) {
+            const msg = String(genErr?.message || genErr).slice(0, 500);
+            const genCall: ImageGenCallRecord = {
+              ...callBase,
+              status: 'failed',
+              error: msg,
+              ms: Date.now() - t0,
+            };
+            it.status = 'failed';
+            it.error = msg;
+            it.prompt = prompt;
+            it.promptZh = promptZh;
+            it.model = this.gen.model;
+            it.size = legacy.size;
+            it.genCall = genCall;
+            await opts?.appendEvent?.(
+              'image_gen',
+              `生图 #${it.index + 1} 失败`,
+              genCall as unknown as Record<string, unknown>,
+            );
+          }
         } catch (e: any) {
-          it.status = 'failed';
-          it.error = String(e.message || e).slice(0, 500);
+          if (it.status !== 'failed') {
+            it.status = 'failed';
+            it.error = String(e.message || e).slice(0, 500);
+          }
         } finally {
           it.ms = Date.now() - t0;
           done += 1;
@@ -1195,13 +2023,316 @@ export class PromoService implements OnModuleInit {
           await opts?.onProgress?.({
             percent: Math.min(95, Math.round((done / items.length) * 90) + 5),
             step: 'generating',
-            message: `生图 ${done}/${items.length}`,
+            message: `生图 ${ok}/${items.length}`,
             done: ok,
             total: items.length,
           });
         }
       }),
     );
+
+    // 外部 Agent：同图对比 / 或纯外部引擎（定稿对接预留，Token 只读 env/secrets）
+    if (outfitEngine === 'both' || outfitEngine === 'external') {
+      await opts?.onProgress?.({
+        percent: 92,
+        step: 'external_outfit',
+        message: outfitEngine === 'both' ? '外部 Agent 同图对比中…' : '外部穿搭 Agent 生图中…',
+        done: items.filter((x) => x.status === 'done').length,
+        total: items.length,
+      });
+      const styleUrls = styleKeysRaw
+        .map((k) => this.oss.publicUrl(k))
+        .filter((u) => /^https?:\/\//i.test(u));
+      const styleKwZh = styleKeywordsToPromptZh(
+        (input as any).styleKeywords,
+        String((input as any).styleKeywordsText || '').trim() || undefined,
+      );
+      const styleNote = styleUrls.length
+        ? `前若干张是成衣参考（保真），后 ${styleUrls.length} 张是风格样例（只学构图光影氛围，禁止抄样例衣服/人脸/品牌logo）`
+        : '';
+      const regenNote = String((input as any).regenNonce || '').trim()
+        ? `重新生成 ${String((input as any).regenNonce).trim()}：必须与上一版有可见差异（机位/构图/姿势微变/光影），禁止复刻同一张；成衣保真不变。`
+        : '';
+
+      const buildTemplateBrief = (it: JobItem, colorLabel?: string) => {
+        const pose = (tpl.poses || []).find((o) => o.id === it?.poseId);
+        const scene = (tpl.scenes || []).find((o) => o.id === it?.sceneId);
+        const bits: string[] = [`模板：${tpl.name}`, `templateId=${tpl.id}`];
+        if (tpl.id === 'detail_closeup') bits.push('细节特写：微距织纹/领口/袖口，浅景深，不要全身、不要真人出镜');
+        else if (tpl.id === 'flatlay') bits.push('平铺/挂拍静物：整件成衣完整入镜，不要真人模特');
+        else if (tpl.id === 'model_scene') bits.push('模特上身场景图：真人穿着成衣，生活场景，衣服保真');
+        else if (tpl.id === 'multi_color') {
+          bits.push('多色展示：同一姿势场景，本张只出「一个」颜色，姿态构图与其它色保持一致只换颜色');
+          if (colorLabel) bits.push(`本张颜色：${colorLabel}（必须与本张成衣参考图颜色一致，禁止混用其它色）`);
+        } else if (tpl.id === 'xhs_cover') bits.push('小红书封面风：竖版氛围感，上方留白（不要写字），可有可无模特');
+        else if (tpl.id === 'style_ref') bits.push('风格参考：成衣保真，构图光影学风格样例，禁止抄样例衣服/人脸/logo');
+        else if (tpl.model === 'none') bits.push('不要出真人模特，做静物/挂拍/细节');
+        else if (tpl.model === 'required') bits.push('必须出真人模特上身展示成衣');
+        else bits.push('模特可选');
+        if (model) {
+          bits.push(`模特：${model.name}${model.desc ? `（${model.desc}）` : ''}`);
+          if (model.prompt) bits.push(`Talent must match: ${model.prompt}`);
+          if (modelFaceUrl) bits.push('已提供模特人脸参考图 modelImageUrl，脸型五官发型须对齐该图');
+        }
+        if (pose?.name) bits.push(`姿势/呈现：${pose.name}`);
+        if (scene?.name) bits.push(`场景：${scene.name}`);
+        return bits.filter(Boolean).join('；');
+      };
+
+      const garmentUrlForSlot = (idx: number): string[] => {
+        // multi_color：严格 1:1 只用该色参考图；其它模板仍可传整组成衣
+        if (isMultiColor) {
+          const r = refs[idx];
+          if (r?.objectKey) {
+            const u = this.oss.publicUrl(r.objectKey);
+            if (/^https?:\/\//i.test(u)) return [u];
+          }
+          // fallback：garmentPrep 同序
+          const prep = garmentPrep.refs[idx];
+          if (prep?.objectKey) {
+            const u = this.oss.publicUrl(prep.objectKey);
+            if (/^https?:\/\//i.test(u)) return [u];
+          }
+          return [];
+        }
+        const keys =
+          garmentPrep.refs
+            .map((r) => r.objectKey)
+            .filter((k): k is string => !!k)
+            .slice(0, 9) ||
+          refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
+        const use = keys.length
+          ? keys
+          : refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
+        return use.map((k) => this.oss.publicUrl(k)).filter((u) => /^https?:\/\//i.test(u));
+      };
+
+      const applyExternalToItem = (
+        it: JobItem,
+        ext: Awaited<ReturnType<ExternalOutfitClient['invoke']>>,
+        urlIdx: number,
+      ) => {
+        if (outfitEngine === 'external') {
+          if (!ext.ok || !ext.imageUrls.length) {
+            it.status = 'failed';
+            it.error = String(ext.error || '外部穿搭 Agent 未返回结果图').slice(0, 500);
+            it.compare = {
+              engine: 'external',
+              external: { status: 'failed', error: it.error, requestId: ext.requestId, ms: ext.ms },
+              self: { status: 'skipped' },
+            };
+            return;
+          }
+          // caller assigns image asynchronously
+          (it as any)._extUrl = ext.imageUrls[Math.min(urlIdx, ext.imageUrls.length - 1)];
+          it.compare = {
+            engine: 'external',
+            external: {
+              status: 'ok',
+              imageUrls: ext.imageUrls,
+              requestId: ext.requestId,
+              ms: ext.ms,
+              agentCode: ext.agentCode,
+            },
+            self: { status: 'skipped' },
+          };
+        } else {
+          it.compare = {
+            engine: 'both',
+            self: {
+              status: it.status === 'done' ? 'ok' : 'failed',
+              objectKey: it.objectKey,
+              prompt: it.prompt,
+              promptZh: it.promptZh,
+              promptEn: it.prompt,
+              ms: it.ms,
+              error: it.error,
+            },
+            external: ext.ok
+              ? {
+                  status: 'ok',
+                  imageUrls: ext.imageUrls,
+                  requestId: ext.requestId,
+                  ms: ext.ms,
+                  agentCode: ext.agentCode,
+                }
+              : {
+                  status: 'failed',
+                  error: ext.error,
+                  requestId: ext.requestId,
+                  ms: ext.ms,
+                  agentCode: ext.agentCode,
+                },
+          };
+        }
+      };
+
+      const downloadExtToItem = async (it: JobItem, url: string) => {
+        try {
+          const u = String(url || '').trim();
+          // 外部引擎已返回可访问直链：直接入库/展示，不下载、不转存自有 OSS（同视频 LKB 直链策略）
+          if (/^https?:\/\//i.test(u)) {
+            it.status = 'done';
+            it.objectKey = undefined;
+            it.url = u;
+            it.via = 'external_outfit';
+            return;
+          }
+          const buf = Buffer.from(await (await fetch(u)).arrayBuffer());
+          const extName = u.toLowerCase().includes('.png') ? '.png' : '.jpg';
+          const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${extName}`;
+          fs.writeFileSync(path.join(this.storageRoot(), objectKey), buf);
+          await this.oss.putObjectSafe(buf, objectKey, extName === '.png' ? 'image/png' : 'image/jpeg');
+          it.status = 'done';
+          it.objectKey = objectKey;
+          it.via = 'external_outfit';
+        } catch (e: any) {
+          it.status = 'failed';
+          it.error = String(e?.message || e).slice(0, 500);
+          if (it.compare?.external) {
+            (it.compare.external as any).status = 'failed';
+            (it.compare.external as any).error = it.error;
+          }
+        }
+      };
+
+      if (isMultiColor) {
+        // 关键：每个颜色单独调一次 Agent（1 色参考 + 该色 prompt），避免整组一锅炖只出第一色
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (this.itemHasResult(it)) continue;
+          const colorLabel = colorsAll[i] || '';
+          const garmentUrls = garmentUrlForSlot(i);
+          if (!garmentUrls.length) {
+            it.status = 'failed';
+            it.error = `多色展示第 ${i + 1} 色缺少参考图 URL`;
+            continue;
+          }
+          const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
+          const promptLead = String(it.prompt || it.promptZh || '').trim();
+          const instruction = [
+            buildTemplateBrief(it, colorLabel),
+            poseTextZh ? `姿势描述：${poseTextZh}` : '',
+            sceneTextZh ? `场景描述：${sceneTextZh}` : '',
+            feature ? `商品特征：${feature}` : '',
+            colorLabel ? `本张只生成颜色「${colorLabel}」，成衣颜色必须与唯一成衣参考图一致` : '',
+            styleKwZh,
+            styleNote,
+            promptLead ? `生图要求：${promptLead}` : '',
+            regenNote,
+          ]
+            .filter(Boolean)
+            .join('\n')
+            .slice(0, 2400);
+          const ext = await this.externalOutfit.invoke({
+            garmentImages: combinedImages,
+            modelImageUrl: modelFaceUrl || undefined,
+            instruction: instruction || undefined,
+          });
+          await opts?.appendEvent?.('external_outfit', ext.ok ? `外部 Agent 色${i + 1}成功` : `外部 Agent 色${i + 1}失败`, {
+            ok: ext.ok,
+            ms: ext.ms,
+            requestId: ext.requestId,
+            agentCode: ext.agentCode,
+            imageCount: ext.imageUrls.length,
+            error: ext.error,
+            engine: outfitEngine,
+            colorIndex: i,
+            colorLabel,
+            garmentImageCount: garmentUrls.length,
+          });
+          applyExternalToItem(it, ext, 0);
+          if (outfitEngine === 'external' && (it as any)._extUrl) {
+            await downloadExtToItem(it, String((it as any)._extUrl));
+            delete (it as any)._extUrl;
+          }
+          await opts?.onProgress?.({
+            percent: Math.min(98, 92 + Math.round(((i + 1) / items.length) * 6)),
+            step: 'external_outfit',
+            message: `外部 Agent 生图 ${i + 1}/${items.length}`,
+            done: items.filter((x) => x.status === 'done').length,
+            total: items.length,
+          });
+        }
+      } else {
+        // 非多色：每槽单独调 Agent（与 multi_color 一致）。
+        // 旧逻辑整组一次调用后按 urlIdx 分发；上游常只回 1 张 → Math.min 夹到同一 URL，多槽变成克隆。
+        const garmentUrls = garmentUrlForSlot(0);
+        const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
+        // external：只生未出结果的槽；both：自建已出图也要再调外部做同图对比
+        const pendingSlots =
+          outfitEngine === 'both'
+            ? items.slice()
+            : items.filter((x) => !this.itemHasResult(x));
+        let extFailAll = true;
+        for (let pi = 0; pi < pendingSlots.length; pi++) {
+          const it = pendingSlots[pi];
+          if (outfitEngine === 'external' && this.itemHasResult(it)) continue;
+          const promptLead = String(it.prompt || it.promptZh || '').trim();
+          const slotNote =
+            items.length > 1
+              ? `本张是第 ${it.index + 1}/${items.length} 张独立变体（slot-${it.index + 1}）：请在机位/构图/姿势微动作/表情/光影上与同组其它张明显不同，禁止复刻同一构图；成衣保真不变。`
+              : '';
+          const instruction = [
+            buildTemplateBrief(it),
+            poseTextZh ? `姿势描述：${poseTextZh}` : '',
+            sceneTextZh ? `场景描述：${sceneTextZh}` : '',
+            feature ? `商品特征：${feature}` : '',
+            styleKwZh,
+            styleNote,
+            promptLead ? `生图要求：${promptLead}` : '',
+            slotNote,
+            regenNote,
+          ]
+            .filter(Boolean)
+            .join('\n')
+            .slice(0, 2400);
+          const ext = await this.externalOutfit.invoke({
+            garmentImages: combinedImages.length ? combinedImages : garmentUrls,
+            modelImageUrl: modelFaceUrl || undefined,
+            instruction: instruction || undefined,
+          });
+          await opts?.appendEvent?.(
+            'external_outfit',
+            ext.ok ? `外部 Agent 槽${it.index + 1}成功` : `外部 Agent 槽${it.index + 1}失败`,
+            {
+              ok: ext.ok,
+              ms: ext.ms,
+              requestId: ext.requestId,
+              agentCode: ext.agentCode,
+              imageCount: ext.imageUrls.length,
+              error: ext.error,
+              engine: outfitEngine,
+              slotIndex: it.index,
+              pendingOrdinal: pi,
+            },
+          );
+          if (ext.ok && ext.imageUrls.length) extFailAll = false;
+          // 每次调用只取本响应第 0 张，避免再按组内下标复用同一结果
+          applyExternalToItem(it, ext, 0);
+          if (outfitEngine === 'external' && (it as any)._extUrl) {
+            await downloadExtToItem(it, String((it as any)._extUrl));
+            delete (it as any)._extUrl;
+          }
+          {
+            const okNow = items.filter((x) => x.status === 'done').length;
+            await opts?.onProgress?.({
+              percent: Math.min(98, 92 + Math.round(((pi + 1) / Math.max(1, pendingSlots.length)) * 6)),
+              step: 'external_outfit',
+              message: `生图 ${okNow}/${items.length}`,
+              done: okNow,
+              total: items.length,
+            });
+          }
+        }
+        if (outfitEngine === 'external' && pendingSlots.length && extFailAll) {
+          throw new Error(
+            pendingSlots.find((x) => x.error)?.error || '外部穿搭 Agent 未返回结果图',
+          );
+        }
+      }
+    }
+
 
     const ok = items.filter((i) => i.status === 'done').length;
     legacy.status = ok === items.length ? 'done' : ok ? 'partial' : 'failed';
@@ -1236,7 +2367,7 @@ export class PromoService implements OnModuleInit {
       items: items.map((i) => ({
         index: i.index,
         status: i.status,
-        url: i.objectKey ? this.publicUrl(i.objectKey) : null,
+        url: this.itemPlayUrl(i),
         mediaId: i.savedMediaId || null,
         error: i.error,
         ms: i.ms,
@@ -1302,8 +2433,23 @@ export class PromoService implements OnModuleInit {
       }
     }
 
+    const priorByIndex = new Map((row.images || []).map((x) => [x.index, x]));
+    const mergeGenCalls = (it: JobItem): ImageGenCallRecord[] => {
+      const prior = priorByIndex.get(it.index);
+      const hist = Array.isArray(it.genCalls)
+        ? [...it.genCalls]
+        : Array.isArray(prior?.genCalls)
+          ? [...prior!.genCalls!]
+          : [];
+      if (it.genCall) hist.push(it.genCall);
+      // 每槽最多保留 30 次，便于分析且控 JSON 体积
+      return hist.slice(-30);
+    };
     for (const it of opts.items) {
-      if (it.status !== 'done' || !it.objectKey) {
+      const externalUrl = String(it.url || '').trim();
+      const hasExternal = /^https?:\/\//i.test(externalUrl);
+      if (it.status !== 'done' || !(it.objectKey || hasExternal)) {
+        const genCalls = mergeGenCalls(it);
         images.push({
           index: it.index,
           status: it.status === 'failed' ? 'failed' : it.status,
@@ -1312,23 +2458,39 @@ export class PromoService implements OnModuleInit {
           error: it.error,
           ms: it.ms,
           objectKey: it.objectKey,
+          externalUrl: hasExternal ? externalUrl : undefined,
           mediaId: it.savedMediaId,
+          prompt: it.prompt || priorByIndex.get(it.index)?.prompt,
+          promptZh: it.promptZh || it.genCall?.promptZh || priorByIndex.get(it.index)?.promptZh,
+          promptEn: it.prompt || it.genCall?.promptEn || priorByIndex.get(it.index)?.promptEn,
+          model: it.model || it.genCall?.model || priorByIndex.get(it.index)?.model,
+          size: it.size || it.genCall?.size || priorByIndex.get(it.index)?.size,
+          genCalls: genCalls.length ? genCalls : undefined,
+          compare: it.compare || priorByIndex.get(it.index)?.compare,
         });
         continue;
       }
       let mediaId = it.savedMediaId;
       if (!mediaId) {
-        const abs = path.join(this.storageRoot(), it.objectKey);
-        const size = fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+        const abs = !hasExternal && it.objectKey ? path.join(this.storageRoot(), it.objectKey) : '';
+        const size = abs && fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+        const mime = hasExternal
+          ? externalUrl.toLowerCase().includes('.png')
+            ? 'image/png'
+            : 'image/jpeg'
+          : it.objectKey!.endsWith('.jpg')
+            ? 'image/jpeg'
+            : 'image/png';
         const saved = await mediaRepo.save(
           mediaRepo.create({
             tenantId: user.tenantId,
             productId,
             promoSetId: setId,
             type: 'image',
-            provider: this.oss.mediaProvider(),
-            objectKey: it.objectKey,
-            mimeType: it.objectKey.endsWith('.jpg') ? 'image/jpeg' : 'image/png',
+            provider: hasExternal ? 'external' : this.oss.mediaProvider(),
+            // 直链存完整 URL；本地/OSS 仍存 objectKey
+            objectKey: hasExternal ? externalUrl : it.objectKey!,
+            mimeType: mime,
             sizeBytes: String(size),
             status: 'active',
           }),
@@ -1339,14 +2501,23 @@ export class PromoService implements OnModuleInit {
       } else {
         await mediaRepo.update({ id: mediaId, tenantId: user.tenantId }, { promoSetId: setId, productId });
       }
+      const genCalls = mergeGenCalls(it);
       images.push({
         index: it.index,
         status: 'done',
-        objectKey: it.objectKey,
+        objectKey: hasExternal ? undefined : it.objectKey,
+        externalUrl: hasExternal ? externalUrl : undefined,
         mediaId,
         poseId: it.poseId,
         sceneId: it.sceneId,
         ms: it.ms,
+        prompt: it.prompt || priorByIndex.get(it.index)?.prompt,
+        promptZh: it.promptZh || it.genCall?.promptZh || priorByIndex.get(it.index)?.promptZh,
+        promptEn: it.prompt || it.genCall?.promptEn || priorByIndex.get(it.index)?.promptEn,
+        model: it.model || it.genCall?.model || priorByIndex.get(it.index)?.model,
+        size: it.size || it.genCall?.size || priorByIndex.get(it.index)?.size,
+        genCalls: genCalls.length ? genCalls : undefined,
+        compare: it.compare || priorByIndex.get(it.index)?.compare,
       });
     }
 
@@ -1359,6 +2530,8 @@ export class PromoService implements OnModuleInit {
       feature: opts.input.feature || '',
       referenceAssetIds: opts.input.referenceAssetIds || [],
       modelId: opts.input.modelId || null,
+      imageGenModel: this.gen.model,
+      garmentCategory: 'knitwear',
       poses: opts.input.poses || [],
       scenes: opts.input.scenes || [],
       poseText: opts.input.poseText || undefined,
@@ -1375,6 +2548,18 @@ export class PromoService implements OnModuleInit {
     row.jobId = opts.frameworkJobId || row.jobId;
     row.legacyJobId = opts.legacyJobId;
     row.status = opts.status;
+    // 局部重生：本轮 items 若漏了未改动旧槽，合并回去，避免 total 被截成本次张数
+    if (regenOnly && priorByIndex.size) {
+      const have = new Set(images.map((x) => x.index));
+      for (const [idx, prior] of priorByIndex) {
+        if (have.has(idx)) continue;
+        if (!prior || prior.status === 'failed') continue;
+        if (!(prior.objectKey || (prior as any).externalUrl || (prior as any).url || prior.mediaId)) continue;
+        images.push({ ...prior, index: idx });
+        have.add(idx);
+      }
+      images.sort((a, b) => a.index - b.index);
+    }
     row.images = images;
     await repo.save(row);
     try {
@@ -1429,10 +2614,42 @@ export class PromoService implements OnModuleInit {
           const objectKey = `${keyDir}/${String(it.index + 1).padStart(2, '0')}${ext}`;
           fs.writeFileSync(path.join(this.storageRoot(), objectKey), r.buffer);
           await this.oss.putObjectSafe(r.buffer, objectKey, r.mime);
-          Object.assign(it, { status: 'done', objectKey, via: r.via });
+          const genCall: ImageGenCallRecord = {
+            at: new Date().toISOString(),
+            prompt: it.prompt,
+            model: this.gen.model,
+            size: job.size,
+            status: 'ok',
+            via: r.via,
+            ms: Date.now() - t0,
+            legacyJobId: job.id,
+            index: it.index,
+            refCount: refPaths.length,
+          };
+          Object.assign(it, {
+            status: 'done',
+            objectKey,
+            via: r.via,
+            model: this.gen.model,
+            size: job.size,
+            genCall,
+          });
         } catch (e: any) {
+          const msg = String(e.message || e).slice(0, 500);
           it.status = 'failed';
-          it.error = String(e.message || e).slice(0, 500);
+          it.error = msg;
+          it.genCall = {
+            at: new Date().toISOString(),
+            prompt: it.prompt,
+            model: this.gen.model,
+            size: job.size,
+            status: 'failed',
+            error: msg,
+            ms: Date.now() - t0,
+            legacyJobId: job.id,
+            index: it.index,
+            refCount: refPaths.length,
+          };
         } finally {
           it.ms = Date.now() - t0;
           this.release();
@@ -1444,6 +2661,35 @@ export class PromoService implements OnModuleInit {
     job.status = ok === job.items.length ? 'done' : ok ? 'partial' : 'failed';
     this.saveJob(job);
     this.logger.log(`job ${job.id} ${job.status} ${ok}/${job.items.length}`);
+  }
+
+
+  /** Put moov before mdat so WeChat <video> can read duration (avoids 0:00). */
+  private async ensureMp4Faststart(absPath: string): Promise<Buffer | null> {
+    if (!absPath.toLowerCase().endsWith('.mp4')) return null;
+    if (!fs.existsSync(absPath)) return null;
+    const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
+    const tmp = `${absPath}.faststart.tmp.mp4`;
+    try {
+      const r = spawnSync(
+        ffmpeg,
+        ['-y', '-i', absPath, '-c', 'copy', '-movflags', '+faststart', tmp],
+        { encoding: 'utf8', timeout: 120_000 },
+      );
+      if (r.status !== 0 || !fs.existsSync(tmp)) {
+        this.logger.warn(
+          `mp4 faststart skip: ${String(r.stderr || r.error || 'ffmpeg failed').slice(0, 200)}`,
+        );
+        try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* ignore */ }
+        return null;
+      }
+      fs.renameSync(tmp, absPath);
+      return fs.readFileSync(absPath);
+    } catch (e: any) {
+      this.logger.warn(`mp4 faststart error: ${String(e?.message || e).slice(0, 200)}`);
+      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* ignore */ }
+      return null;
+    }
   }
 
   private jobFile(tenantId: string, productId: string, jobId: string) {
@@ -1482,7 +2728,7 @@ export class PromoService implements OnModuleInit {
         status: i.status,
         poseId: i.poseId,
         sceneId: i.sceneId,
-        url: i.objectKey ? this.publicUrl(i.objectKey) : null,
+        url: this.itemPlayUrl(i),
         error: i.error,
         saved: !!i.savedMediaId,
         ms: i.ms,
@@ -1598,6 +2844,8 @@ export class PromoService implements OnModuleInit {
 
   // ---------- 宣传图组（UI 以 set 为中心） ----------
   private setDto(row: PromoSetEntity) {
+    const kindEarly =
+      (row as any).kind || (row.params as any)?.kind || (row.params as any)?.mediaKind || 'image';
     const images = (row.images || []).map((i) => {
       const regenerating = i.status === 'pending' || i.status === 'running';
       return {
@@ -1607,14 +2855,23 @@ export class PromoService implements OnModuleInit {
         sceneId: i.sceneId,
         mediaId: i.mediaId || null,
         // 重生中的槽位先藏旧图，列表立刻出现「生成中」占位
-        url: i.objectKey && !regenerating ? this.publicUrl(i.objectKey) : null,
+        url: !regenerating ? this.itemPlayUrl(i) : null,
         error: i.error,
         ms: i.ms,
         saved: !!i.mediaId,
-        regenerating: !!regenerating && !!i.objectKey,
+        regenerating: !!regenerating && !!(i.objectKey || (i as any).externalUrl || (i as any).url),
+        // IMAGE_GEN 可分析：中文原话 + 英文最终提示词 + 历次调用（重生追加）
+        prompt: i.prompt || null,
+        promptZh: i.promptZh || null,
+        promptEn: i.promptEn || i.prompt || null,
+        model: i.model || null,
+        size: i.size || null,
+        genCalls: Array.isArray(i.genCalls) ? i.genCalls : [],
+        compare: i.compare || null,
       };
     });
-    const done = images.filter((i) => i.status === 'done' && i.url).length;
+    // done：当前成功可展示槽；重生中 status≠done，不计入
+    const done = images.filter((i) => i.status === 'done' && (i.url || i.mediaId)).length;
     const tpl = findTemplate(row.templateId);
     const kind = (row as any).kind || (row.params as any)?.kind || (row.params as any)?.mediaKind || 'image';
     const jobType = kind === 'video' || kind === 'promo_video' ? 'promo_video' : 'promo_image';
@@ -1645,7 +2902,21 @@ export class PromoService implements OnModuleInit {
       legacyJobId: row.legacyJobId,
       status: row.status,
       done,
-      total: images.length || Number((row.params as any)?.count) || 0,
+      // 槽位总数以组为准：局部重生不得把 total 缩成「本次重生张数」
+      total: Math.max(
+        images.length,
+        Number((row.params as any)?.count) || 0,
+        done,
+      ),
+      // 视频时长（秒）：params.seconds；供 gallery 展示，避免 moov 未就绪时播放器显示 0:00
+      seconds:
+        kind === 'video' || kind === 'promo_video'
+          ? Number((row.params as any)?.seconds) || null
+          : null,
+      durationSec:
+        kind === 'video' || kind === 'promo_video'
+          ? Number((row.params as any)?.seconds) || null
+          : null,
       items: images,
       createdAt: row.createdAt?.getTime?.() ?? row.createdAt,
       updatedAt: row.updatedAt?.getTime?.() ?? row.updatedAt,
@@ -1653,18 +2924,22 @@ export class PromoService implements OnModuleInit {
   }
 
   async listSets(user: AuthContext, productId: string) {
-    await this.products.getDetail(user, productId);
+    // Light ACL — avoid full getDetail (images/signing) on every gallery poll
+    await this.products.assertProductReadable(user, productId);
     await this.migrateLegacyJobsToSets(user, productId);
-    const rows = await this.setsRepo().find({
+    let rows = await this.setsRepo().find({
       where: { tenantId: user.tenantId, productId },
       order: { createdAt: 'DESC' },
       take: 50,
     });
+    rows = rows.filter((r) => r.status !== 'deleted');
     // 附带尚未落库完成的排队中任务（仅 payload.setId 已有）
     const dtos = rows.map((r) => this.setDto(r));
     try {
-      const imageJobs = await this.jobs.list(user, { type: 'promo_image', limit: 30 });
-      const videoJobs = await this.jobs.list(user, { type: 'promo_video', limit: 30 });
+      const [imageJobs, videoJobs] = await Promise.all([
+        this.jobs.list(user, { type: 'promo_image', limit: 30 }),
+        this.jobs.list(user, { type: 'promo_video', limit: 30 }),
+      ]);
       const items = [...(imageJobs.items || []), ...(videoJobs.items || [])];
       for (const j of items) {
         if ((j.payload as any)?.productId !== productId) continue;
@@ -1716,22 +2991,95 @@ export class PromoService implements OnModuleInit {
     return this.collapseBusySetsByTemplate(mapped);
   }
 
-  /** 同模板多条 generating 只留最新，避免素材列表「两条多色」 */
-  private collapseBusySetsByTemplate<T extends { id: string; templateId?: string; busy?: boolean; status?: string; createdAt?: any }>(
-    sets: T[],
-  ): T[] {
+  /**
+   * 素材列表去重：
+   * - 同模板多条 generating 只留最新
+   * - 失败且无可用图、且同模板已有更新成功组 → 不展示（避免「失败空壳」刷屏）
+   */
+  private collapseBusySetsByTemplate<T extends {
+    id: string;
+    templateId?: string;
+    busy?: boolean;
+    status?: string;
+    createdAt?: any;
+    done?: number;
+    total?: number;
+    items?: any[];
+  }>(sets: T[]): T[] {
     const seenBusyTpl = new Set<string>();
+    const hasDoneTpl = new Set<string>();
+    for (const s of sets) {
+      const tpl = String(s.templateId || '');
+      const done =
+        typeof s.done === 'number'
+          ? s.done
+          : (s.items || []).filter((i) => i && (i.status === 'done' || i.url)).length;
+      if (tpl && (s.status === 'done' || s.status === 'partial') && done > 0) {
+        hasDoneTpl.add(tpl);
+      }
+    }
     const out: T[] = [];
     for (const s of sets) {
       const busy = !!(s.busy || s.status === 'generating' || s.status === 'queued');
       const tpl = String(s.templateId || '');
+      const done =
+        typeof s.done === 'number'
+          ? s.done
+          : (s.items || []).filter((i) => i && (i.status === 'done' || i.url)).length;
       if (busy && tpl) {
         if (seenBusyTpl.has(tpl)) continue;
         seenBusyTpl.add(tpl);
       }
+      // 失败空壳：同模板已有成功成片时隐藏
+      if (s.status === 'failed' && done <= 0 && tpl && hasDoneTpl.has(tpl)) {
+        continue;
+      }
       out.push(s);
     }
     return out;
+  }
+
+  /** 软删同商品+模板下无成片的失败空壳组，避免新建时堆积 */
+  private async softDeleteFailedEmptySets(
+    user: AuthContext,
+    productId: string,
+    templateId: string,
+    exceptSetId?: string,
+  ) {
+    const repo = this.setsRepo();
+    const rows = await repo.find({
+      where: { tenantId: user.tenantId, productId, templateId, status: 'failed' },
+      take: 20,
+      order: { createdAt: 'DESC' },
+    });
+    for (const row of rows) {
+      if (exceptSetId && row.id === exceptSetId) continue;
+      const done = (row.images || []).filter((i) => i && i.status === 'done' && (i.objectKey || (i as any).externalUrl || (i as any).url)).length;
+      if (done > 0) continue;
+      row.status = 'deleted';
+      await repo.save(row);
+      this.logger.log(`soft-delete failed empty set ${row.id} tpl=${templateId}`);
+    }
+  }
+
+  /** 新建时优先复用同模板失败空壳 set，避免任务/素材双增 */
+  private async findReusableFailedSet(
+    user: AuthContext,
+    productId: string,
+    templateId: string,
+  ) {
+    const repo = this.setsRepo();
+    const rows = await repo.find({
+      where: { tenantId: user.tenantId, productId, templateId, status: 'failed' },
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+    for (const row of rows) {
+      const done = (row.images || []).filter((i) => i && i.status === 'done' && (i.objectKey || (i as any).externalUrl || (i as any).url)).length;
+      if (done > 0) continue;
+      return row;
+    }
+    return null;
   }
 
   async getSet(user: AuthContext, productId: string, setId: string) {
@@ -1773,17 +3121,28 @@ export class PromoService implements OnModuleInit {
       const covers = (product.coverMediaIds || []).filter((id: string) => !mediaIds.includes(id));
       await this.products.update(user, productId, { coverMediaIds: covers });
     }
-    await this.setsRepo().delete({ id: setId, tenantId: user.tenantId, productId });
+    row.status = 'deleted';
+    await this.setsRepo().save(row);
     return { deleted: setId, mediaRemoved: mediaIds.length };
   }
 
   /** 把旧 pj_* 文件一次性迁入 promo_sets（幂等） */
   private async migrateLegacyJobsToSets(user: AuthContext, productId: string) {
     if (!(this.dataSource && process.env.DB_ENABLED === 'true')) return;
-    const dir = this.stateDir(user.tenantId, productId);
-    if (!fs.existsSync(dir)) return;
+    const memoKey = `${user.tenantId}:${productId}`;
+    if (this.legacyMigratedProducts.has(memoKey)) return;
+    // Peek without mkdir (stateDir always creates)
+    const dir = path.join(process.cwd(), 'data', 'promo', user.tenantId, productId);
+    if (!fs.existsSync(dir)) {
+      this.legacyMigratedProducts.add(memoKey);
+      return;
+    }
     const repo = this.setsRepo();
     const files = fs.readdirSync(dir).filter((f) => f.startsWith('pj_') && f.endsWith('.json'));
+    if (!files.length) {
+      this.legacyMigratedProducts.add(memoKey);
+      return;
+    }
     for (const f of files) {
       try {
         const job: PromoJob = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -1835,6 +3194,7 @@ export class PromoService implements OnModuleInit {
         this.logger.warn(`migrate legacy ${f}: ${e.message || e}`);
       }
     }
+    this.legacyMigratedProducts.add(memoKey);
   }
 
   /**
@@ -1849,17 +3209,27 @@ export class PromoService implements OnModuleInit {
     const want = body?.indexes?.length ? body.indexes : job.items.map((i) => i.index);
     const added: string[] = [];
     for (const it of job.items) {
-      if (!want.includes(it.index) || it.status !== 'done' || !it.objectKey || it.savedMediaId) continue;
-      const stInfo = fs.statSync(path.join(this.storageRoot(), it.objectKey));
+      const externalUrl = String(it.url || '').trim();
+      const hasExternal = /^https?:\/\//i.test(externalUrl);
+      if (!want.includes(it.index) || it.status !== 'done' || !(it.objectKey || hasExternal) || it.savedMediaId) continue;
+      const abs = !hasExternal && it.objectKey ? path.join(this.storageRoot(), it.objectKey) : '';
+      const sizeBytes = abs && fs.existsSync(abs) ? fs.statSync(abs).size : 0;
+      const mime = hasExternal
+        ? externalUrl.toLowerCase().includes('.png')
+          ? 'image/png'
+          : 'image/jpeg'
+        : it.objectKey!.endsWith('.jpg')
+          ? 'image/jpeg'
+          : 'image/png';
       const saved = await repo.save(
         repo.create({
           tenantId: user.tenantId,
           productId,
           type: 'image',
-          provider: this.oss.mediaProvider(),
-          objectKey: it.objectKey,
-          mimeType: it.objectKey.endsWith('.jpg') ? 'image/jpeg' : 'image/png',
-          sizeBytes: String(stInfo.size),
+          provider: hasExternal ? 'external' : this.oss.mediaProvider(),
+          objectKey: hasExternal ? externalUrl : it.objectKey!,
+          mimeType: mime,
+          sizeBytes: String(sizeBytes),
           status: 'active',
         }),
       );

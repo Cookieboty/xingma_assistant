@@ -7,6 +7,12 @@ const {
   hasContactInfo,
   isContactPrompted,
   markContactPrompted,
+  isProfileComplete,
+  isProfilePrompted,
+  markProfilePrompted,
+  missingProfileFields,
+  saveProfileWithAvatarUpload,
+  stableMediaUrl,
 } = require('../../../utils/profile');
 
 function skuHasPrice(s) {
@@ -42,6 +48,10 @@ Page({
     id: '',
     shareEventId: '',
     boundCustomerId: '',
+    groupId: '',
+    showCatalogCta: false,
+    homeFabTop: 88,
+    homeFabSize: 32,
     contactQrUrl: '',
     error: '',
     hasPrice: false,
@@ -49,13 +59,25 @@ Page({
     skuRows: [],
     showSoftTip: false,
     showInquirySheet: false,
+    showProfileSheet: false,
     contactPhone: '',
     contactName: '',
     contactRemark: '',
     profilePhone: '',
     profileName: '',
+    profileAvatarUrl: '',
+    profileDraftNick: '',
+    profileDraftPhone: '',
+    profileSaving: false,
+    needProfileAvatar: false,
+    needProfileNickname: false,
+    needProfilePhone: false,
+    profileSheetTitle: '完善资料',
+    profileSheetDesc: '',
   },
   async onLoad(q) {
+    this._layoutHomeFab();
+    this._hideNativeHome();
     const shareEventId = q.shareEventId || '';
     const boundCustomerId = q.boundCustomerId || '';
     const id = q.id || '';
@@ -68,8 +90,10 @@ Page({
       this.setData({ error: (e && e.message) || '鉴权失败' });
       return;
     }
-    await this.load(id, shareEventId, boundCustomerId);
-    await this.loadProfileForInquiry();
+    await Promise.all([
+      this.load(id, shareEventId, boundCustomerId),
+      this.loadProfileForInquiry(),
+    ]);
     try {
       wx.hideShareMenu({ menus: ['shareAppMessage', 'shareTimeline'] });
     } catch (e) {
@@ -105,9 +129,13 @@ Page({
       const product = await request({ url });
       const skuState = this.buildSkuState(product);
       const safe = Object.assign({}, product, { tags: publicTags(product.tags) });
+      const groupId = product.groupId || '';
       this.setData({
         product: safe,
         canDownload: !!product.allowCustomerDownload,
+        groupId,
+        // 客户分享落地页：房子/「更多」始终进公开目录，不依赖 groupId
+        showCatalogCta: true,
         error: '',
         ...skuState,
       });
@@ -120,7 +148,7 @@ Page({
   async loadContactQr() {
     try {
       const tenant = await request({ url: '/api/tenants/current' });
-      this.setData({ contactQrUrl: (tenant && tenant.contactQrUrl) || '' });
+      this.setData({ contactQrUrl: stableMediaUrl((tenant && tenant.contactQrUrl) || '') || '' });
     } catch (e) {
       /* ignore */
     }
@@ -142,25 +170,155 @@ Page({
     });
   },
 
-  /** 预填联系方式；无联系方式时轻提示一次（不强制弹填表） */
+  /** 预填联系方式；首次打开软提示完善资料（头像+昵称+手机，可跳过） */
   async loadProfileForInquiry() {
     try {
       const me = await request({ url: '/api/auth/me' });
       const phone = (me && me.phone) || '';
       const name = (me && me.nickname) || '';
+      const avatar = (me && me.avatarUrl) || '';
       this.setData({
         profilePhone: phone,
         profileName: name,
+        profileAvatarUrl: avatar,
         contactPhone: phone,
         contactName: name,
+        profileDraftNick: name,
+        profileDraftPhone: phone,
       });
-      if (!hasContactInfo(me) && !isContactPrompted()) {
+      // 缺啥补啥：已有头像/昵称不重复催；仅缺项弹层（可跳过，不挡看货）
+      const miss = missingProfileFields(me);
+      if (isProfileComplete(me)) {
+        markProfilePrompted();
+        markContactPrompted();
+      } else if (!isProfilePrompted() && miss.length) {
+        const needAvatar = miss.indexOf('avatar') >= 0;
+        const needNickname = miss.indexOf('nickname') >= 0;
+        const needPhone = miss.indexOf('phone') >= 0;
+        let title = '完善资料';
+        let desc = '只补还缺的项；可跳过，看货不受影响';
+        if (miss.length === 1 && needPhone) {
+          title = '补一下手机号';
+          desc = '方便档口联系你；可用微信一键授权，也可跳过';
+        } else if (!needAvatar && !needNickname && needPhone) {
+          title = '补一下手机号';
+          desc = '头像昵称已有；还差手机号（可跳过）';
+        }
+        this.setData({
+          showProfileSheet: true,
+          showSoftTip: false,
+          needProfileAvatar: needAvatar,
+          needProfileNickname: needNickname,
+          needProfilePhone: needPhone,
+          profileSheetTitle: title,
+          profileSheetDesc: desc,
+        });
+      } else if (!hasContactInfo(me) && !isContactPrompted()) {
         this.setData({ showSoftTip: true });
       } else if (hasContactInfo(me)) {
         markContactPrompted();
       }
     } catch (e) {
       /* 不阻断看货 */
+    }
+  },
+  skipProfileSheet() {
+    markProfilePrompted();
+    this.setData({ showProfileSheet: false });
+    // 仍无联系方式时给询价轻提示
+    if (!hasContactInfo({
+      phone: this.data.profilePhone || this.data.profileDraftPhone,
+      nickname: this.data.profileName || this.data.profileDraftNick,
+    }) && !isContactPrompted()) {
+      this.setData({ showSoftTip: true });
+    }
+  },
+  onProfileChooseAvatar(e) {
+    const url = (e.detail && e.detail.avatarUrl) || '';
+    if (url) this.setData({ profileAvatarUrl: url });
+  },
+  onProfileNick(e) {
+    this.setData({ profileDraftNick: e.detail.value });
+  },
+  onProfilePhone(e) {
+    this.setData({ profileDraftPhone: e.detail.value });
+  },
+  async onProfileGetPhone(e) {
+    const detail = (e && e.detail) || {};
+    if (detail.errno === 1400001) {
+      wx.showToast({ title: '手机号额度不足', icon: 'none' });
+      return;
+    }
+    if (!detail.code) {
+      const denied = (detail.errMsg || '').indexOf('deny') >= 0;
+      wx.showToast({ title: denied ? '已取消授权' : '无法获取微信手机号', icon: 'none' });
+      return;
+    }
+    try {
+      const me = await request({
+        url: '/api/auth/me/phone',
+        method: 'POST',
+        data: { code: detail.code },
+      });
+      const phone = (me && me.phone) || '';
+      if (phone) {
+        this.setData({
+          profileDraftPhone: phone,
+          profilePhone: phone,
+          contactPhone: phone,
+        });
+        wx.showToast({ title: '已填入手机号', icon: 'success' });
+      }
+    } catch (err) {
+      wx.showToast({ title: (err && err.message) || '微信手机号不可用', icon: 'none' });
+    }
+  },
+  async saveProfileSheet() {
+    if (this.data.profileSaving) return;
+    const nickname = (this.data.profileDraftNick || '').trim();
+    const phone = (this.data.profileDraftPhone || '').trim();
+    const avatarUrl = (this.data.profileAvatarUrl || '').trim();
+    if (!nickname && !phone && !avatarUrl) {
+      wx.showToast({ title: '可先填一项，或点跳过', icon: 'none' });
+      return;
+    }
+    if (phone && !/^1\d{10}$/.test(phone) && !/^\+?\d{6,20}$/.test(phone)) {
+      wx.showToast({ title: '手机号格式不太对', icon: 'none' });
+      return;
+    }
+    this.setData({ profileSaving: true });
+    try {
+      const saved = await saveProfileWithAvatarUpload({
+        nickname: nickname || undefined,
+        phone: phone || undefined,
+        avatarUrl: avatarUrl || undefined,
+        uploadAvatarIfTemp: true,
+      });
+      markProfilePrompted();
+      markContactPrompted();
+      const nextNick = (saved && saved.nickname) || nickname;
+      const nextPhone = (saved && saved.phone) || phone;
+      const nextAvatar = (saved && saved.avatarUrl) || avatarUrl;
+      this.setData({
+        showProfileSheet: false,
+        profileSaving: false,
+    needProfileAvatar: false,
+    needProfileNickname: false,
+    needProfilePhone: false,
+    profileSheetTitle: '完善资料',
+    profileSheetDesc: '',
+        profileName: nextNick,
+        profilePhone: nextPhone,
+        profileAvatarUrl: nextAvatar,
+        profileDraftNick: nextNick,
+        profileDraftPhone: nextPhone,
+        contactName: nextNick,
+        contactPhone: nextPhone,
+      });
+      wx.showToast({ title: '已保存', icon: 'success' });
+    } catch (err) {
+      this.setData({ profileSaving: false });
+      wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' });
     }
   },
   dismissSoftTip() {
@@ -178,6 +336,7 @@ Page({
         contactName: name,
         contactRemark: '',
         showInquirySheet: true,
+        showProfileSheet: false,
         showSoftTip: false,
         profilePhone: phone,
         profileName: name,
@@ -185,6 +344,7 @@ Page({
     } catch (e) {
       this.setData({
         showInquirySheet: true,
+        showProfileSheet: false,
         showSoftTip: false,
         contactPhone: this.data.profilePhone || '',
         contactName: this.data.profileName || '',
@@ -247,5 +407,46 @@ Page({
     } finally {
       this._submittingInquiry = false;
     }
+  },
+
+  onShow() {
+    this._hideNativeHome();
+  },
+
+  /** 分享单页模式下系统左上角房子会进首页/管理端 Tab；隐藏之，只用自定义 FAB→catalog */
+  _hideNativeHome() {
+    try {
+      if (typeof wx.hideHomeButton === 'function') wx.hideHomeButton();
+    } catch (e) { /* ignore */ }
+  },
+
+  /** t336: 房子在导航栏下方左侧（原生 nav 不可覆盖；系统 home 已 hide） */
+  _layoutHomeFab() {
+    try {
+      const sys = wx.getSystemInfoSync() || {};
+      const menu = wx.getMenuButtonBoundingClientRect ? wx.getMenuButtonBoundingClientRect() : null;
+      if (menu && menu.height) {
+        this.setData({
+          homeFabTop: Math.round(menu.bottom + 8),
+          homeFabSize: Math.round(menu.height),
+        });
+        return;
+      }
+      const status = sys.statusBarHeight || 20;
+      this.setData({ homeFabTop: status + 48, homeFabSize: 32 });
+    } catch (e) { /* keep defaults */ }
+  },
+
+  /** 房子 FAB 与「更多」共用：客户上下文永远进公开 catalog，绝不进管理端 list */
+  goCatalog() {
+    const groupId = this.data.groupId || (this.data.product && this.data.product.groupId) || '';
+    const qs = [];
+    if (groupId) qs.push(`groupId=${encodeURIComponent(groupId)}`);
+    if (this.data.shareEventId) qs.push(`shareEventId=${encodeURIComponent(this.data.shareEventId)}`);
+    if (this.data.boundCustomerId) qs.push(`boundCustomerId=${encodeURIComponent(this.data.boundCustomerId)}`);
+    const url = qs.length
+      ? `/pages/product/catalog/catalog?${qs.join('&')}`
+      : '/pages/product/catalog/catalog';
+    wx.navigateTo({ url });
   },
 });

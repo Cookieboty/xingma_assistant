@@ -161,4 +161,69 @@ export class MediaService {
     const secret = this.config.get<string>('jwt.secret') || 'dev';
     return createHmac('sha256', secret).update(`${objectKey}:${expireAt}`).digest('hex').slice(0, 32);
   }
+
+  private hmacSecret() {
+    return this.config.get<string>('jwt.secret') || process.env.JWT_SECRET || 'dev';
+  }
+
+  /** 自有 OSS / 本站域名：小程序 downloadFile 已白名单，可直链播放 */
+  isAlreadyPlayableHost(url: string): boolean {
+    try {
+      const host = new URL(url).host.toLowerCase();
+      const appBase = String(process.env.APP_BASE_URL || this.config.get<string>('app.baseUrl') || '')
+        .trim()
+        .replace(/\/$/, '');
+      if (appBase) {
+        const appHost = new URL(appBase.startsWith('http') ? appBase : `https://${appBase}`).host.toLowerCase();
+        if (host === appHost) return true;
+      }
+      // 业务自有桶（mp downloadFile 已配 xy-tradex 深圳）
+      if (host === 'xy-tradex.oss-cn-shenzhen.aliyuncs.com') return true;
+      if (host.endsWith('.oss-cn-shenzhen.aliyuncs.com') && host.startsWith('xy-tradex.')) return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 外部视频同域 HMAC 中转 URL（应急保留；默认播放已改回上游直链）。
+   * 不落盘、不转存自有 OSS。正常路径不再由 itemPlayUrl 调用。
+   */
+  buildExternalPlayUrl(upstreamUrl: string, ttlSec = 6 * 3600): string {
+    const u = String(upstreamUrl || '').trim();
+    if (!/^https?:\/\//i.test(u)) {
+      throw new BadRequestException('external play url 无效');
+    }
+    if (this.isAlreadyPlayableHost(u)) return u;
+    const exp = Math.floor(Date.now() / 1000) + Math.max(300, ttlSec);
+    const sig = createHmac('sha256', this.hmacSecret())
+      .update(`extplay:${u}:${exp}`)
+      .digest('hex')
+      .slice(0, 32);
+    const appBase = String(process.env.APP_BASE_URL || this.config.get<string>('app.baseUrl') || '')
+      .trim()
+      .replace(/\/$/, '') || '';
+    const q = `u=${encodeURIComponent(u)}&e=${exp}&s=${sig}`;
+    if (appBase) return `${appBase}/api/media/external-play?${q}`;
+    return `/api/media/external-play?${q}`;
+  }
+
+  /** 校验 HMAC 并返回上游 URL；过期/篡改抛错 */
+  verifyExternalPlayToken(u: string, e: string | number, s: string): string {
+    const url = String(u || '').trim();
+    const exp = Number(e);
+    const sig = String(s || '').trim();
+    if (!/^https?:\/\//i.test(url)) throw new BadRequestException('无效地址');
+    if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000) - 30) {
+      throw new BadRequestException('播放链接已过期');
+    }
+    if (!/^[a-f0-9]{32}$/i.test(sig)) throw new BadRequestException('签名无效');
+    const expect = createHmac('sha256', this.hmacSecret())
+      .update(`extplay:${url}:${exp}`)
+      .digest('hex')
+      .slice(0, 32);
+    if (expect !== sig) throw new BadRequestException('签名无效');
+    return url;
+  }
 }

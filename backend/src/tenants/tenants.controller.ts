@@ -30,7 +30,7 @@ export class TenantsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'staff')
   setContactQr(@AuthUser() user: AuthContext, @Body() body: { url?: string | null }) {
-    return this.tenantsService.setContactQr(user.tenantId, body?.url ?? null);
+    return this.tenantsService.setContactQr(user.tenantId, body?.url ?? null, user);
   }
 
   @Patch('current/allow-customer-download')
@@ -42,7 +42,7 @@ export class TenantsController {
   ) {
     const allow =
       body?.allowCustomerDownload !== undefined ? !!body.allowCustomerDownload : !!body?.allow;
-    return this.tenantsService.setAllowCustomerDownload(user.tenantId, allow);
+    return this.tenantsService.setAllowCustomerDownload(user.tenantId, allow, user);
   }
 
   @Get(':id')

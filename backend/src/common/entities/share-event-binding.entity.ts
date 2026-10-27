@@ -22,6 +22,9 @@ export class ShareEventBinding {
   @Column({ type: 'datetime', name: 'bound_at' })
   boundAt!: Date;
 
+  @Column({ type: 'varchar', length: 16, default: 'active', comment: 'active|revoked' })
+  status!: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

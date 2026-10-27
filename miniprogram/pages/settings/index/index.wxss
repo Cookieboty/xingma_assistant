@@ -1,6 +1,6 @@
 .section { font-weight: 600; margin-bottom: 8rpx; }
 .item { justify-content: space-between; margin-top: 16rpx; padding-top: 12rpx; border-top: 1px solid #eee; }
-.ops { display: flex; gap: 16rpx; }
+.ops { display: flex; align-items: center; gap: 28rpx; flex-shrink: 0; }
 .link { color: #3b82f6; font-size: 24rpx; }
 .link.danger { color: #ef4444; }
 .form { margin-top: 20rpx; }
@@ -8,45 +8,90 @@
 .mini { margin-top: 12rpx; text-align: center; padding: 16rpx; }
 .tag { margin-left: 8rpx; font-size: 22rpx; background: #e0f2fe; color: #0369a1; padding: 2rpx 10rpx; border-radius: 8rpx; }
 
-.profile-pick { display: flex; flex-direction: column; align-items: center; gap: 20rpx; }
+/* 我的资料：左头像 + 右昵称，手机手填 + 右侧「微信获取」链，与其它 card 一致 */
+.profile-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 24rpx;
+  margin-top: 20rpx;
+}
 .avatar-pick {
-  width: 160rpx;
-  height: 160rpx;
-  padding: 0;
+  /* 严格正方形：压制 button 默认宽高/内边距，避免扁椭圆 */
+  width: 112rpx !important;
+  height: 112rpx !important;
+  min-width: 112rpx !important;
+  max-width: 112rpx !important;
+  min-height: 112rpx !important;
+  max-height: 112rpx !important;
+  flex: 0 0 112rpx;
+  padding: 0 !important;
   margin: 0;
-  border-radius: 50%;
+  border-radius: 12rpx;
   overflow: hidden;
-  background: #c45c26;
+  background: #f0f0f0;
   display: flex;
   align-items: center;
   justify-content: center;
-  line-height: 1.2;
+  box-sizing: border-box;
+  line-height: 112rpx;
+  font-size: 0;
 }
 .avatar-pick::after { border: none; }
 .avatar-pick-inner {
-  width: 100%;
-  height: 100%;
+  width: 112rpx;
+  height: 112rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16rpx;
   box-sizing: border-box;
 }
-.avatar-pick-text { font-size: 24rpx; color: #fff; text-align: center; line-height: 1.3; }
-.avatar-preview { width: 160rpx; height: 160rpx; display: block; }
-.nick-pill {
-  width: 100%;
-  height: 80rpx;
-  padding: 0 28rpx;
-  background: #fff;
-  border-radius: 999rpx;
+.avatar-pick-text { font-size: 22rpx; color: #999; text-align: center; line-height: 1.2; }
+.avatar-preview {
+  width: 112rpx !important;
+  height: 112rpx !important;
+  display: block;
+  border-radius: 12rpx;
+}
+.profile-main { flex: 1; min-width: 0; }
+.nick-input { margin-bottom: 0; }
+.phone-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+.phone-input {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.phone-display {
+  flex: 1;
+  min-width: 0;
   font-size: 28rpx;
   color: #333;
-  text-align: center;
-  border: 2rpx solid #e8c8b0;
+  padding: 12rpx 0;
+}
+.profile-guide { margin-top: 8rpx; font-size: 22rpx; }
+.phone-wx-link {
+  flex-shrink: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0 4rpx;
+  margin: 0;
+  background: transparent;
+  color: #576b95;
+  font-size: 26rpx;
+  line-height: 1.4;
+  border: none;
+  border-radius: 0;
   box-sizing: border-box;
 }
-.nick-pill-filled { border-color: #c45c26; color: #c45c26; font-weight: 500; }
+.phone-wx-link::after { border: none; }
+.phone-wx-link[disabled] { color: #b0b8c8; }
+
 .qr-preview { width: 240rpx; height: 240rpx; background: #fff; border-radius: 12rpx; }
 
 .invite-box { margin-top: 20rpx; padding: 16rpx; background: #faf7f4; border-radius: 12rpx; }
@@ -58,3 +103,87 @@
   font-weight: 600;
   color: #444;
 }
+
+.nick-save-btn {
+  margin-top: 12rpx;
+  width: auto !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24rpx !important;
+  height: 56rpx;
+  line-height: 56rpx;
+  font-size: 24rpx;
+}
+
+
+.invite-share-btn {
+  width: auto !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  line-height: 1.4;
+}
+.invite-share-btn::after { border: none; }
+.invite-share-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0 2rpx;
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  width: auto !important;
+  height: auto;
+  line-height: 1.3;
+  font-size: 24rpx;
+  color: #3b82f6;
+  flex-shrink: 0;
+}
+.invite-share-link::after { border: none; }
+
+/* 邀请记录：单行不换行；邀请/撤销挨近 */
+.invite-record {
+  flex-wrap: nowrap;
+  align-items: center;
+  white-space: nowrap;
+}
+.invite-record .invite-meta {
+  flex: 1;
+  min-width: 0;
+  padding-right: 12rpx;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.invite-record .ops {
+  gap: 6rpx;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.invite-record .ops .link.danger {
+  padding: 0 2rpx;
+  flex-shrink: 0;
+}
+.invite-code-text {
+  font-size: 26rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+  color: #333;
+}
+.invite-meta .muted {
+  font-size: 22rpx;
+}
+
+.member-row { align-items: center; gap: 16rpx; }
+.member-avatar {
+  width: 72rpx; height: 72rpx; border-radius: 50%; background: #f0ebe6; flex-shrink: 0;
+}
+.member-avatar-ph {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28rpx; color: #c45c26; font-weight: 600;
+}
+.member-meta { flex: 1; min-width: 0; }
+.member-name-row { display: flex; align-items: center; gap: 8rpx; flex-wrap: wrap; }
+.member-name { font-size: 30rpx; font-weight: 600; color: #333; }

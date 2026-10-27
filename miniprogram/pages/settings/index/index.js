@@ -1,5 +1,15 @@
 const { request } = require('../../../utils/request');
-const { saveProfileWithAvatarUpload } = require('../../../utils/profile');
+const { saveProfileWithAvatarUpload, isTempAvatarPath, stableMediaUrl } = require('../../../utils/profile');
+
+function inviteStatusLabel(status) {
+  const map = {
+    active: '有效',
+    revoked: '已撤销',
+    exhausted: '已用完',
+    expired: '已过期',
+  };
+  return map[status] || status || '';
+}
 
 Page({
   data: {
@@ -7,27 +17,18 @@ Page({
     nickname: '',
     avatarUrl: '',
     phone: '',
+    phoneBinding: false,
+    needProfileGuide: false,
+    profileSaving: false,
     contactQrUrl: '',
-    allowCustomerDownload: false,
     isOwner: false,
-    inviteRole: 'staff',
+    canInvite: false,
+    myMemberId: '',
     invites: [],
     members: [],
     latestInvite: null,
-    customerLevels: [],
-    productLevels: [],
-    // 新建客户等级
-    clCode: '',
-    clName: '',
-    clRank: '1',
-    clDefault: false,
-    // 新建商品等级
-    plCode: '',
-    plName: '',
-    plRank: '0',
-    plPolicy: 'designated_only',
-    plMinRank: '',
   },
+  _nickSaveTimer: null,
   onLoad(q) {
     if (q && q.profile === '1') this.setData({ showProfile: true });
   },
@@ -39,32 +40,55 @@ Page({
       const app = getApp();
       const role = (app.globalData && app.globalData.role) || wx.getStorageSync('role') || '';
       const isOwner = role === 'owner';
+      const canInvite = role === 'owner' || role === 'staff';
       const tasks = [
-        request({ url: '/api/levels/customer' }),
-        request({ url: '/api/levels/product' }),
         request({ url: '/api/auth/me' }).catch(() => null),
         request({ url: '/api/tenants/current' }).catch(() => null),
         request({ url: '/api/invites/members' }).catch(() => []),
       ];
-      if (isOwner) tasks.push(request({ url: '/api/invites' }).catch(() => []));
+      if (canInvite) tasks.push(request({ url: '/api/invites' }).catch(() => []));
       const results = await Promise.all(tasks);
-      const customerLevels = results[0];
-      const productLevels = results[1];
-      const me = results[2];
-      const tenant = results[3];
-      const members = results[4] || [];
-      const invites = isOwner ? (results[5] || []) : [];
+      const me = results[0];
+      const tenant = results[1];
+      const rawMembers = results[2] || [];
+      // 前端不展示 openid；统一显示为员工（平权）
+      const members = (Array.isArray(rawMembers) ? rawMembers : []).map((m) => ({
+        id: m.id,
+        nickname: m.nickname || '',
+        avatarUrl: stableMediaUrl(m.avatarUrl || '') || '',
+        phone: m.phone || '',
+        status: m.status,
+        role: 'staff',
+        displayName: (m.nickname || '').trim() || (m.phone || '').trim() || '未设昵称',
+        nickShort: ((m.nickname || '').trim() || (m.phone || '').trim() || '员').slice(0, 1),
+        whoLine: [m.nickname, m.phone].filter((x) => (x || '').trim()).join(' · ') || '未完善资料',
+      }));
+      const rawInvites = canInvite ? (results[3] || []) : [];
+      const invites = (Array.isArray(rawInvites) ? rawInvites : []).map((inv) => ({
+        ...inv,
+        statusLabel: inviteStatusLabel(inv && inv.status),
+      }));
+      // 刷新后恢复「最新有效邀请」，避免转发按钮丢 code 落到无码 accept
+      const latestInvite =
+        invites.find((inv) => inv && inv.status === 'active') ||
+        this.data.latestInvite ||
+        null;
+      const nickname = (me && me.nickname) || '';
+      const avatarUrl = stableMediaUrl((me && me.avatarUrl) || '') || '';
+      const phone = (me && me.phone) || '';
+      const needProfileGuide = !nickname || !avatarUrl;
       this.setData({
         isOwner,
-        customerLevels: customerLevels || [],
-        productLevels: productLevels || [],
-        nickname: (me && me.nickname) || '',
-        avatarUrl: (me && me.avatarUrl) || '',
-        phone: (me && me.phone) || '',
-        contactQrUrl: (tenant && tenant.contactQrUrl) || '',
-        allowCustomerDownload: !!(tenant && tenant.allowCustomerDownload),
+        canInvite,
+        myMemberId: (me && me.memberId) || '',
+        nickname,
+        avatarUrl,
+        phone,
+        needProfileGuide,
+        contactQrUrl: stableMediaUrl((tenant && tenant.contactQrUrl) || '') || '',
         members,
         invites,
+        latestInvite,
       });
     } catch (e) {
       wx.showToast({ title: e.message || '加载失败', icon: 'none' });
@@ -72,31 +96,171 @@ Page({
   },
   onChooseAvatar(e) {
     const url = e.detail && e.detail.avatarUrl;
-    if (url) this.setData({ avatarUrl: url });
+    if (!url) return;
+    this.setData({ avatarUrl: url });
+    this.persistProfile({ avatarUrl: url });
+  },
+  /** 从各事件里抠昵称；微信「用微信昵称」时 detail 常为空，需靠 form submit */
+  _pickNickname(...candidates) {
+    for (let i = 0; i < candidates.length; i++) {
+      const raw = candidates[i];
+      if (raw == null) continue;
+      const s = String(raw).trim();
+      if (s) return s.slice(0, 64);
+    }
+    return '';
+  },
+  _rememberNickname(nickname) {
+    if (!nickname) return;
+    this._pendingNickname = nickname;
+    if (nickname !== this.data.nickname) this.setData({ nickname });
+  },
+  onNicknameInput(e) {
+    const nickname = this._pickNickname(e.detail && e.detail.value);
+    if (nickname) this._rememberNickname(nickname);
+  },
+  /** 非聚焦态内容变化（含部分基础库下微信昵称回填） */
+  onNicknameChange(e) {
+    const nickname = this._pickNickname(e.detail && e.detail.value);
+    if (!nickname) return;
+    this._rememberNickname(nickname);
+    this.scheduleNicknameSave(nickname);
   },
   onNickname(e) {
-    const nickname = ((e.detail && e.detail.value) || '').trim();
-    this.setData({ nickname });
+    const nickname = this._pickNickname(
+      e.detail && e.detail.value,
+      this._pendingNickname,
+      this.data.nickname,
+    );
+    if (!nickname) return;
+    this._rememberNickname(nickname);
+    this.scheduleNicknameSave(nickname);
   },
-  async saveProfileTap() {
-    const nickname = (this.data.nickname || '').trim();
-    const avatarUrl = this.data.avatarUrl || '';
-    if (!nickname && !avatarUrl) {
-      wx.showToast({ title: '请先点选头像或昵称', icon: 'none' });
+  onNicknameReview(e) {
+    const pass = !!(e.detail && e.detail.pass);
+    const timeout = !!(e.detail && e.detail.timeout);
+    // review 事件本身不含昵称值；有 pending/data 才自动存。无值时请点「保存昵称」(form)。
+    const nickname = this._pickNickname(
+      e.detail && (e.detail.value || e.detail.nickname),
+      this._pendingNickname,
+      this.data.nickname,
+    );
+    if (!pass && !timeout) {
+      wx.showToast({ title: '昵称未通过微信校验', icon: 'none' });
       return;
     }
+    if (nickname) {
+      this._rememberNickname(nickname);
+      this.scheduleNicknameSave(nickname);
+    } else if (pass) {
+      wx.showToast({ title: '请再点「保存昵称」', icon: 'none' });
+    }
+  },
+  /** form submit：唯一可靠拿到「用微信昵称」回填值的路径（不依赖 bindinput） */
+  onNicknameFormSubmit(e) {
+    const formNick = e.detail && e.detail.value && e.detail.value.nickname;
+    const nickname = this._pickNickname(formNick, this._pendingNickname, this.data.nickname);
+    if (!nickname) {
+      wx.showToast({ title: '请先填写或点选微信昵称', icon: 'none' });
+      return;
+    }
+    this._rememberNickname(nickname);
+    this.persistProfile({ nickname });
+  },
+  scheduleNicknameSave(nickname) {
+    if (!nickname) return;
+    if (this._nickSaveTimer) clearTimeout(this._nickSaveTimer);
+    this._nickSaveTimer = setTimeout(() => {
+      this._nickSaveTimer = null;
+      this.persistProfile({ nickname });
+    }, 120);
+  },
+  async onGetPhoneNumber(e) {
+    const detail = (e && e.detail) || {};
+    if (detail.errno === 1400001) {
+      wx.showToast({ title: '手机号额度不足', icon: 'none' });
+      return;
+    }
+    if (!detail.code) {
+      const denied = (detail.errMsg || '').indexOf('deny') >= 0 || (detail.errMsg || '').indexOf('auth deny') >= 0;
+      wx.showToast({ title: denied ? '已取消授权' : '无法获取微信手机号', icon: 'none' });
+      return;
+    }
+    this.setData({ phoneBinding: true });
     try {
-      const { avatarUrl: persisted, nickname: nick } = await saveProfileWithAvatarUpload({
+      const me = await request({
+        url: '/api/auth/me/phone',
+        method: 'POST',
+        data: { code: detail.code },
+      });
+      const phone = (me && me.phone) || '';
+      if (phone) this.setData({ phone });
+      wx.showToast({ title: phone ? '手机号已绑定' : '已处理', icon: 'success' });
+    } catch (err) {
+      wx.showToast({
+        title: (err && err.message) || '微信手机号不可用',
+        icon: 'none',
+      });
+    } finally {
+      this.setData({ phoneBinding: false });
+    }
+  },
+  /** 选完微信头像/昵称后自动上传并 PATCH；昵称不附带临时头像，避免上传失败拖垮保存 */
+  async persistProfile(partial) {
+    if (this._profileSaveChain) {
+      try { await this._profileSaveChain; } catch (e) { /* 串行下一次 */ }
+    }
+    const run = this._doPersistProfile(partial);
+    this._profileSaveChain = run.finally(() => {
+      if (this._profileSaveChain === run) this._profileSaveChain = null;
+    });
+    return run;
+  },
+  async _doPersistProfile(partial) {
+    const nickname = partial.nickname != null
+      ? String(partial.nickname).trim()
+      : undefined;
+    let avatarUrl = partial.avatarUrl != null
+      ? partial.avatarUrl
+      : undefined;
+    // 只改昵称：绝不带上页面里可能残留的 wxfile 临时头像
+    const uploadAvatarIfTemp = partial.avatarUrl != null;
+    if (!uploadAvatarIfTemp) {
+      avatarUrl = undefined;
+    }
+    if (!(nickname || avatarUrl)) return;
+    this.setData({ profileSaving: true });
+    try {
+      const saved = await saveProfileWithAvatarUpload({
         nickname: nickname || undefined,
         avatarUrl: avatarUrl || undefined,
+        uploadAvatarIfTemp,
       });
       const patch = {};
-      if (persisted) patch.avatarUrl = persisted;
-      if (nick != null) patch.nickname = nick;
-      if (Object.keys(patch).length) this.setData(patch);
-      wx.showToast({ title: '已保存', icon: 'success' });
+      const serverAvatar = stableMediaUrl(
+        (saved.me && saved.me.avatarUrl) || saved.avatarUrl || '',
+      ) || '';
+      if (serverAvatar) {
+        patch.avatarUrl = serverAvatar;
+      } else if (isTempAvatarPath(this.data.avatarUrl)) {
+        // 临时头像未上传成功：去掉 wxfile，避免下次误带；保留空以显示占位
+        patch.avatarUrl = '';
+      }
+      if (saved.nickname != null) patch.nickname = saved.nickname;
+      if (saved.phone != null) patch.phone = saved.phone;
+      const nextNick = patch.nickname != null ? patch.nickname : (this.data.nickname || '');
+      const nextAvatar = patch.avatarUrl != null ? patch.avatarUrl : (this.data.avatarUrl || '');
+      patch.needProfileGuide = !nextNick || !nextAvatar || isTempAvatarPath(nextAvatar);
+      this.setData(patch);
+      if (saved.avatarUploadFailed && nickname) {
+        wx.showToast({ title: '昵称已保存（头像待重选）', icon: 'none' });
+      } else {
+        wx.showToast({ title: '已保存', icon: 'success' });
+      }
     } catch (e) {
-      wx.showToast({ title: e.message || '保存失败', icon: 'none' });
+      wx.showToast({ title: (e && e.message) || '保存失败', icon: 'none' });
+    } finally {
+      this.setData({ profileSaving: false });
     }
   },
   pickContactQr() {
@@ -106,9 +270,7 @@ Page({
       success: async (res) => {
         const path = res.tempFiles && res.tempFiles[0] && res.tempFiles[0].tempFilePath;
         if (!path) return;
-        // 本地临时路径先直接回写（生产可改为上传 media）；小程序可展示本地/https
         try {
-          // 若已有上传接口则优先；否则用本地路径仅开发可见——改为上传到商品无关的 media
           const app = getApp();
           const baseUrl = (app.globalData && app.globalData.baseUrl) || '';
           const token = app.globalData.token || wx.getStorageSync('token') || '';
@@ -129,7 +291,9 @@ Page({
               fail: reject,
             });
           });
-          const url = upload.url || upload.publicUrl || upload.avatarUrl || path;
+          const raw = upload.url || upload.publicUrl || upload.avatarUrl || '';
+          const url = stableMediaUrl(raw) || raw;
+          if (!url || isTempAvatarPath(url)) throw new Error('上传未返回可访问地址');
           await request({
             url: '/api/tenants/current/contact-qr',
             method: 'PATCH',
@@ -138,7 +302,6 @@ Page({
           this.setData({ contactQrUrl: url });
           wx.showToast({ title: '二维码已更新', icon: 'none' });
         } catch (e) {
-          // 无上传接口时：直接存临时路径不可跨端，提示
           wx.showToast({ title: (e && e.message) || '请配置媒体上传', icon: 'none' });
         }
       },
@@ -153,115 +316,18 @@ Page({
       wx.showToast({ title: e.message || '失败', icon: 'none' });
     }
   },
-  async onAllowDownloadTap(e) {
-    const v = e.currentTarget.dataset.v;
-    const allow = v === '1' || v === 1;
-    try {
-      await request({
-        url: '/api/tenants/current/allow-customer-download',
-        method: 'PATCH',
-        data: { allowCustomerDownload: allow },
-      });
-      this.setData({ allowCustomerDownload: allow });
-      wx.showToast({ title: allow ? '已允许客户存图' : '已禁止客户存图', icon: 'none' });
-    } catch (err) {
-      wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' });
-    }
-  },
-  onClCode(e) { this.setData({ clCode: e.detail.value }); },
-  onClName(e) { this.setData({ clName: e.detail.value }); },
-  onClRank(e) { this.setData({ clRank: e.detail.value }); },
-  onClDefault(e) { this.setData({ clDefault: !!e.detail.value.length }); },
-  async addCustomerLevel() {
-    try {
-      await request({
-        url: '/api/levels/customer',
-        method: 'POST',
-        data: {
-          code: this.data.clCode.trim(),
-          name: this.data.clName.trim(),
-          rank: parseInt(this.data.clRank, 10) || 0,
-          isDefault: this.data.clDefault,
-        },
-      });
-      this.setData({ clCode: '', clName: '', clRank: '1', clDefault: false });
-      this.load();
-      wx.showToast({ title: '已添加' });
-    } catch (e) {
-      wx.showToast({ title: e.message || '失败', icon: 'none' });
-    }
-  },
-  async setDefaultCl(e) {
-    const id = e.currentTarget.dataset.id;
-    try {
-      await request({
-        url: `/api/levels/customer/${id}`,
-        method: 'PATCH',
-        data: { isDefault: true },
-      });
-      this.load();
-    } catch (err) {
-      wx.showToast({ title: err.message || '失败', icon: 'none' });
-    }
-  },
-  async deleteCl(e) {
-    const id = e.currentTarget.dataset.id;
-    try {
-      await request({ url: `/api/levels/customer/${id}`, method: 'DELETE' });
-      this.load();
-    } catch (err) {
-      wx.showToast({ title: err.message || '失败', icon: 'none' });
-    }
-  },
-  onPlCode(e) { this.setData({ plCode: e.detail.value }); },
-  onPlName(e) { this.setData({ plName: e.detail.value }); },
-  onPlRank(e) { this.setData({ plRank: e.detail.value }); },
-  onPlPolicy(e) { this.setData({ plPolicy: e.detail.value }); },
-  onPlMinRank(e) { this.setData({ plMinRank: e.detail.value }); },
-  async addProductLevel() {
-    try {
-      await request({
-        url: '/api/levels/product',
-        method: 'POST',
-        data: {
-          code: this.data.plCode.trim(),
-          name: this.data.plName.trim(),
-          rank: parseInt(this.data.plRank, 10) || 0,
-          defaultSharePolicy: this.data.plPolicy,
-          minCustomerRank: this.data.plMinRank === '' ? null : parseInt(this.data.plMinRank, 10),
-        },
-      });
-      this.setData({ plCode: '', plName: '', plRank: '0', plPolicy: 'designated_only', plMinRank: '' });
-      this.load();
-      wx.showToast({ title: '已添加' });
-    } catch (e) {
-      wx.showToast({ title: e.message || '失败', icon: 'none' });
-    }
-  },
-  async deletePl(e) {
-    const id = e.currentTarget.dataset.id;
-    try {
-      await request({ url: `/api/levels/product/${id}`, method: 'DELETE' });
-      this.load();
-    } catch (err) {
-      wx.showToast({ title: err.message || '失败', icon: 'none' });
-    }
-  },
-  onInviteRole(e) {
-    this.setData({ inviteRole: e.detail.value });
-  },
   async createInvite() {
     wx.showLoading({ title: '生成中', mask: true });
     try {
       const inv = await request({
         url: '/api/invites',
         method: 'POST',
-        data: { role: this.data.inviteRole || 'staff', maxUses: 1, expiresInDays: 7 },
+        data: { role: 'staff', maxUses: 3, expiresInDays: 7 },
       });
       wx.hideLoading();
       this.setData({ latestInvite: inv });
-      this.load();
-      wx.showToast({ title: '已生成', icon: 'success' });
+      await this.load();
+      wx.showToast({ title: '已生成，列表点邀请复制', icon: 'none' });
     } catch (e) {
       wx.hideLoading();
       wx.showToast({ title: (e && e.message) || '失败', icon: 'none' });
@@ -272,7 +338,7 @@ Page({
     if (!code) return;
     wx.setClipboardData({
       data: String(code),
-      success: () => wx.showToast({ title: '已复制邀请码', icon: 'none' }),
+      success: () => wx.showToast({ title: '已复制邀请码，发给同事', icon: 'none' }),
     });
   },
   async revokeInvite(e) {
@@ -289,5 +355,25 @@ Page({
       wx.showToast({ title: (err && err.message) || '失败', icon: 'none' });
     }
   },
-
+  kickMember(e) {
+    const id = e.currentTarget.dataset.id;
+    const name = e.currentTarget.dataset.name || '该员工';
+    if (!id) return;
+    wx.showModal({
+      title: '踢除员工',
+      content: `确定踢除「${name}」？踢后不能再以员工身份进入档口。`,
+      confirmText: '踢除',
+      confirmColor: '#ef4444',
+      success: async (r) => {
+        if (!r.confirm) return;
+        try {
+          await request({ url: `/api/invites/members/${id}/disable`, method: 'POST' });
+          this.load();
+          wx.showToast({ title: '已踢除', icon: 'none' });
+        } catch (err) {
+          wx.showToast({ title: (err && err.message) || '踢除失败', icon: 'none' });
+        }
+      },
+    });
+  },
 });

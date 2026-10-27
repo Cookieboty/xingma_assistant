@@ -80,22 +80,52 @@ export class ProductsService {
     return uniq.filter((id) => ok.has(id));
   }
 
-    private async firstCoverUrl(tenantId: string, p: ProductRec): Promise<string> {
-    if (!(this.dataSource && process.env.DB_ENABLED === 'true')) return '';
+  private async firstCoverUrl(tenantId: string, p: ProductRec): Promise<string> {
+    const map = await this.batchFirstCoverUrls(tenantId, [p]);
+    return map.get(p.id) || '';
+  }
+
+  /** Batch cover URLs for list endpoints — one media query instead of N findOne loops */
+  private async batchFirstCoverUrls(tenantId: string, products: ProductRec[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!(this.dataSource && process.env.DB_ENABLED === 'true') || !products.length) return out;
     const repo = this.dataSource.getRepository(MediaAsset);
-    const coverIds = p.coverMediaIds || [];
-    for (const coverId of coverIds) {
-      const row = await repo.findOne({ where: { tenantId, id: coverId, status: 'active' } });
-      if (row && !this.isPromoAsset(row)) return this.publicUrl(row.objectKey);
+    const coverIds = [...new Set(products.flatMap((p) => p.coverMediaIds || []).filter(Boolean))];
+    const productIds = products.map((p) => p.id);
+    const [byCover, byProduct] = await Promise.all([
+      coverIds.length
+        ? repo.find({ where: { tenantId, id: In(coverIds), status: 'active' } })
+        : Promise.resolve([] as MediaAsset[]),
+      repo.find({
+        where: { tenantId, productId: In(productIds), status: 'active', type: 'image' },
+        order: { createdAt: 'ASC' },
+        take: Math.min(products.length * 20, 400),
+      }),
+    ]);
+    const coverMap = new Map(byCover.map((r) => [r.id, r]));
+    const productMedia = new Map<string, MediaAsset[]>();
+    for (const r of byProduct) {
+      if (!r.productId) continue;
+      const list = productMedia.get(r.productId) || [];
+      list.push(r);
+      productMedia.set(r.productId, list);
     }
-    // 兜底：商品图里第一张非宣传图
-    const rows = await repo.find({
-      where: { tenantId, productId: p.id, status: 'active', type: 'image' },
-      order: { createdAt: 'ASC' },
-      take: 20,
-    });
-    const hit = rows.find((r) => !this.isPromoAsset(r));
-    return hit ? this.publicUrl(hit.objectKey) : '';
+    for (const p of products) {
+      let url = '';
+      for (const cid of p.coverMediaIds || []) {
+        const row = coverMap.get(cid);
+        if (row && !this.isPromoAsset(row)) {
+          url = this.publicUrl(row.objectKey);
+          break;
+        }
+      }
+      if (!url) {
+        const hit = (productMedia.get(p.id) || []).find((r) => !this.isPromoAsset(r));
+        if (hit) url = this.publicUrl(hit.objectKey);
+      }
+      if (url) out.set(p.id, url);
+    }
+    return out;
   }
 
   private storageRoot() {
@@ -154,16 +184,16 @@ export class ProductsService {
     return { suggestion };
   }
 
-    /** 员工列表（可筛选） */
+  /** 员工列表（可筛选） */
   async listForStaff(tenantId: string, query?: ProductListQuery) {
     const { items, total } = await this.repo.list(tenantId, query);
-    const withMeta = await Promise.all(
-      items.map(async (p) => {
-        const skus = await this.repo.listSkus(tenantId, p.id);
-        const coverUrl = await this.firstCoverUrl(tenantId, p);
-        return { ...this.toStaffDto(p, skus), coverUrl };
-      }),
-    );
+    if (!items.length) return { items: [], total };
+    const coverMap = await this.batchFirstCoverUrls(tenantId, items);
+    const skuLists = await Promise.all(items.map((p) => this.repo.listSkus(tenantId, p.id)));
+    const withMeta = items.map((p, i) => ({
+      ...this.toStaffDto(p, skuLists[i] || []),
+      coverUrl: coverMap.get(p.id) || '',
+    }));
     return { items: withMeta, total };
   }
 
@@ -173,7 +203,7 @@ export class ProductsService {
    */
   async listForCustomer(
     user: AuthContext,
-    opts?: { shareEventId?: string; boundCustomerId?: string; boundCustomerIds?: string[] } & ProductListQuery,
+    opts?: { shareEventId?: string; boundCustomerId?: string; boundCustomerIds?: string[]; publicOnly?: boolean } & ProductListQuery,
   ) {
     const { items } = await this.repo.list(user.tenantId, {
       ...opts,
@@ -185,10 +215,27 @@ export class ProductsService {
       opts?.boundCustomerIds,
       opts?.boundCustomerId,
     );
-    const out = [];
+    const levelCache = new Map<string, { policy: SharePolicy; minRank: number }>();
+    const resolveLevel = async (p: ProductRec) => {
+      const key = `${p.levelId || ''}|${p.sharePolicy || ''}`;
+      if (levelCache.has(key)) return levelCache.get(key)!;
+      let policy: SharePolicy = (p.sharePolicy as SharePolicy) || 'designated_only';
+      let minRank = 0;
+      try {
+        const level = await this.levels.getProductLevel(user.tenantId, p.levelId);
+        if (!p.sharePolicy) policy = (level.defaultSharePolicy as SharePolicy) || 'designated_only';
+        minRank = level.minCustomerRank ?? 0;
+      } catch {
+        /* keep defaults */
+      }
+      const rec = { policy, minRank };
+      levelCache.set(key, rec);
+      return rec;
+    };
+    const visible: ProductRec[] = [];
     for (const p of items) {
-      const policy = await this.resolveSharePolicy(user.tenantId, p);
-      const minRank = await this.resolveMinRank(user.tenantId, p);
+      const { policy, minRank } = await resolveLevel(p);
+      if (opts?.publicOnly && policy !== 'open') continue;
       const verdict = this.access.canView(user, {
         productId: p.id,
         sharePolicy: policy,
@@ -198,11 +245,45 @@ export class ProductsService {
         boundCustomerIds: boundIds,
       });
       if (!verdict.ok) continue;
-      const skus = await this.repo.listSkus(user.tenantId, p.id);
-      const coverUrl = await this.firstCoverUrl(user.tenantId, p);
-      out.push({ ...this.toPublicDto(p, skus, true), coverUrl });
+      visible.push(p);
     }
+    if (!visible.length) return { items: [], total: 0 };
+    const coverMap = await this.batchFirstCoverUrls(user.tenantId, visible);
+    const skuLists = await Promise.all(visible.map((p) => this.repo.listSkus(user.tenantId, p.id)));
+    const out = visible.map((p, i) => ({
+      ...this.toPublicDto(p, skuLists[i] || [], true),
+      coverUrl: coverMap.get(p.id) || '',
+    }));
     return { items: out, total: out.length };
+  }
+
+  /** Light existence+ACL check without resolving images (listSets / promo polls). */
+  async assertProductReadable(
+    user: AuthContext,
+    productId: string,
+    opts?: { shareEventId?: string; boundCustomerId?: string; boundCustomerIds?: string[] },
+  ) {
+    const p = await this.repo.findById(user.tenantId, productId);
+    if (!p) throw new NotFoundException('商品不存在');
+    if (user.role === 'owner' || user.role === 'staff') return p;
+    const policy = await this.resolveSharePolicy(user.tenantId, p);
+    const minRank = await this.resolveMinRank(user.tenantId, p);
+    const boundIds = await this.resolveShareBoundIds(
+      user.tenantId,
+      opts?.shareEventId,
+      opts?.boundCustomerIds,
+      opts?.boundCustomerId,
+    );
+    const verdict = this.access.canView(user, {
+      productId: p.id,
+      sharePolicy: policy,
+      minCustomerRank: minRank,
+      viaShareEventId: opts?.shareEventId,
+      boundCustomerId: opts?.boundCustomerId,
+      boundCustomerIds: boundIds,
+    });
+    if (!verdict.ok) throw new ForbiddenException(`无权查看该商品: ${verdict.reason}`);
+    return p;
   }
 
   async getDetail(
@@ -379,6 +460,7 @@ export class ProductsService {
     ];
     return {
       styleNo: p.styleNo,
+      sellerSku: p.styleNo,
       name: p.name,
       material: p.material,
       colors,
@@ -406,6 +488,9 @@ export class ProductsService {
 
   async update(user: AuthContext, id: string, input: UpdateProductInput) {
     this.assertStaff(user);
+    if (!(input as any).styleNo && (input as any).sellerSku) {
+      (input as any).styleNo = String((input as any).sellerSku).trim();
+    }
     if (input.styleNo) {
       const clash = await this.repo.findByStyleNo(user.tenantId, input.styleNo.trim());
       if (clash && clash.id !== id) throw new ConflictException('款号在本租户内已存在');
@@ -426,8 +511,9 @@ export class ProductsService {
   }
 
   /**
-   * 发品异步任务：按颜色列表整体替换 SKU（一色一价，size=null）。
-   * 先 update 商品字段再调本方法，保证 skuCode 用新款号。
+   * 按颜色列表整体替换/对齐 SKU（一色一价，size=null）。
+   * 同色更新 in-place；缺的新增（优先 revive 软删行）；多余的软删并释放 uk_sku。
+   * 避免「全删再插」撞 product_skus.uk_sku。
    */
   async replaceColorSkus(
     user: AuthContext,
@@ -443,24 +529,52 @@ export class ProductsService {
       throw new BadRequestException('颜色名不能重复');
     }
     const existing = await this.repo.listSkus(user.tenantId, productId);
+    const byColor = new Map<string, (typeof existing)[number]>();
     for (const s of existing) {
-      await this.repo.removeSku(user.tenantId, s.id);
+      const c = (s.color || '').trim();
+      if (c && !byColor.has(c)) byColor.set(c, s);
     }
-    const created = [];
+    const kept: Awaited<ReturnType<IProductsRepository['addSku']>>[] = [];
+    const usedIds = new Set<string>();
     for (const s of skus) {
       const color = s.color.trim();
-      created.push(
-        await this.repo.addSku(user.tenantId, productId, {
-          color,
-          size: null,
-          price: s.price != null && String(s.price).trim() !== '' ? String(s.price).trim() : null,
-          stock: 0,
-          status: 'active',
-          skuCode: `${p.styleNo}-${color}`,
-        }),
+      const price =
+        s.price != null && String(s.price).trim() !== '' ? String(s.price).trim() : null;
+      const skuCode = `${p.styleNo}-${color}`;
+      const payload = {
+        color,
+        size: null as string | null,
+        price,
+        stock: 0,
+        status: 'active' as const,
+        skuCode,
+      };
+      const old = byColor.get(color);
+      if (old) {
+        const updated = await this.repo.updateSku(user.tenantId, old.id, payload);
+        if (updated) kept.push(updated);
+        usedIds.add(old.id);
+        continue;
+      }
+      const revived = await this.repo.reviveSkuByCode(
+        user.tenantId,
+        productId,
+        skuCode,
+        payload,
       );
+      if (revived) {
+        kept.push(revived);
+        usedIds.add(revived.id);
+        continue;
+      }
+      kept.push(await this.repo.addSku(user.tenantId, productId, payload));
     }
-    return created;
+    for (const s of existing) {
+      if (!usedIds.has(s.id)) {
+        await this.repo.removeSku(user.tenantId, s.id);
+      }
+    }
+    return kept;
   }
 
   /** 删除=下架 */
@@ -471,9 +585,12 @@ export class ProductsService {
     return { ok: true, id, status: updated.status };
   }
 
-  async batchStatus(user: AuthContext, ids: string[], status: 'on_sale' | 'off_sale' | 'draft') {
+  async batchStatus(user: AuthContext, ids: string[], status: 'on_sale' | 'off_sale') {
     this.assertStaff(user);
     if (!ids?.length) throw new BadRequestException('ids 不能为空');
+    if (status !== 'on_sale' && status !== 'off_sale') {
+      throw new BadRequestException('status 仅支持 on_sale / off_sale');
+    }
     const n = await this.repo.batchSetStatus(user.tenantId, ids, status);
     return { ok: true, affected: n, status };
   }
@@ -601,7 +718,9 @@ export class ProductsService {
   }
 
   private validateProductInput(input: CreateProductInput) {
-    if (!input.styleNo?.trim()) throw new BadRequestException('款号必填');
+    const styleNo = (input.styleNo || (input as any).sellerSku || '').trim();
+    if (!styleNo) throw new BadRequestException('款号必填');
+    input.styleNo = styleNo;
     if (!input.name?.trim()) throw new BadRequestException('名称必填');
     if (!input.levelId) throw new BadRequestException('商品等级必填');
   }
@@ -700,6 +819,7 @@ export class ProductsService {
     return {
       id: p.id,
       styleNo: p.styleNo,
+      sellerSku: p.styleNo,
       name: p.name,
       description: p.description,
       material: p.material,
@@ -738,6 +858,7 @@ export class ProductsService {
     return {
       id: p.id,
       styleNo: p.styleNo,
+      sellerSku: p.styleNo,
       name: p.name,
       description: p.description,
       material: p.material,

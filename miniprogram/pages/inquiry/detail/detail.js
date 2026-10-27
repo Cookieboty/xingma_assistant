@@ -1,9 +1,10 @@
 const { request } = require('../../../utils/request');
 function statusLabel(s) {
   if (s === 'handled') return '已处理';
+  if (s === 'in_progress') return '正在沟通';
   if (s === 'replied') return '已回复';
   if (s === 'closed') return '已关闭';
-  return '待处理';
+  return '待沟通';
 }
 Page({
   data: { mode: '', productId: '', content: '', inquiry: null },
