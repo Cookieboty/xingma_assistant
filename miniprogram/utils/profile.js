@@ -41,7 +41,21 @@ function hasContactInfo(me) {
   return !!(phone || name);
 }
 
+/** 客户列表可见身份：头像或昵称任一即可 */
+function hasAvatarOrNickname(me) {
+  if (!me) return false;
+  const avatar = String(me.avatarUrl || '').trim();
+  const name = String(me.nickname || '').trim();
+  return !!(avatar || name);
+}
 
+/** 强制授权目标：头像与昵称缺一不可 */
+function hasAvatarAndNickname(me) {
+  if (!me) return false;
+  const avatar = String(me.avatarUrl || '').trim();
+  const name = String(me.nickname || '').trim();
+  return !!(avatar && name);
+}
 
 /** 返回仍缺的资料字段：avatar / nickname / phone（已有则不返回，避免反复打扰） */
 function missingProfileFields(me) {
@@ -268,6 +282,8 @@ module.exports = {
   isTempAvatarPath,
   stableMediaUrl,
   hasContactInfo,
+  hasAvatarOrNickname,
+  hasAvatarAndNickname,
   isContactPrompted,
   markContactPrompted,
   CONTACT_PROMPTED_KEY,

@@ -12,8 +12,10 @@ export class MemoryCustomersRepository implements ICustomersRepository {
 
   async list(tenantId: string, opts?: { levelId?: string; q?: string }) {
     let items = [...this.byId.values()].filter((c) => c.tenantId === tenantId);
-    // 列表仅展示留了可用手机号的客户
-    items = items.filter((c) => !!(c.phone || '').trim());
+    // 列表：头像或昵称任一即可；两者皆无则不展示（不强制手机、不去重）
+    items = items.filter(
+      (c) => !!(String(c.avatarUrl || '').trim() || String(c.nickname || '').trim()),
+    );
     if (opts?.levelId) items = items.filter((c) => c.levelId === opts.levelId);
     if (opts?.q) {
       const q = opts.q.toLowerCase();

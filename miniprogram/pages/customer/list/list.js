@@ -76,8 +76,12 @@ Page({
       let raw = Array.isArray(res) ? res : (res.items || res || []);
       // /api/customers 已附带 unread-summary 字段，避免再打一遍
       let list = (raw || []).map(enrich);
-      // 未留可用手机号（无法联系）的客户不展示；与 API 一致
-      list = list.filter((c) => !!(c.phone || '').trim());
+      // 头像或昵称任一即可；两者皆无则不展示（与 API 一致；不去重）
+      list = list.filter((c) => {
+        const avatar = (c.avatarUrl || '').trim();
+        const nick = (c.nickname || c.contactName || '').trim();
+        return !!(avatar || nick);
+      });
       if (this.data.filter === 'pending') {
         list = list.filter((c) => c.hasPendingInquiry || c.hasUnreadInquiry);
       }
