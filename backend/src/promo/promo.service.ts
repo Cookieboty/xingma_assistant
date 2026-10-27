@@ -8,13 +8,13 @@ import { AuthContext } from '../common/interfaces/auth-context.interface';
 import { MediaAsset } from '../common/entities/media-asset.entity';
 import { PromoSetEntity, PromoSetImage, ImageGenCallRecord, OutfitCompareRecord } from '../common/entities/promo-set.entity';
 import { newId } from '../common/utils/id';
+import { mapPool } from '../common/utils/map-pool';
 import { ProductsService } from '../products/products.service';
 import { ImageGenClient } from './image-gen.client';
 import { MODELS, SIZES, TEMPLATES, findTemplate, templateDto, resolveOption, buildStyleRefPrompt, StyleStrength, isVideoTemplate, listTemplatesByKind, VIDEO_BGM_PRESETS, findVideoBgm } from './promo.templates';
 import { enrichPoseSceneText } from './pose-scene-enrich';
 import { analyzeStyleRefs, styleKeywordsToPromptZh, StyleKeywordsZh } from './style-ref-analyze';
-import { prepareRefsForCategory, buildPromptZh } from './garment-ref-prepare';
-import type { ProductRefAnalysis, GarmentRefKind } from './garment-ref-prepare';
+import { buildPromptZh } from './garment-ref-prepare';
 import { VisionClient } from '../vision/vision.client';
 import { JobsService } from '../jobs/jobs.service';
 import { registerPromoImageHandler } from '../jobs/handlers/promo-image.handler';
@@ -1039,12 +1039,12 @@ export class PromoService implements OnModuleInit {
     try {
       let r: { buffer?: Buffer; mime: string; via: string; videoId: string; videoUrl?: string; seconds?: number; size?: string };
       if (engine === 'lkb') {
-        // Seedance 固定通道对多参考图更易 503；成功样本均为 1 张首帧。默认只传 1 张。
+        // 商品参考图一律 reference_image（语义=参考图），不用 first_frame；taskType=FREE。
+        // 默认最多 3 张，降低上游压力，可调 VIDEO_LKB_MAX_REF_IMAGES。
         const maxLkbRefs = Math.max(
           1,
-          Math.min(9, parseInt(process.env.VIDEO_LKB_MAX_REF_IMAGES || '1', 10) || 1),
+          Math.min(3, parseInt(process.env.VIDEO_LKB_MAX_REF_IMAGES || '3', 10) || 3),
         );
-        // 优先自有 OSS key 的公网 URL（xy-tradex），外部 HTTPS（puyuanxing 等）靠后
         const ranked = refs
           .map((r, i) => ({ r, i, url: this.publicUrl(r!.objectKey) }))
           .filter((x) => /^https?:\/\//i.test(x.url))
@@ -1059,43 +1059,17 @@ export class PromoService implements OnModuleInit {
             `LKB refs capped ${refUrls.length}→${useUrls.length} (VIDEO_LKB_MAX_REF_IMAGES=${maxLkbRefs})`,
           );
         }
-        const attachments: LkbVideoAttachment[] = [];
-        if (useUrls.length) {
-          attachments.push({
-            type: 'image',
-            uri: useUrls[0],
-            mediaType: 'image/jpeg',
-            name: 'first_frame',
-            metadata: { role: 'first_frame' },
-          });
-          for (let i = 1; i < useUrls.length; i++) {
-            attachments.push({
-              type: 'image',
-              uri: useUrls[i],
-              mediaType: 'image/jpeg',
-              name: `ref_${i}`,
-              metadata: { role: 'reference_image' },
-            });
-          }
-        }
-        const taskType = attachments.some((a) => a.metadata.role === 'first_frame')
-          ? 'FIRST_LAST_FRAME'
-          : 'FREE';
-        if (taskType === 'FREE' && useUrls.length && !attachments.length) {
-          for (let i = 0; i < useUrls.length; i++) {
-            attachments.push({
-              type: 'image',
-              uri: useUrls[i],
-              mediaType: 'image/jpeg',
-              name: `ref_${i}`,
-              metadata: { role: 'reference_image' },
-            });
-          }
-        }
+        const attachments: LkbVideoAttachment[] = useUrls.map((uri, i) => ({
+          type: 'image' as const,
+          uri,
+          mediaType: 'image/jpeg',
+          name: `product_ref_${i + 1}`,
+          metadata: { role: 'reference_image' as const },
+        }));
         r = await this.lkbVideo.generate({
           prompt: promptZh,
           duration: seconds,
-          taskType,
+          taskType: 'FREE',
           attachments,
           generateAudio: true,
           watermark: false,
@@ -1723,75 +1697,31 @@ export class PromoService implements OnModuleInit {
 
     // 商品参考图：ensureLocal（OSS→本地）；缺一不可
     const refPaths: string[] = [];
-    const refInputs: Array<{
-      localPath: string;
-      objectKey?: string;
-      assetId?: string;
-      filename?: string;
-      priorKind?: GarmentRefKind;
-      priorRoleZh?: string;
-      priorRoleEn?: string;
-    }> = [];
-    const cachedAnalysis = (product as any)?.refAnalysis as ProductRefAnalysis | null | undefined;
-    const cachedByAsset = new Map(
-      (cachedAnalysis?.assets || []).filter((a) => a?.assetId).map((a) => [a.assetId, a]),
-    );
     for (const r of refs) {
       const local = await this.ensureLocal(r!.objectKey);
       if (!local) throw new Error(`参考图本地不可用：${r!.objectKey}`);
       refPaths.push(local);
-      const prior = cachedByAsset.get(r!.id) || ((r as any).meta as any) || null;
-      const priorKind = prior?.kind as GarmentRefKind | undefined;
-      refInputs.push({
-        localPath: local,
-        objectKey: r!.objectKey,
-        assetId: r!.id,
-        filename: (r as any).filename || (r as any).originalName,
-        priorKind:
-          priorKind === 'hang' || priorKind === 'detail' || priorKind === 'unusable' ? priorKind : undefined,
-        priorRoleZh: prior?.roleZh ? String(prior.roleZh) : undefined,
-        priorRoleEn: prior?.roleEn ? String(prior.roleEn) : undefined,
-      });
     }
-    const canReuseCached =
-      !!cachedAnalysis?.analyzedAt &&
-      refInputs.length > 0 &&
-      refInputs.every((i) => !!i.priorKind);
 
     const keyDir = `tenants/${user.tenantId}/products/${product.styleNo}/promo/${legacy.id}`;
     fs.mkdirSync(path.join(this.storageRoot(), keyDir), { recursive: true });
 
-    // 羊毛衫专用标准流程：分类 → 宫格补细节 → 角色标注 → 硬约束；非羊毛衫/读不全拒生
+    // 生图路径不再跑 garment_prep（分类/宫格/读衣）：上传时已完成；此处直接把商品参考图交给下游。
     const keptDone0 = items.filter((x) => x.status === 'done').length;
     await opts?.onProgress?.({
       percent: 8,
       step: 'prepare_refs',
       message: keptDone0
         ? `准备参考图（已保留 ${keptDone0}/${items.length}）`
-        : '识别羊毛衫参考图…',
+        : '准备参考图…',
       done: keptDone0,
       total: items.length,
     });
-    const garmentPrep = await prepareRefsForCategory('knitwear', this.vision, refInputs, {
-      workDir: path.join(this.storageRoot(), keyDir, '_knitwear_grid'),
-      reuseCached: canReuseCached,
-      cachedAnalysis: canReuseCached ? cachedAnalysis || null : null,
-    });
-    if (!garmentPrep.ok) {
-      throw new Error(garmentPrep.reasonZh || '羊毛衫参考图不可用，已拒绝生图');
-    }
-    this.logger.log(
-      `knitwear-prep via=${garmentPrep.via} detail=${garmentPrep.detailSufficiency} refs=${garmentPrep.refs.length} classified=${garmentPrep.classified.length}`,
-    );
-    await opts?.appendEvent?.('garment_prep', '羊毛衫参考图准备完成', {
-      via: garmentPrep.via,
-      detailSufficiency: garmentPrep.detailSufficiency,
-      garmentDescZh: garmentPrep.garmentDescZh,
-      refKinds: garmentPrep.refs.map((r) => r.kind),
-      classified: garmentPrep.classified.map((c) => ({ kind: c.kind, roleZh: c.roleZh, objectKey: c.objectKey })),
+    await opts?.appendEvent?.('garment_prep', '跳过生图前读衣/宫格（沿用上传参考图）', {
+      via: 'skipped_at_gen',
+      refCount: refs.length,
     });
 
-    // 将硬约束 + 参考图角色写入每张待生图 prompt；中文原话成对留痕
     const styleKwZhForTrace = styleKeywordsToPromptZh(
       (input as any).styleKeywords,
       String((input as any).styleKeywordsText || '').trim() || undefined,
@@ -1801,8 +1731,6 @@ export class PromoService implements OnModuleInit {
         feature,
         poseText: poseTextZh,
         sceneText: sceneTextZh,
-        garmentDescZh: garmentPrep.garmentDescZh,
-        refRolesPromptZh: garmentPrep.refRolesPromptZh,
       }),
       styleKwZhForTrace ? `风格关键词：${styleKwZhForTrace}` : '',
     ]
@@ -1834,14 +1762,7 @@ export class PromoService implements OnModuleInit {
         wrapPass > 0
           ? `同动作×场景第 ${wrapPass + 1} 轮补充：相对前一轮改机位高度/裁切松紧/视线与手位，保证提示词与成片均不同；成衣不变。`
           : '';
-      const enrichedPrompt = [
-        it.prompt,
-        garmentPrep.garmentConstraintEn,
-        garmentPrep.refRolesPromptEn,
-        slotNudgeEn,
-        wrapNudgeEn,
-        regenNudgeEn,
-      ]
+      const enrichedPrompt = [it.prompt, slotNudgeEn, wrapNudgeEn, regenNudgeEn]
         .filter(Boolean)
         .join(' ');
       it.prompt = enrichedPrompt;
@@ -1917,16 +1838,10 @@ export class PromoService implements OnModuleInit {
         try {
           it.status = 'running';
           this.saveJob(legacy);
-          // 羊毛衫：prepared 挂拍/细节/宫格；多色时只用「该色」参考 + 细节（禁止混入其它色挂拍）
-          const prepPaths = garmentPrep.refs.map((r) => r.localPath);
-          let garmentRefs = prepPaths;
+          // 直接用商品参考图（不再经 garment_prep 宫格/分类）
+          let garmentRefs = refPaths.slice();
           if (isMultiColor && refPaths[it.index]) {
-            const colorPath = refPaths[it.index];
-            const detailOnly = garmentPrep.refs
-              .filter((r) => r.kind === 'detail' || r.kind === 'grid_cell')
-              .map((r) => r.localPath)
-              .filter((p) => p && p !== colorPath);
-            garmentRefs = [colorPath, ...detailOnly];
+            garmentRefs = [refPaths[it.index]];
           }
           const faceRefs = modelFaceLocal ? [modelFaceLocal] : [];
           const refsForShot = [...garmentRefs, ...faceRefs, ...stylePaths];
@@ -1963,10 +1878,8 @@ export class PromoService implements OnModuleInit {
             refObjectKeys,
             refCount: refsForShot.length,
             garmentPrep: {
-              via: garmentPrep.via,
-              detailSufficiency: garmentPrep.detailSufficiency,
-              garmentDescZh: garmentPrep.garmentDescZh,
-              refKinds: garmentPrep.refs.map((r) => r.kind),
+              via: 'skipped_at_gen',
+              refKinds: refs.map(() => 'product_ref'),
             },
           };
           try {
@@ -2098,30 +2011,16 @@ export class PromoService implements OnModuleInit {
       };
 
       const garmentUrlForSlot = (idx: number): string[] => {
-        // multi_color：严格 1:1 只用该色参考图；其它模板仍可传整组成衣
+        // multi_color：严格 1:1 只用该色参考图；其它模板传整组成衣（生图不再经 garment_prep）
         if (isMultiColor) {
           const r = refs[idx];
           if (r?.objectKey) {
             const u = this.oss.publicUrl(r.objectKey);
             if (/^https?:\/\//i.test(u)) return [u];
           }
-          // fallback：garmentPrep 同序
-          const prep = garmentPrep.refs[idx];
-          if (prep?.objectKey) {
-            const u = this.oss.publicUrl(prep.objectKey);
-            if (/^https?:\/\//i.test(u)) return [u];
-          }
           return [];
         }
-        const keys =
-          garmentPrep.refs
-            .map((r) => r.objectKey)
-            .filter((k): k is string => !!k)
-            .slice(0, 9) ||
-          refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
-        const use = keys.length
-          ? keys
-          : refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
+        const use = refs.map((r) => r!.objectKey).filter(Boolean).slice(0, 9);
         return use.map((k) => this.oss.publicUrl(k)).filter((u) => /^https?:\/\//i.test(u));
       };
 
@@ -2214,17 +2113,26 @@ export class PromoService implements OnModuleInit {
         }
       };
 
+      const slotConcurrency = Math.max(
+        1,
+        Math.min(3, parseInt(process.env.OUTFIT_SLOT_CONCURRENCY || '3', 10) || 3),
+      );
+
       if (isMultiColor) {
-        // 关键：每个颜色单独调一次 Agent（1 色参考 + 该色 prompt），避免整组一锅炖只出第一色
-        for (let i = 0; i < items.length; i++) {
-          const it = items[i];
-          if (this.itemHasResult(it)) continue;
+        // 关键：每色单独调 Agent；有界并发，避免串行 ~25s×N
+        let multiDone = 0;
+        await mapPool(items, slotConcurrency, async (it, i) => {
+          if (this.itemHasResult(it)) {
+            multiDone += 1;
+            return;
+          }
           const colorLabel = colorsAll[i] || '';
           const garmentUrls = garmentUrlForSlot(i);
           if (!garmentUrls.length) {
             it.status = 'failed';
             it.error = `多色展示第 ${i + 1} 色缺少参考图 URL`;
-            continue;
+            multiDone += 1;
+            return;
           }
           const combinedImages = [...garmentUrls, ...styleUrls].slice(0, 9);
           const promptLead = String(it.prompt || it.promptZh || '').trim();
@@ -2264,14 +2172,15 @@ export class PromoService implements OnModuleInit {
             await downloadExtToItem(it, String((it as any)._extUrl));
             delete (it as any)._extUrl;
           }
+          multiDone += 1;
           await opts?.onProgress?.({
-            percent: Math.min(98, 92 + Math.round(((i + 1) / items.length) * 6)),
+            percent: Math.min(98, 92 + Math.round((multiDone / items.length) * 6)),
             step: 'external_outfit',
-            message: `外部 Agent 生图 ${i + 1}/${items.length}`,
+            message: `外部 Agent 生图 ${multiDone}/${items.length}`,
             done: items.filter((x) => x.status === 'done').length,
             total: items.length,
           });
-        }
+        });
       } else {
         // 非多色：每槽单独调 Agent（与 multi_color 一致）。
         // 旧逻辑整组一次调用后按 urlIdx 分发；上游常只回 1 张 → Math.min 夹到同一 URL，多槽变成克隆。
@@ -2283,9 +2192,12 @@ export class PromoService implements OnModuleInit {
             ? items.slice()
             : items.filter((x) => !this.itemHasResult(x));
         let extFailAll = true;
-        for (let pi = 0; pi < pendingSlots.length; pi++) {
-          const it = pendingSlots[pi];
-          if (outfitEngine === 'external' && this.itemHasResult(it)) continue;
+        let slotsDone = 0;
+        await mapPool(pendingSlots, slotConcurrency, async (it, pi) => {
+          if (outfitEngine === 'external' && this.itemHasResult(it)) {
+            slotsDone += 1;
+            return;
+          }
           const promptLead = String(it.prompt || it.promptZh || '').trim();
           const slotNote =
             items.length > 1
@@ -2326,23 +2238,23 @@ export class PromoService implements OnModuleInit {
             },
           );
           if (ext.ok && ext.imageUrls.length) extFailAll = false;
-          // 每次调用只取本响应第 0 张，避免再按组内下标复用同一结果
           applyExternalToItem(it, ext, 0);
           if (outfitEngine === 'external' && (it as any)._extUrl) {
             await downloadExtToItem(it, String((it as any)._extUrl));
             delete (it as any)._extUrl;
           }
+          slotsDone += 1;
           {
             const okNow = items.filter((x) => x.status === 'done').length;
             await opts?.onProgress?.({
-              percent: Math.min(98, 92 + Math.round(((pi + 1) / Math.max(1, pendingSlots.length)) * 6)),
+              percent: Math.min(98, 92 + Math.round((slotsDone / Math.max(1, pendingSlots.length)) * 6)),
               step: 'external_outfit',
               message: `生图 ${okNow}/${items.length}`,
               done: okNow,
               total: items.length,
             });
           }
-        }
+        });
         if (outfitEngine === 'external' && pendingSlots.length && extFailAll) {
           throw new Error(
             pendingSlots.find((x) => x.error)?.error || '外部穿搭 Agent 未返回结果图',
