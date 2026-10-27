@@ -161,30 +161,43 @@ export class LkbVideoClient {
       },
     };
 
-    const created = await this.postRsync(payload, key);
-    const videoId = String(created?.id || created?.requestId || created?.data?.id || '');
-    if (!videoId) throw new Error(`LKB 建视频无 id: ${JSON.stringify(created).slice(0, 300)}`);
+    // 上游瞬时：fixed channel / OSS 图片上传 — 本客户端再投几次再抛给 job 重试
+    const maxSubmit = Math.max(1, parseInt(process.env.VIDEO_LKB_SUBMIT_RETRIES || '3', 10) || 3);
+    let lastErr: Error | null = null;
+    for (let i = 1; i <= maxSubmit; i++) {
+      try {
+        const created = await this.postRsync(payload, key);
+        const videoId = String(created?.id || created?.requestId || created?.data?.id || '');
+        if (!videoId) throw new Error(`LKB 建视频无 id: ${JSON.stringify(created).slice(0, 300)}`);
 
-    const done = await this.poll(videoId, key);
-    const videoUrl = extractVideoUrl(done);
-    if (!videoUrl) {
-      throw new Error(`LKB 成功但无视频 URL: ${JSON.stringify(done).slice(0, 400)}`);
+        const done = await this.poll(videoId, key);
+        const videoUrl = extractVideoUrl(done);
+        if (!videoUrl) {
+          throw new Error(`LKB 成功但无视频 URL: ${JSON.stringify(done).slice(0, 400)}`);
+        }
+        const secondsOut = extractDurationSec(done) || duration;
+        this.logger.log(
+          `lkb video ${videoId} direct_url seconds=${secondsOut} (req=${duration}) url=${videoUrl.slice(0, 80)}`,
+        );
+        return {
+          mime: 'video/mp4',
+          via: `lkb:${this.agentCode}`,
+          videoId,
+          videoUrl,
+          seconds: secondsOut,
+          size: this.defaultSize,
+          taskType,
+        };
+      } catch (e: any) {
+        lastErr = e instanceof Error ? e : new Error(String(e?.message || e));
+        const msg = lastErr.message;
+        if (!isTransientLkbError(msg) || i >= maxSubmit) throw lastErr;
+        const wait = Math.min(120_000, 15_000 * i);
+        this.logger.warn(`LKB transient (${i}/${maxSubmit}) wait ${wait}ms: ${msg.slice(0, 140)}`);
+        await new Promise((r) => setTimeout(r, wait));
+      }
     }
-    // 时长：优先 token_usage…parameters.duration（实测字段），否则用请求时长
-    const secondsOut = extractDurationSec(done) || duration;
-    this.logger.log(
-      `lkb video ${videoId} direct_url seconds=${secondsOut} (req=${duration}) url=${videoUrl.slice(0, 80)}`,
-    );
-    // 直链播放：不下载、不转存自有 OSS（避免 moov/时长错乱）
-    return {
-      mime: 'video/mp4',
-      via: `lkb:${this.agentCode}`,
-      videoId,
-      videoUrl,
-      seconds: secondsOut,
-      size: this.defaultSize,
-      taskType,
-    };
+    throw lastErr || new Error('LKB 视频失败');
   }
 
   private authHeaders(key: string): Record<string, string> {
@@ -237,14 +250,10 @@ export class LkbVideoClient {
         return last;
       }
       if (status === 'FAILED' || status === 'ERROR' || status === 'CANCELLED' || status === 'CANCELED') {
-        const err =
-          last?.errorMessage ||
-          last?.errorCode ||
-          last?.error ||
-          last?.data?.errorMessage ||
-          last?.data?.errorCode ||
-          last;
-        throw new Error(`LKB 视频失败: ${JSON.stringify(err).slice(0, 400)}`);
+        const errMsg = last?.errorMessage || last?.data?.errorMessage || last?.error || '';
+        const errCode = last?.errorCode || last?.data?.errorCode || '';
+        const friendly = formatLkbUserError(errMsg || errCode || last, errCode);
+        throw new Error(`LKB 视频失败: ${friendly}`);
       }
       // PENDING / RUNNING / 空 → 继续
     }
@@ -292,6 +301,38 @@ export class LkbVideoClient {
       clearTimeout(t);
     }
   }
+}
+
+
+/** 上游瞬时错误：fixed channel / OSS 上传 / 5xx — 可再投 */
+export function isTransientLkbError(msg: string): boolean {
+  const s = String(msg || '');
+  return /fixed channel unavailable|OSS\s*图片上传失败|HTTP_503|EXTERNAL_SERVICE_ERROR|ECONNRESET|ETIMEDOUT|socket hang up|\b503\b|\b429\b|通道繁忙|拉取参考图失败|请稍后重试/i.test(
+    s,
+  );
+}
+
+/** 把 LKB errorMessage/errorCode 译成任务中心可读文案 */
+export function formatLkbUserError(errorMessage: unknown, errorCode?: unknown): string {
+  const raw = String(errorMessage ?? '')
+    .replace(/^"+|"+$/g, '')
+    .trim();
+  const code = String(errorCode ?? '').trim();
+  if (/fixed channel unavailable/i.test(raw) || code === 'HTTP_503') {
+    return '视频通道繁忙（上游固定通道暂不可用），请稍后重试';
+  }
+  if (/OSS\s*图片上传失败/i.test(raw)) {
+    return '上游拉取参考图失败，请稍后重试或换一张商品参考图';
+  }
+  if (raw) return raw.slice(0, 200);
+  if (code) return code;
+  return '视频生成失败';
+}
+
+/** job 层自动重试退避（attempts 已含本次） */
+export function lkbTransientRetryDelayMs(attempt: number): number {
+  const n = Math.max(1, Number(attempt) || 1);
+  return Math.min(300_000, 45_000 * Math.pow(2, n - 1));
 }
 
 export function clampDuration(n: number): number {

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { JobsService } from './jobs.service';
 import { JobEntity } from '../common/entities/job.entity';
+import { isTransientLkbError, lkbTransientRetryDelayMs } from '../promo/lkb-video.client';
 
 /**
  * 进程内调度器：轮询 jobs 表领取 queued，交给已注册 handler 执行。
@@ -127,9 +128,12 @@ export class JobSchedulerService implements OnModuleInit, OnModuleDestroy {
       const cur = await this.jobs.getEntity(job.tenantId, job.id);
       if (!cur || cur.status !== 'running') return;
       const auto = process.env.JOB_AUTO_RETRY !== 'false';
-      const errFull = e?.stack || e?.message || String(e);
-      await this.jobs.markFailed(cur, e?.message || String(e), {
+      const errMsg = e?.message || String(e);
+      const errFull = e?.stack || errMsg;
+      const transient = isTransientLkbError(errMsg);
+      await this.jobs.markFailed(cur, errMsg, {
         requeue: auto && cur.attempts < cur.maxAttempts,
+        delayMs: transient ? lkbTransientRetryDelayMs(cur.attempts) : undefined,
       });
       const pid = (job.payload as any)?.productId || '-';
       this.logger.error(

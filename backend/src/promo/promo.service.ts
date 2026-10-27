@@ -1039,20 +1039,39 @@ export class PromoService implements OnModuleInit {
     try {
       let r: { buffer?: Buffer; mime: string; via: string; videoId: string; videoUrl?: string; seconds?: number; size?: string };
       if (engine === 'lkb') {
+        // Seedance 固定通道对多参考图更易 503；成功样本均为 1 张首帧。默认只传 1 张。
+        const maxLkbRefs = Math.max(
+          1,
+          Math.min(9, parseInt(process.env.VIDEO_LKB_MAX_REF_IMAGES || '1', 10) || 1),
+        );
+        // 优先自有 OSS key 的公网 URL（xy-tradex），外部 HTTPS（puyuanxing 等）靠后
+        const ranked = refs
+          .map((r, i) => ({ r, i, url: this.publicUrl(r!.objectKey) }))
+          .filter((x) => /^https?:\/\//i.test(x.url))
+          .sort((a, b) => {
+            const ae = /^https?:\/\//i.test(String(a.r!.objectKey)) ? 1 : 0;
+            const be = /^https?:\/\//i.test(String(b.r!.objectKey)) ? 1 : 0;
+            return ae - be || a.i - b.i;
+          });
+        const useUrls = ranked.slice(0, maxLkbRefs).map((x) => x.url);
+        if (refUrls.length > useUrls.length) {
+          this.logger.log(
+            `LKB refs capped ${refUrls.length}→${useUrls.length} (VIDEO_LKB_MAX_REF_IMAGES=${maxLkbRefs})`,
+          );
+        }
         const attachments: LkbVideoAttachment[] = [];
-        if (refUrls.length) {
-          // 有商品/宣传图作首帧 → FIRST_LAST_FRAME；其余作 reference_image
+        if (useUrls.length) {
           attachments.push({
             type: 'image',
-            uri: refUrls[0],
+            uri: useUrls[0],
             mediaType: 'image/jpeg',
             name: 'first_frame',
             metadata: { role: 'first_frame' },
           });
-          for (let i = 1; i < Math.min(refUrls.length, 9); i++) {
+          for (let i = 1; i < useUrls.length; i++) {
             attachments.push({
               type: 'image',
-              uri: refUrls[i],
+              uri: useUrls[i],
               mediaType: 'image/jpeg',
               name: `ref_${i}`,
               metadata: { role: 'reference_image' },
@@ -1062,12 +1081,11 @@ export class PromoService implements OnModuleInit {
         const taskType = attachments.some((a) => a.metadata.role === 'first_frame')
           ? 'FIRST_LAST_FRAME'
           : 'FREE';
-        // FREE 时仍可带 reference_image
-        if (taskType === 'FREE' && refUrls.length && !attachments.length) {
-          for (let i = 0; i < Math.min(refUrls.length, 9); i++) {
+        if (taskType === 'FREE' && useUrls.length && !attachments.length) {
+          for (let i = 0; i < useUrls.length; i++) {
             attachments.push({
               type: 'image',
-              uri: refUrls[i],
+              uri: useUrls[i],
               mediaType: 'image/jpeg',
               name: `ref_${i}`,
               metadata: { role: 'reference_image' },
