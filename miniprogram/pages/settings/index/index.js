@@ -1,6 +1,10 @@
 const { request } = require('../../../utils/request');
 const { saveProfileWithAvatarUpload, isTempAvatarPath, stableMediaUrl } = require('../../../utils/profile');
 
+/** 员工邀请分享卡封面：公网 https（OSS xingma-stall/static），勿用本地/空路径 */
+const INVITE_SHARE_COVER_URL =
+  'https://xy-tradex.oss-cn-shenzhen.aliyuncs.com/xingma-stall/static/invite-share-cover.jpg';
+
 function inviteStatusLabel(status) {
   const map = {
     active: '有效',
@@ -346,9 +350,12 @@ Page({
     const path = code
       ? `/pages/invite/accept/accept?code=${encodeURIComponent(code)}`
       : '/pages/invite/accept/accept';
+    // 必须用公网 https；空/本地/坏链会导致分享卡中间大块黑
+    const imageUrl = INVITE_SHARE_COVER_URL;
     return {
       title: '邀请你加入档口',
       path,
+      imageUrl,
     };
   },
   async revokeInvite(e) {
