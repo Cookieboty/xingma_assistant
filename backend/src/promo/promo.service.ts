@@ -1133,11 +1133,11 @@ export class PromoService implements OnModuleInit {
     try {
       let r: { buffer?: Buffer; mime: string; via: string; videoId: string; videoUrl?: string; seconds?: number; size?: string };
       if (engine === 'lkb') {
-        // 商品参考图一律 reference_image（语义=参考图），不用 first_frame；taskType=FREE。
-        // 默认最多 3 张，降低上游压力，可调 VIDEO_LKB_MAX_REF_IMAGES。
+        // Demo/prod 稳妥路径：1 张自有 OSS 作 first_frame + FIRST_LAST_FRAME（历史 SUCCEEDED 样本）。
+        // FREE+多 reference_image 今日触发 fixed channel / ratio-resolution 拒参。可调 VIDEO_LKB_MAX_REF_IMAGES。
         const maxLkbRefs = Math.max(
           1,
-          Math.min(3, parseInt(process.env.VIDEO_LKB_MAX_REF_IMAGES || '3', 10) || 3),
+          Math.min(9, parseInt(process.env.VIDEO_LKB_MAX_REF_IMAGES || '1', 10) || 1),
         );
         const ranked = refs
           .map((r, i) => ({ r, i, url: this.publicUrl(r!.objectKey) }))
@@ -1153,17 +1153,32 @@ export class PromoService implements OnModuleInit {
             `LKB refs capped ${refUrls.length}→${useUrls.length} (VIDEO_LKB_MAX_REF_IMAGES=${maxLkbRefs})`,
           );
         }
-        const attachments: LkbVideoAttachment[] = useUrls.map((uri, i) => ({
-          type: 'image' as const,
-          uri,
-          mediaType: 'image/jpeg',
-          name: `product_ref_${i + 1}`,
-          metadata: { role: 'reference_image' as const },
-        }));
+        const attachments: LkbVideoAttachment[] = [];
+        if (useUrls.length) {
+          attachments.push({
+            type: 'image',
+            uri: useUrls[0],
+            mediaType: 'image/jpeg',
+            name: 'first_frame',
+            metadata: { role: 'first_frame' },
+          });
+          for (let i = 1; i < useUrls.length; i++) {
+            attachments.push({
+              type: 'image',
+              uri: useUrls[i],
+              mediaType: 'image/jpeg',
+              name: `ref_${i}`,
+              metadata: { role: 'reference_image' },
+            });
+          }
+        }
+        const taskType = attachments.some((a) => a.metadata.role === 'first_frame')
+          ? 'FIRST_LAST_FRAME'
+          : 'FREE';
         r = await this.lkbVideo.generate({
           prompt: promptZh,
           duration: seconds,
-          taskType: 'FREE',
+          taskType,
           attachments,
           generateAudio: true,
           watermark: false,

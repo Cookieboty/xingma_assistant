@@ -161,6 +161,9 @@ export class OssClient implements OnModuleInit {
    * - 其它：`${MEDIA_PUBLIC_BASE|APP_BASE_URL}/media/${objectKey}`
    */
   publicUrl(objectKey: string): string {
+    const raw = String(objectKey || '').trim();
+    // 外部 HTTPS 已是完整 URL（outfit agent 等），禁止再拼 bucket/prefix
+    if (/^https?:\/\//i.test(raw)) return raw;
     if (this.isAliyun() && !this.serveLocal) {
       if (!this.publicRead) {
         try {
